@@ -1,0 +1,24 @@
+请根据以下课件结构和内容，将课程字幕整理为结构化的Markdown笔记。
+
+【课件结构分析】
+<structure_analysis>
+{structure_analysis}
+</structure_analysis>
+
+【课件参考内容】
+<courseware_reference>
+{pdf_content}
+</courseware_reference>
+
+【课程字幕】
+<subtitle_content>
+{subtitle_text}
+</subtitle_content>
+
+【要求】
+1. 按照课件的章节结构组织笔记
+2. 结合课件知识点，将字幕整理为完整的笔记
+3. 去除口语化表达，保留核心知识
+4. 使用Markdown格式：标题、列表、表格、加粗等
+5. 重要概念和定义突出显示
+6. **重要：直接返回纯Markdown内容，不要包裹在代码块(```markdown)中**
