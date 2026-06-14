@@ -1,0 +1,40 @@
+[project]
+name = "vid2note-workspace"
+version = "0.1.0"
+description = "vid2note monorepo"
+requires-python = ">=3.11"
+
+[tool.uv.workspace]
+members = ["core", "server"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+markers = [
+    "slow: 耗时长的测试",
+    "network: 需要网络",
+    "golden: Golden dataset",
+    "gpu: 需要 GPU"
+]
+addopts = "-ra --strict-markers"
+testpaths = ["core/tests", "server/tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+ignore_missing_imports = true
+
+[tool.coverage.run]
+source = ["vid2note_core", "vid2note_server"]
+omit = ["*/tests/*", "*/test_*.py"]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
