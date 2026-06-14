@@ -7,6 +7,9 @@ requires-python = ">=3.11"
 [tool.uv.workspace]
 members = ["core", "server"]
 
+[tool.uv.sources]
+vid2note-core = { workspace = true }
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 markers = [
