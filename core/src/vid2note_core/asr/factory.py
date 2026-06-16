@@ -1,17 +1,20 @@
 """ASR 工厂"""
-from pathlib import Path
-from typing import Dict, Any
+
+from typing import Any
+
 from vid2note_core.asr.base import IASR
 from vid2note_core.asr.cloud.asrtools import AsrToolsBLLM
+from vid2note_core.asr.local.funasr import FunASRAdapter
 
 
 class ASRFactory:
-    _providers: Dict[str, Any] = {
+    _providers: dict[str, Any] = {
         "asrtools-b": AsrToolsBLLM,
+        "funasr": FunASRAdapter,
     }
 
     @classmethod
-    def create(cls, provider: str, config: Dict[str, Any]) -> IASR:
+    def create(cls, provider: str, config: dict[str, Any]) -> IASR:
         provider = provider.lower()
         if provider not in cls._providers:
             raise ValueError(f"不支持的 ASR 提供商: {provider}")

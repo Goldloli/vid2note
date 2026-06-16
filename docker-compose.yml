@@ -1,0 +1,72 @@
+services:
+  vid2note-cpu:
+    build:
+      context: .
+      dockerfile: Dockerfile.cpu
+    image: vid2note:cpu
+    container_name: vid2note-cpu
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config:ro
+    environment:
+      - VID2NOTE_DATA_DIR=/app/data
+      - VID2NOTE_LOG_LEVEL=info
+    env_file:
+      - .env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # GPU 版本（需安装 nvidia-docker2）
+  # 启动命令: docker compose up vid2note-gpu
+  vid2note-gpu:
+    build:
+      context: .
+      dockerfile: Dockerfile.gpu
+    image: vid2note:gpu
+    container_name: vid2note-gpu
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config:ro
+    environment:
+      - VID2NOTE_DATA_DIR=/app/data
+      - VID2NOTE_LOG_LEVEL=info
+    env_file:
+      - .env
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # 可选：前端静态文件服务（Nginx）
+  frontend:
+    image: nginx:alpine
+    container_name: vid2note-frontend
+    ports:
+      - "80:80"
+    volumes:
+      - ./desktop/dist:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - vid2note-cpu
+    restart: unless-stopped
+    profiles:
+      - web

@@ -1,7 +1,7 @@
 """安全工具"""
+
 import re
 from pathlib import Path
-
 
 _FILE_ID_PATTERN = re.compile(r"^file_[a-f0-9]{12}$")
 _TASK_ID_PATTERN = re.compile(r"^task_[a-f0-9]{12}$")

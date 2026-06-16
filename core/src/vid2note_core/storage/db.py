@@ -1,17 +1,20 @@
 """SQLite 数据库管理"""
+
+import atexit
+import contextlib
 import sqlite3
 import threading
-import atexit
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional
-from contextlib import contextmanager
 
 
 class Database:
     _instance: Optional["Database"] = None
     _lock = threading.Lock()
+    _initialized: bool = False
 
-    def __new__(cls, db_path: Optional[str] = None):
+    def __new__(cls, db_path: str | None = None):
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
@@ -19,7 +22,7 @@ class Database:
                     cls._instance._initialized = False
         return cls._instance
 
-    def __init__(self, db_path: Optional[str] = None):
+    def __init__(self, db_path: str | None = None):
         if self._initialized:
             return
         if db_path is None:
@@ -159,10 +162,8 @@ class Database:
     def close_all_connections(self):
         with self._connections_lock:
             for conn in list(self._connections):
-                try:
+                with contextlib.suppress(Exception):
                     conn.close()
-                except Exception:
-                    pass
             self._connections.clear()
 
     def execute(self, sql: str, parameters: tuple = ()):
@@ -181,4 +182,6 @@ class Database:
     def reset_instance(cls):
         if cls._instance:
             cls._instance.close_all_connections()
+            with contextlib.suppress(Exception):
+                Path(cls._instance.db_path).unlink(missing_ok=True)
         cls._instance = None

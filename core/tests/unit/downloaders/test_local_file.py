@@ -1,4 +1,5 @@
 """测试本地文件下载器"""
+
 from pathlib import Path
 from vid2note_core.downloaders.local_file import LocalFileDownloader
 from vid2note_core.downloaders.base import DownloadOpts

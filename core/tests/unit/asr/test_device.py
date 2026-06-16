@@ -1,5 +1,7 @@
 """测试 ASR 设备检测"""
+
 from unittest.mock import patch
+
 from vid2note_core.asr.local.device import detect_device
 
 
@@ -9,6 +11,8 @@ def test_detect_device_returns_valid():
 
 
 def test_detect_cpu_fallback():
-    with patch("torch.cuda.is_available", return_value=False):
-        with patch("torch.backends.mps.is_available", return_value=False):
-            assert detect_device() == "cpu"
+    with (
+        patch("torch.cuda.is_available", return_value=False),
+        patch("torch.backends.mps.is_available", return_value=False),
+    ):
+        assert detect_device() == "cpu"

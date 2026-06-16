@@ -1,6 +1,8 @@
 """任务上下文"""
+
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
+
 from vid2note_core.types import TaskId
 
 
@@ -11,7 +13,7 @@ class TaskContext:
     artifacts: dict = field(default_factory=dict)
     metadata: dict = field(default_factory=dict)
 
-    def get_artifact(self, node: str, name: str) -> Optional[Any]:
+    def get_artifact(self, node: str, name: str) -> Any | None:
         return self.artifacts.get(f"{node}/{name}")
 
     def set_artifact(self, node: str, name: str, value: Any) -> None:

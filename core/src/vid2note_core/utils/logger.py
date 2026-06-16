@@ -1,11 +1,11 @@
 """结构化日志"""
+
 import json
 import logging
 import sys
-from pathlib import Path
 from datetime import datetime
-from typing import Any, Optional
-
+from pathlib import Path
+from typing import Any
 
 LOG_DIR = Path("logs")
 LOG_DIR.mkdir(exist_ok=True)
@@ -66,6 +66,7 @@ def get_logger(name: str) -> logging.Logger:
 
 class TaskLogger:
     """任务级 logger，自动附加 task_id"""
+
     def __init__(self, task_id: str):
         self.task_id = task_id
         self._logger = get_logger("task")

@@ -14,8 +14,20 @@
 </template>
 
 <script setup>
+import { onMounted, onUnmounted } from 'vue'
 import UrlInput from '../components/UrlInput.vue'
 import TaskList from '../components/TaskList.vue'
+import { useTaskStore } from '../stores/task'
+
+const store = useTaskStore()
+
+onMounted(() => {
+  store.loadTasks()
+})
+
+onUnmounted(() => {
+  store.cleanup()
+})
 </script>
 
 <style scoped>

@@ -1,15 +1,15 @@
 """下载器接口"""
+
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 
 @dataclass
 class DownloadResult:
-    video_path: Optional[Path] = None
-    audio_path: Optional[Path] = None
-    metadata: dict = None
+    video_path: Path | None = None
+    audio_path: Path | None = None
+    metadata: dict = field(default_factory=dict)
     raw_output: str = ""
 
     def __post_init__(self):
@@ -19,8 +19,8 @@ class DownloadResult:
 
 @dataclass
 class DownloadOpts:
-    cookie_path: Optional[Path] = None
-    proxy: Optional[str] = None
+    cookie_path: Path | None = None
+    proxy: str | None = None
     quality: str = "best"  # yt-dlp 质量参数
 
 

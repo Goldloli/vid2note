@@ -1,4 +1,5 @@
 """测试配置管理器"""
+
 from pathlib import Path
 from vid2note_core.config.manager import ConfigManager
 from vid2note_core.config.models import AppConfig

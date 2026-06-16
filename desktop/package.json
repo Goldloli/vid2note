@@ -2,22 +2,60 @@
   "name": "vid2note-desktop",
   "version": "0.1.0",
   "private": true,
-  "type": "module",
+  "main": "src/main/index.js",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "electron:dev": "NODE_ENV=development electron .",
+    "electron:build": "vite build && electron-builder",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
-    "vue": "^3.4.0",
-    "vue-router": "^4.2.0",
-    "pinia": "^2.1.0",
-    "element-plus": "^2.5.0",
     "@element-plus/icons-vue": "^2.3.0",
-    "axios": "^1.6.0"
+    "axios": "^1.6.0",
+    "element-plus": "^2.5.0",
+    "pinia": "^2.1.0",
+    "vue": "^3.4.0",
+    "vue-router": "^4.2.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.0",
     "@vitejs/plugin-vue": "^5.0.0",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.0.0",
     "vite": "^5.0.0"
+  },
+  "build": {
+    "appId": "com.vid2note.app",
+    "productName": "vid2note",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "src/main/**/*",
+      "src/preload/**/*",
+      "src/renderer/dist/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../python-dist",
+        "to": "python",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "category": "public.app-category.productivity"
+    }
   }
 }

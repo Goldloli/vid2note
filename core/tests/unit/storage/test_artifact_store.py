@@ -1,4 +1,5 @@
 """测试产物存储"""
+
 from pathlib import Path
 from vid2note_core.storage.artifact_store import ArtifactStore
 

@@ -1,4 +1,5 @@
 """测试任务仓库"""
+
 import pytest
 from datetime import datetime
 from vid2note_core.storage.db import Database

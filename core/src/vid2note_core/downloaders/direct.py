@@ -1,7 +1,9 @@
 """直链下载器"""
-import httpx
+
 from pathlib import Path
-from vid2note_core.downloaders.base import IDownloader, DownloadOpts, DownloadResult
+
+import httpx
+from vid2note_core.downloaders.base import DownloadOpts, DownloadResult, IDownloader
 
 
 class DirectDownloader(IDownloader):

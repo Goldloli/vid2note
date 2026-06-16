@@ -1,0 +1,547 @@
+"""
+Real pipeline nodes for vid2note.
+
+与 nodes.py 里的 stub 节点不同，这些节点真正调用下载器/ffmpeg/ASR/LLM，
+并通过 ArtifactStore 把产物落盘，遵循 artifact-driven 设计：
+  - 每个节点从上游 artifact 读取输入（download 节点从 ctx.config 读 url/路径）
+  - 调用真实模块完成工作
+  - 把产物写入 ArtifactStore 并返回 ArtifactRef
+  - 通过 EventBus 发布进度事件
+"""
+
+from __future__ import annotations
+
+import asyncio
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+from vid2note_core.audio.extractor import AudioExtractor
+from vid2note_core.downloaders.base import DownloadOpts
+from vid2note_core.downloaders.bbdown import BBDownDownloader
+from vid2note_core.downloaders.direct import DirectDownloader
+from vid2note_core.downloaders.local_file import LocalFileDownloader
+from vid2note_core.downloaders.router import DownloaderRouter
+from vid2note_core.downloaders.ytdlp import YtdlpDownloader
+from vid2note_core.errors import Vid2NoteError
+from vid2note_core.events.bus import TaskEvent, get_event_bus
+from vid2note_core.pipeline.context import TaskContext
+from vid2note_core.pipeline.node import PipelineNode
+from vid2note_core.storage.artifact_store import ArtifactStore
+from vid2note_core.storage.task_repo import TaskRepository
+from vid2note_core.types import ArtifactRef, NodeName, NodeResult, NodeStatus
+
+
+def _build_default_router() -> DownloaderRouter:
+    """按设计稿路由策略装配下载器（顺序即优先级）。"""
+    return DownloaderRouter(
+        [
+            LocalFileDownloader(),
+            DirectDownloader(),
+            BBDownDownloader(),
+            YtdlpDownloader(),
+        ]
+    )
+
+
+class _RealNodeMixin:
+    """真实节点共享的事件发布与 DB 更新逻辑。"""
+
+    name: NodeName
+
+    async def _publish(
+        self,
+        task_id: str,
+        event_type: str,
+        progress: int,
+        message: str,
+        artifact: str | None = None,
+    ) -> None:
+        bus = get_event_bus()
+        is_start = event_type == "node.started"
+        bus.publish(
+            TaskEvent(
+                task_id=task_id,
+                event_type=event_type,
+                node_name=self.name.value,
+                node_status=NodeStatus.RUNNING.value if is_start else NodeStatus.COMPLETED.value,
+                progress=progress,
+                message=message,
+                artifact=artifact,
+                timestamp=datetime.now().isoformat(),
+            )
+        )
+
+    def _update_db(
+        self,
+        task_id: str,
+        status: NodeStatus,
+        artifacts: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+        error: dict[str, str] | None = None,
+    ) -> None:
+        TaskRepository().update_node(
+            task_id,
+            self.name.value,
+            status,
+            artifacts=artifacts or [],
+            metadata=metadata or {},
+            error=error,
+        )
+
+
+class RealDownloadNode(PipelineNode, _RealNodeMixin):
+    """下载视频：url/路径 → video_file。"""
+
+    name = NodeName.DOWNLOAD
+    requires: list[str] = []
+    produces: list[str] = ["video_file"]
+
+    def __init__(self, router: DownloaderRouter | None = None, store: ArtifactStore | None = None):
+        self.router = router or _build_default_router()
+        self.store = store or ArtifactStore()
+
+    async def run(self, ctx: TaskContext) -> NodeResult:
+        task_id = ctx.task_id.value
+        url = ctx.config.get("url") or ctx.config.get("video_url")
+        if not url:
+            return NodeResult.failure(self.name, "DOWNLOAD_URL_INVALID", "缺少 url/video_url 配置")
+
+        task_dir = self.store.ensure_task_dir(task_id)
+        dest_dir = task_dir / "artifacts"
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        opts = DownloadOpts(
+            cookie_path=Path(ctx.config["cookie_path"]) if ctx.config.get("cookie_path") else None,
+            proxy=ctx.config.get("proxy"),
+        )
+
+        self._update_db(task_id, NodeStatus.RUNNING)
+        await self._publish(task_id, "node.started", 10, "开始下载视频...")
+
+        try:
+            result = await asyncio.to_thread(
+                self.router.download_with_fallback, url, dest_dir, opts
+            )
+        except Vid2NoteError as e:
+            self._update_db(task_id, NodeStatus.FAILED, error={"code": e.code, "message": str(e)})
+            return NodeResult.failure(self.name, e.code, str(e))
+        except Exception as e:  # noqa: BLE001 - 下载器底层异常兜底
+            self._update_db(
+                task_id, NodeStatus.FAILED, error={"code": "DOWNLOAD_ERROR", "message": str(e)}
+            )
+            return NodeResult.failure(self.name, "DOWNLOAD_ERROR", str(e))
+
+        video_path = result.video_path
+        if video_path is None or not Path(video_path).exists():
+            return NodeResult.failure(self.name, "DOWNLOAD_ERROR", "下载完成但未找到视频文件")
+
+        # 落盘产物到标准产物名
+        self.store.write_artifact(
+            task_id, self.name.value, "video_file", Path(video_path).read_bytes()
+        )
+
+        metadata = {
+            "video_file": str(video_path),
+            "title": result.metadata.get("title"),
+        }
+        self._update_db(task_id, NodeStatus.COMPLETED, artifacts=["video_file"], metadata=metadata)
+        await self._publish(task_id, "node.completed", 25, "视频下载完成", artifact="video_file")
+        return NodeResult.success(
+            node=self.name,
+            artifacts=[ArtifactRef(node=self.name, name="video_file")],
+            metadata=metadata,
+        )
+
+
+class RealExtractAudioNode(PipelineNode, _RealNodeMixin):
+    """从视频提取音频：video_file → audio_file（16kHz 单声道 wav）。"""
+
+    name = NodeName.EXTRACT_AUDIO
+    requires: list[str] = ["video_file"]
+    produces: list[str] = ["audio_file"]
+
+    def __init__(self, extractor: AudioExtractor | None = None, store: ArtifactStore | None = None):
+        self.extractor = extractor or AudioExtractor()
+        self.store = store or ArtifactStore()
+
+    async def run(self, ctx: TaskContext) -> NodeResult:
+        task_id = ctx.task_id.value
+        task_dir = self.store.ensure_task_dir(task_id)
+        video_bytes = self.store.read_artifact(task_id, NodeName.DOWNLOAD.value, "video_file")
+
+        # 把上游视频写入临时文件供 ffmpeg 处理
+        video_tmp = task_dir / "_source_video"
+        video_tmp.write_bytes(video_bytes)
+
+        self._update_db(task_id, NodeStatus.RUNNING)
+        await self._publish(task_id, "node.started", 30, "提取音频中...")
+
+        try:
+            audio_path = await asyncio.to_thread(
+                self.extractor.extract, video_tmp, task_dir / "artifacts"
+            )
+        except Vid2NoteError as e:
+            self._update_db(task_id, NodeStatus.FAILED, error={"code": e.code, "message": str(e)})
+            return NodeResult.failure(self.name, e.code, str(e))
+        except Exception as e:  # noqa: BLE001
+            self._update_db(
+                task_id,
+                NodeStatus.FAILED,
+                error={"code": "AUDIO_EXTRACT_FAILED", "message": str(e)},
+            )
+            return NodeResult.failure(self.name, "AUDIO_EXTRACT_FAILED", str(e))
+        finally:
+            video_tmp.unlink(missing_ok=True)
+
+        self.store.write_artifact(
+            task_id, self.name.value, "audio_file", Path(audio_path).read_bytes()
+        )
+        metadata = {"audio_file": str(audio_path)}
+        self._update_db(task_id, NodeStatus.COMPLETED, artifacts=["audio_file"], metadata=metadata)
+        await self._publish(task_id, "node.completed", 45, "音频提取完成", artifact="audio_file")
+        return NodeResult.success(
+            node=self.name,
+            artifacts=[ArtifactRef(node=self.name, name="audio_file")],
+            metadata=metadata,
+        )
+
+
+class RealTranscribeNode(PipelineNode, _RealNodeMixin):
+    """语音识别：audio_file → srt_file。"""
+
+    name = NodeName.TRANSCRIBE
+    requires: list[str] = ["audio_file"]
+    produces: list[str] = ["srt_file"]
+
+    def __init__(self, asr=None, store: ArtifactStore | None = None):
+        # asr: 实现了 transcribe(audio_path, opts) -> ASRResult 的对象
+        self.asr = asr
+        self.store = store or ArtifactStore()
+
+    async def run(self, ctx: TaskContext) -> NodeResult:
+        task_id = ctx.task_id.value
+        task_dir = self.store.ensure_task_dir(task_id)
+        audio_bytes = self.store.read_artifact(task_id, NodeName.EXTRACT_AUDIO.value, "audio_file")
+        audio_tmp = task_dir / "_source_audio.wav"
+        audio_tmp.write_bytes(audio_bytes)
+
+        self._update_db(task_id, NodeStatus.RUNNING)
+        await self._publish(task_id, "node.started", 50, "语音识别中...")
+
+        asr = self.asr or _default_asr(ctx.config)
+        opts = {"language": ctx.config.get("language", "zh")}
+        try:
+            result = await _maybe_await(asr.transcribe(audio_tmp, opts))
+        except Vid2NoteError as e:
+            self._update_db(task_id, NodeStatus.FAILED, error={"code": e.code, "message": str(e)})
+            return NodeResult.failure(self.name, e.code, str(e))
+        except Exception as e:  # noqa: BLE001
+            self._update_db(
+                task_id, NodeStatus.FAILED, error={"code": "ASR_ERROR", "message": str(e)}
+            )
+            return NodeResult.failure(self.name, "ASR_ERROR", str(e))
+        finally:
+            audio_tmp.unlink(missing_ok=True)
+
+        srt_text = _asr_result_to_srt(result)
+        self.store.write_artifact(task_id, self.name.value, "srt_file", srt_text.encode("utf-8"))
+        metadata = {"srt_file": "srt_file", "language": getattr(result, "language", "zh")}
+        self._update_db(task_id, NodeStatus.COMPLETED, artifacts=["srt_file"], metadata=metadata)
+        await self._publish(task_id, "node.completed", 70, "语音识别完成", artifact="srt_file")
+        return NodeResult.success(
+            node=self.name,
+            artifacts=[ArtifactRef(node=self.name, name="srt_file")],
+            metadata=metadata,
+        )
+
+
+class RealOrganizeNode(PipelineNode, _RealNodeMixin):
+    """LLM 整理笔记：srt_file → markdown_file。"""
+
+    name = NodeName.ORGANIZE
+    requires: list[str] = ["srt_file"]
+    produces: list[str] = ["markdown_file"]
+
+    def __init__(self, llm=None, store: ArtifactStore | None = None):
+        self.llm = llm
+        self.store = store or ArtifactStore()
+
+    async def run(self, ctx: TaskContext) -> NodeResult:
+        task_id = ctx.task_id.value
+        srt_bytes = self.store.read_artifact(task_id, NodeName.TRANSCRIBE.value, "srt_file")
+        subtitle = srt_bytes.decode("utf-8")
+
+        self._update_db(task_id, NodeStatus.RUNNING)
+        await self._publish(task_id, "node.started", 75, "LLM 整理笔记中...")
+
+        llm = self.llm or _default_llm(ctx.config)
+        try:
+            # restructure_content 是同步阻塞调用，放到线程池
+            markdown = await asyncio.to_thread(
+                llm.restructure_content, subtitle, ctx.config.get("context", ""), 0.3
+            )
+        except Vid2NoteError as e:
+            self._update_db(task_id, NodeStatus.FAILED, error={"code": e.code, "message": str(e)})
+            return NodeResult.failure(self.name, e.code, str(e))
+        except Exception as e:  # noqa: BLE001
+            self._update_db(
+                task_id, NodeStatus.FAILED, error={"code": "LLM_ERROR", "message": str(e)}
+            )
+            return NodeResult.failure(self.name, "LLM_ERROR", str(e))
+
+        self.store.write_artifact(
+            task_id, self.name.value, "markdown_file", markdown.encode("utf-8")
+        )
+        metadata = {"markdown_file": "markdown_file"}
+        self._update_db(
+            task_id, NodeStatus.COMPLETED, artifacts=["markdown_file"], metadata=metadata
+        )
+        await self._publish(task_id, "node.completed", 95, "笔记整理完成", artifact="markdown_file")
+        return NodeResult.success(
+            node=self.name,
+            artifacts=[ArtifactRef(node=self.name, name="markdown_file")],
+            metadata=metadata,
+        )
+
+
+class RealMindmapNode(PipelineNode, _RealNodeMixin):
+    """生成思维导图：markdown_file → mindmap_file（Mermaid）。
+
+    用 prompts/mindmap.txt 把整理好的 Markdown 笔记转成 Mermaid mindmap 语法，
+    落盘到 ArtifactStore。Mermaid 可被前端直接渲染，后续可再转 xmind/png。
+    """
+
+    name = NodeName.MINDMAP
+    requires: list[str] = ["markdown_file"]
+    produces: list[str] = ["mindmap_file"]
+
+    def __init__(
+        self, llm=None, store: ArtifactStore | None = None, mindmap_format: str = "mermaid"
+    ):
+        self.llm = llm
+        self.store = store or ArtifactStore()
+        self.mindmap_format = mindmap_format  # "mermaid" 或 "outline"
+
+    def _build_prompt(self, markdown: str) -> str:
+        """根据格式选择 prompt 模板并填充内容。"""
+        from vid2note_core.prompts import MINDMAP_GENERATION, MINDMAP_OUTLINE
+
+        template = MINDMAP_OUTLINE if self.mindmap_format == "outline" else MINDMAP_GENERATION
+        # mindmap.txt 用 {markdown_content}，mindmap_outline.txt 用 {content}
+        if "{markdown_content}" in template:
+            return template.replace("{markdown_content}", markdown)
+        return template.replace("{content}", markdown)
+
+    async def run(self, ctx: TaskContext) -> NodeResult:
+        task_id = ctx.task_id.value
+        md_bytes = self.store.read_artifact(task_id, NodeName.ORGANIZE.value, "markdown_file")
+        markdown = md_bytes.decode("utf-8")
+
+        self._update_db(task_id, NodeStatus.RUNNING)
+        await self._publish(task_id, "node.started", 96, "生成思维导图...")
+
+        llm = self.llm or _default_llm(ctx.config)
+        prompt = self._build_prompt(markdown)
+        messages = [
+            {"role": "system", "content": "你是思维导图结构分析专家，只输出结构化内容，不要解释。"},
+            {"role": "user", "content": prompt},
+        ]
+
+        try:
+            mindmap = await asyncio.to_thread(llm.chat, messages, temperature=0.3, max_tokens=3000)
+        except Vid2NoteError as e:
+            self._update_db(task_id, NodeStatus.FAILED, error={"code": e.code, "message": str(e)})
+            return NodeResult.failure(self.name, e.code, str(e))
+        except Exception as e:  # noqa: BLE001
+            self._update_db(
+                task_id, NodeStatus.FAILED, error={"code": "LLM_ERROR", "message": str(e)}
+            )
+            return NodeResult.failure(self.name, "LLM_ERROR", str(e))
+
+        mindmap = _clean_mindmap_output(mindmap, self.mindmap_format)
+        self.store.write_artifact(task_id, self.name.value, "mindmap_file", mindmap.encode("utf-8"))
+        metadata = {"mindmap_file": "mindmap_file", "format": self.mindmap_format}
+        self._update_db(
+            task_id, NodeStatus.COMPLETED, artifacts=["mindmap_file"], metadata=metadata
+        )
+        await self._publish(
+            task_id, "node.completed", 98, "思维导图生成完成", artifact="mindmap_file"
+        )
+        return NodeResult.success(
+            node=self.name,
+            artifacts=[ArtifactRef(node=self.name, name="mindmap_file")],
+            metadata=metadata,
+        )
+
+
+class RealCleanupNode(PipelineNode, _RealNodeMixin):
+    """清理临时文件：按 RetentionConfig 删除 video/audio（默认删），保留 srt。
+
+    清理不影响主链路完成状态（设计稿：cleanup 节点失败不影响 completed）。
+    产物是一份删除清单（deletion manifest），落盘到 ArtifactStore 便于审计。
+    """
+
+    name = NodeName.CLEANUP
+    requires: list[str] = ["markdown_file"]
+    produces: list[str] = ["cleanup_manifest"]
+
+    def __init__(self, store: ArtifactStore | None = None):
+        self.store = store or ArtifactStore()
+
+    async def run(self, ctx: TaskContext) -> NodeResult:
+        task_id = ctx.task_id.value
+        # 从 ctx.config 读保留策略（与 RetentionConfig 字段对齐）
+        keep_video = ctx.config.get("keep_video", False)
+        keep_audio = ctx.config.get("keep_audio", False)
+        # keep_srt 默认 True（与 RetentionConfig 一致），srt/markdown/mindmap 始终保留
+
+        self._update_db(task_id, NodeStatus.RUNNING)
+        await self._publish(task_id, "node.started", 99, "清理临时文件...")
+
+        deleted: list[str] = []
+        kept: list[str] = []
+
+        # 按保留策略删除 video / audio 产物
+        targets = []
+        if not keep_video:
+            targets.append((NodeName.DOWNLOAD.value, "video_file", "video"))
+        else:
+            kept.append("video")
+        if not keep_audio:
+            targets.append((NodeName.EXTRACT_AUDIO.value, "audio_file", "audio"))
+        else:
+            kept.append("audio")
+
+        for node_name, artifact_name, label in targets:
+            try:
+                if self.store.exists(task_id, node_name, artifact_name):
+                    self.store.delete_artifact(task_id, node_name, artifact_name)
+                    deleted.append(artifact_name)
+            except Exception:  # noqa: BLE001 - 单个产物删除失败不阻断清理
+                kept.append(label)
+
+        # 始终保留：srt、markdown、mindmap
+        kept.extend(["srt", "markdown", "mindmap"])
+
+        # 落盘删除清单
+        import json
+
+        manifest = {
+            "deleted": deleted,
+            "kept": kept,
+            "keep_video": keep_video,
+            "keep_audio": keep_audio,
+        }
+        self.store.write_artifact(
+            task_id,
+            self.name.value,
+            "cleanup_manifest",
+            json.dumps(manifest, ensure_ascii=False).encode("utf-8"),
+        )
+
+        metadata = {"cleanup_manifest": "cleanup_manifest", "deleted": deleted, "kept": kept}
+        self._update_db(
+            task_id,
+            NodeStatus.COMPLETED,
+            artifacts=["cleanup_manifest"],
+            metadata=metadata,
+        )
+        await self._publish(task_id, "node.completed", 100, "清理完成")
+        return NodeResult.success(
+            node=self.name,
+            artifacts=[ArtifactRef(node=self.name, name="cleanup_manifest")],
+            metadata=metadata,
+        )
+
+
+# ── 辅助函数 ─────────────────────────────────────────────
+
+
+def _default_asr(config: dict):
+    """根据 config 创建默认 ASR（asr_provider），失败回退到 mock。"""
+    from vid2note_core.asr.factory import ASRFactory
+
+    provider = config.get("asr_provider", "asrtools-b")
+    try:
+        return ASRFactory.create(provider, {})
+    except Exception:  # noqa: BLE001 - 默认 ASR 不可用时给一个 mock，避免硬失败
+        from vid2note_core.asr.base import ASRResult, ASRSegment
+
+        class _MockASR:
+            name = "mock"
+            is_cloud = False
+
+            def transcribe(self, audio_path: Path, opts: dict) -> ASRResult:
+                return ASRResult(
+                    text_full="[mock] 示例转录文本",
+                    segments=[ASRSegment(start_ms=0, end_ms=1000, text="示例转录文本")],
+                    language=opts.get("language", "zh"),
+                )
+
+        return _MockASR()
+
+
+def _default_llm(config: dict):
+    """根据 config 创建默认 LLM。"""
+    from vid2note_core.llm.factory import LLMFactory
+
+    provider = config.get("llm_provider", "mock")
+    return LLMFactory.create(
+        provider,
+        {"api_key": config.get("api_key", "mock"), "model": config.get("llm_model", "mock")},
+    )
+
+
+def _format_timestamp(ms: int) -> str:
+    """毫秒 → SRT 时间码 HH:MM:SS,mmm"""
+    if ms < 0:
+        ms = 0
+    hours, ms = divmod(ms, 3_600_000)
+    minutes, ms = divmod(ms, 60_000)
+    seconds, ms = divmod(ms, 1000)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d},{ms:03d}"
+
+
+def _asr_result_to_srt(result) -> str:
+    """ASRResult → SRT 文本。"""
+    segments = getattr(result, "segments", None) or []
+    if not segments:
+        # 无分段时退化为单段纯文本
+        text = getattr(result, "text_full", "") or str(result)
+        return f"1\n00:00:00,000 --> 00:00:01,000\n{text}\n"
+    lines = []
+    for i, seg in enumerate(segments, 1):
+        start = _format_timestamp(getattr(seg, "start_ms", 0))
+        end = _format_timestamp(getattr(seg, "end_ms", 0))
+        text = getattr(seg, "text", "")
+        lines.append(f"{i}\n{start} --> {end}\n{text}\n")
+    return "\n".join(lines)
+
+
+async def _maybe_await(value):
+    """transcribe 可能是同步或异步：统一为 await 结果。"""
+    if asyncio.iscoroutine(value):
+        return await value
+    return value
+
+
+def _clean_mindmap_output(text: str, mindmap_format: str) -> str:
+    """清理 LLM 输出：去掉可能存在的代码块包裹与多余空白。
+
+    prompt 虽要求"不要包裹代码块"，但模型有时仍会包裹，这里兜底剥离。
+    mermaid 格式会保留首部 mindmap 关键字；outline 格式保持纯缩进文本。
+    """
+    if not text:
+        return ""
+    text = text.strip()
+    # 剥离 ```mermaid / ``` 包裹
+    if text.startswith("```"):
+        lines = text.splitlines()
+        # 去掉首行（``` 或 ```mermaid）
+        if lines and lines[0].strip().startswith("```"):
+            lines = lines[1:]
+        # 去掉末行 ```（若有）
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    return text

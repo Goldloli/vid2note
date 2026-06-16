@@ -1,0 +1,110 @@
+import { defineStore } from 'pinia'
+import { ref, computed } from 'vue'
+import { createTask, listTasks } from '../api/task'
+import { TaskEventSource } from '../api/sse'
+
+export const useTaskStore = defineStore('task', () => {
+  const tasks = ref([])
+  const isCreating = ref(false)
+  const error = ref('')
+  const eventSources = ref(new Map())
+
+  const runningTasks = computed(() => tasks.value.filter((t) => t.status === 'running' || t.status === 'pending'))
+  const completedTasks = computed(() => tasks.value.filter((t) => t.status === 'completed'))
+
+  async function loadTasks() {
+    try {
+      const res = await listTasks()
+      tasks.value = res.tasks || []
+    } catch (e) {
+      error.value = e.message
+    }
+  }
+
+  async function addTask(url) {
+    isCreating.value = true
+    error.value = ''
+    try {
+      const res = await createTask(url)
+      const newTask = {
+        id: res.task_id,
+        status: 'pending',
+        progress: 0,
+        current_step: '等待处理',
+        video_url: url,
+        created_at: new Date().toISOString(),
+      }
+      tasks.value = [newTask, ...tasks.value]
+      _subscribeToEvents(res.task_id)
+      return res.task_id
+    } catch (e) {
+      error.value = e.message
+      throw e
+    } finally {
+      isCreating.value = false
+    }
+  }
+
+  function _subscribeToEvents(taskId) {
+    if (eventSources.value.has(taskId)) {
+      eventSources.value.get(taskId).close()
+    }
+
+    const es = new TaskEventSource(
+      taskId,
+      (event) => _handleEvent(taskId, event),
+      (err) => console.error('SSE error for', taskId, err)
+    )
+    es.connect()
+    eventSources.value.set(taskId, es)
+  }
+
+  function _handleEvent(taskId, event) {
+    const idx = tasks.value.findIndex((t) => t.id === taskId)
+    if (idx === -1) return
+
+    const task = tasks.value[idx]
+    const updated = {
+      ...task,
+      progress: event.progress !== undefined ? event.progress : task.progress,
+      current_step: event.message || task.current_step,
+      status: _mapStatus(event.event_type, event.node_status) || task.status,
+    }
+    tasks.value = [...tasks.value.slice(0, idx), updated, ...tasks.value.slice(idx + 1)]
+
+    if (event.event_type === 'task.completed' || event.event_type === 'task.failed') {
+      const es = eventSources.value.get(taskId)
+      if (es) {
+        es.close()
+        eventSources.value.delete(taskId)
+      }
+    }
+  }
+
+  function _mapStatus(eventType, nodeStatus) {
+    if (eventType === 'task.started') return 'running'
+    if (eventType === 'task.completed') return 'completed'
+    if (eventType === 'task.failed') return 'failed'
+    if (eventType.startsWith('node.')) {
+      if (nodeStatus === 'running') return 'running'
+      if (nodeStatus === 'failed') return 'failed'
+    }
+    return null
+  }
+
+  function cleanup() {
+    eventSources.value.forEach((es) => es.close())
+    eventSources.value.clear()
+  }
+
+  return {
+    tasks,
+    isCreating,
+    error,
+    runningTasks,
+    completedTasks,
+    loadTasks,
+    addTask,
+    cleanup,
+  }
+})

@@ -1,16 +1,16 @@
 """统一错误体系"""
-from typing import Optional
 
 
 class Vid2NoteError(Exception):
     """基类"""
+
     def __init__(
         self,
         message: str,
         code: str = "UNKNOWN",
         retryable: bool = False,
-        user_message: Optional[str] = None,
-        step: Optional[str] = None,
+        user_message: str | None = None,
+        step: str | None = None,
     ):
         super().__init__(message)
         self.code = code
@@ -31,6 +31,7 @@ class Vid2NoteError(Exception):
 # ── Download ───────────────────────────────
 class DownloadError(Vid2NoteError): ...
 
+
 class DownloadURLInvalid(DownloadError):
     def __init__(self, url: str):
         super().__init__(
@@ -40,6 +41,7 @@ class DownloadURLInvalid(DownloadError):
             user_message="URL 格式不正确，请检查输入",
             step="download",
         )
+
 
 class DownloadNetworkError(DownloadError):
     def __init__(self, url: str, detail: str = ""):
@@ -51,6 +53,7 @@ class DownloadNetworkError(DownloadError):
             step="download",
         )
 
+
 class DownloadVideoNotFound(DownloadError):
     def __init__(self, url: str):
         super().__init__(
@@ -60,6 +63,7 @@ class DownloadVideoNotFound(DownloadError):
             user_message="视频不存在或已被删除",
             step="download",
         )
+
 
 class DownloadGeoBlocked(DownloadError):
     def __init__(self, url: str):
@@ -71,6 +75,7 @@ class DownloadGeoBlocked(DownloadError):
             step="download",
         )
 
+
 class DownloadCookieExpired(DownloadError):
     def __init__(self):
         super().__init__(
@@ -80,6 +85,7 @@ class DownloadCookieExpired(DownloadError):
             user_message="Cookie 已过期，请到设置页更新",
             step="download",
         )
+
 
 class DownloadRateLimited(DownloadError):
     def __init__(self, url: str):
@@ -91,6 +97,7 @@ class DownloadRateLimited(DownloadError):
             step="download",
         )
 
+
 class DownloadBinaryMissing(DownloadError):
     def __init__(self, name: str):
         super().__init__(
@@ -100,6 +107,7 @@ class DownloadBinaryMissing(DownloadError):
             user_message=f"未找到 {name}，请检查安装",
             step="download",
         )
+
 
 class DownloadDiskFull(DownloadError):
     def __init__(self):
@@ -111,8 +119,10 @@ class DownloadDiskFull(DownloadError):
             step="download",
         )
 
+
 # ── ASR ────────────────────────────────────
 class ASRError(Vid2NoteError): ...
+
 
 class ASRToolBChanged(ASRError):
     def __init__(self, detail: str = ""):
@@ -124,6 +134,7 @@ class ASRToolBChanged(ASRError):
             step="transcribe",
         )
 
+
 class ASRNetworkError(ASRError):
     def __init__(self, detail: str = ""):
         super().__init__(
@@ -133,6 +144,7 @@ class ASRNetworkError(ASRError):
             user_message="语音识别服务连接失败，请检查网络后重试",
             step="transcribe",
         )
+
 
 class ASRModelNotFound(ASRError):
     def __init__(self, model_id: str):
@@ -144,6 +156,7 @@ class ASRModelNotFound(ASRError):
             step="transcribe",
         )
 
+
 class ASRDeviceUnavailable(ASRError):
     def __init__(self, device: str):
         super().__init__(
@@ -154,8 +167,10 @@ class ASRDeviceUnavailable(ASRError):
             step="transcribe",
         )
 
+
 # ── LLM ────────────────────────────────────
 class LLMError(Vid2NoteError): ...
+
 
 class LLMRateLimited(LLMError):
     def __init__(self, provider: str):
@@ -167,6 +182,7 @@ class LLMRateLimited(LLMError):
             step="organize",
         )
 
+
 class LLMAPIError(LLMError):
     def __init__(self, provider: str, detail: str = ""):
         super().__init__(
@@ -176,6 +192,7 @@ class LLMAPIError(LLMError):
             user_message="AI 服务调用失败，请检查配置后重试",
             step="organize",
         )
+
 
 class LLMTimeout(LLMError):
     def __init__(self, provider: str):
@@ -187,6 +204,7 @@ class LLMTimeout(LLMError):
             step="organize",
         )
 
+
 class LLMInvalidOutput(LLMError):
     def __init__(self, detail: str = ""):
         super().__init__(
@@ -197,8 +215,10 @@ class LLMInvalidOutput(LLMError):
             step="organize",
         )
 
+
 # ── Pipeline ───────────────────────────────
 class PipelineError(Vid2NoteError): ...
+
 
 class PipelineUpstreamMissing(PipelineError):
     def __init__(self, node: str, missing: list[str]):
@@ -209,6 +229,7 @@ class PipelineUpstreamMissing(PipelineError):
             user_message="前置步骤未完成，请等待或重试",
             step=node,
         )
+
 
 class PipelineCircularDependency(PipelineError):
     def __init__(self):

@@ -1,16 +1,64 @@
-"""上传 API"""
-from fastapi import APIRouter
+"""上传 API
+
+接收 SRT/PDF/TXT 文件，安全存储到 UploadStore，返回真实 file_id。
+file_id 可在创建任务时引用（task_repo 的 srt_file/pdf_file/txt_file 字段）。
+"""
+
+from __future__ import annotations
+
+from fastapi import APIRouter, HTTPException, UploadFile
+from pydantic import BaseModel
+from vid2note_core.storage.upload_store import UploadStore
 
 router = APIRouter(tags=["upload"])
 
-@router.post("/upload/srt")
-async def upload_srt():
-    return {"file_id": "file_xxx"}
+# 各类型允许的扩展名与最大字节数
+_ALLOWED = {
+    "srt": {".srt"},
+    "pdf": {".pdf"},
+    "txt": {".txt"},
+}
+MAX_SIZE = 50 * 1024 * 1024  # 50 MB
 
-@router.post("/upload/pdf")
-async def upload_pdf():
-    return {"file_id": "file_xxx"}
 
-@router.post("/upload/txt")
-async def upload_txt():
-    return {"file_id": "file_xxx"}
+class UploadResponse(BaseModel):
+    file_id: str
+    filename: str
+    size: int
+
+
+def _validate_and_store(upload: UploadFile, kind: str) -> UploadResponse:
+    """通用上传处理：校验扩展名/大小 → 存储 → 返回响应。"""
+    filename = upload.filename or ""
+    ext = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if ext not in _ALLOWED[kind]:
+        raise HTTPException(
+            400,
+            f"不支持的文件类型: {ext or '(无扩展名)'}，{kind} 仅支持 {_ALLOWED[kind]}",
+        )
+
+    data = upload.file.read()
+    if not data:
+        raise HTTPException(400, "文件为空")
+    if len(data) > MAX_SIZE:
+        raise HTTPException(413, f"文件过大（>{MAX_SIZE // 1024 // 1024}MB）")
+
+    store = UploadStore()
+    file_id = UploadStore.generate_file_id()
+    store.save(file_id, filename, data)
+    return UploadResponse(file_id=file_id, filename=filename, size=len(data))
+
+
+@router.post("/upload/srt", response_model=UploadResponse)
+async def upload_srt(file: UploadFile):
+    return _validate_and_store(file, "srt")
+
+
+@router.post("/upload/pdf", response_model=UploadResponse)
+async def upload_pdf(file: UploadFile):
+    return _validate_and_store(file, "pdf")
+
+
+@router.post("/upload/txt", response_model=UploadResponse)
+async def upload_txt(file: UploadFile):
+    return _validate_and_store(file, "txt")

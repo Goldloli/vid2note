@@ -1,7 +1,9 @@
 """you-get 下载器"""
+
 import subprocess
 from pathlib import Path
-from vid2note_core.downloaders.base import IDownloader, DownloadOpts, DownloadResult
+
+from vid2note_core.downloaders.base import DownloadOpts, DownloadResult, IDownloader
 from vid2note_core.downloaders.binary_manager import BinaryManager
 
 
@@ -9,10 +11,7 @@ class YouGetDownloader(IDownloader):
     name = "youget"
 
     def can_handle(self, url_or_path: str) -> bool:
-        return any(
-            domain in url_or_path
-            for domain in ["iqiyi.com", "youku.com", "mgtv.com"]
-        )
+        return any(domain in url_or_path for domain in ["iqiyi.com", "youku.com", "mgtv.com"])
 
     def download(self, url: str, dest_dir: Path, opts: DownloadOpts) -> DownloadResult:
         binary = BinaryManager("you-get").resolve()

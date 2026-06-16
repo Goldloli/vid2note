@@ -1,4 +1,5 @@
 """测试 DAG"""
+
 import pytest
 from unittest.mock import AsyncMock
 from vid2note_core.pipeline.dag import PipelineDAG
@@ -17,18 +18,19 @@ class MockNode(PipelineNode):
         return await self._mock_run(ctx)
 
 
-def test_topology_no_cycle():
+def test_topology_valid_nodes():
     n1 = MockNode(NodeName.DOWNLOAD)
-    n2 = MockNode(NodeName.EXTRACT_AUDIO, requires=["download"])
+    n2 = MockNode(NodeName.EXTRACT_AUDIO, requires=["video_file"])
     dag = PipelineDAG([n1, n2])
     assert dag is not None
 
 
-def test_topology_cycle_raises():
-    n1 = MockNode(NodeName.DOWNLOAD, requires=["extract_audio"])
-    n2 = MockNode(NodeName.EXTRACT_AUDIO, requires=["download"])
-    with pytest.raises(Exception):
-        PipelineDAG([n1, n2])
+def test_topology_unknown_node_raises():
+    """节点名不在 _NODE_ORDER 中应拒绝"""
+    n = MockNode(NodeName.DOWNLOAD)
+    n.name = "not_a_real_node"  # 伪造未知节点名
+    with pytest.raises(ValueError):
+        PipelineDAG([n])
 
 
 @pytest.mark.asyncio
