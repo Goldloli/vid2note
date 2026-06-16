@@ -1,7 +1,9 @@
 """BBDown 下载器"""
+
 import subprocess
 from pathlib import Path
-from vid2note_core.downloaders.base import IDownloader, DownloadOpts, DownloadResult
+
+from vid2note_core.downloaders.base import DownloadOpts, DownloadResult, IDownloader
 from vid2note_core.downloaders.binary_manager import BinaryManager
 
 

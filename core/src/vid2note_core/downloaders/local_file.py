@@ -1,7 +1,9 @@
 """本地文件下载器"""
+
 import shutil
 from pathlib import Path
-from vid2note_core.downloaders.base import IDownloader, DownloadOpts, DownloadResult
+
+from vid2note_core.downloaders.base import DownloadOpts, DownloadResult, IDownloader
 
 
 class LocalFileDownloader(IDownloader):

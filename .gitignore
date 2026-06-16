@@ -15,14 +15,22 @@ coverage.xml
 node_modules/
 dist/
 build/
+dist-electron/
+python-dist/
 *.dmg
 *.app
+
+# 外部二进制（由 scripts/fetch_binaries.sh 拉取，不入库）
+scripts/bin/
 
 data/
 logs/
 output/
 models/
 config/config.yaml
+
+# 评估报告（运行时生成）
+tests/fixtures/eval-report.json
 
 .DS_Store
 .idea/

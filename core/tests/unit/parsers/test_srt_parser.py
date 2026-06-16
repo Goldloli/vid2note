@@ -1,4 +1,5 @@
 """测试 SRT 解析器"""
+
 from vid2note_core.parsers.srt_parser import SRTParser
 
 

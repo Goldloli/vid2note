@@ -1,7 +1,8 @@
 """测试模型管理器"""
+
+import pytest
 from vid2note_core.asr.local.model_manager import ModelManager
 from vid2note_core.errors import ASRModelNotFound
-import pytest
 
 
 def test_list_available():

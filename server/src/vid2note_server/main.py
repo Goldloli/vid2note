@@ -1,9 +1,23 @@
 """FastAPI 入口"""
+
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from vid2note_server.api import tasks, process, upload, config, models, events, logs
+from vid2note_core.worker import get_worker
 
-app = FastAPI(title="vid2note", version="0.1.0")
+from vid2note_server.api import config, events, logs, models, process, tasks, upload
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    worker = get_worker()
+    await worker.start()
+    yield
+    await worker.stop()
+
+
+app = FastAPI(title="vid2note", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -21,6 +35,21 @@ app.include_router(models.router, prefix="/api/v1")
 app.include_router(events.router, prefix="/api/v1")
 app.include_router(logs.router, prefix="/api/v1")
 
+
 @app.get("/health")
+@app.get("/api/v1/health")
 async def health():
-    return {"status": "ok"}
+    """健康检查。
+
+    同时挂在 /health 和 /api/v1/health：
+    - /api/v1/health 是 Dockerfile healthcheck 和 Electron 主进程 waitForBackend 使用的路径
+    - /health 保留向后兼容
+    """
+    from vid2note_core.storage.task_repo import TaskRepository
+
+    try:
+        repo = TaskRepository()
+        active = repo.count_active()
+        return {"status": "ok", "active_tasks": active}
+    except Exception as e:  # noqa: BLE001
+        return {"status": "degraded", "error": str(e)}

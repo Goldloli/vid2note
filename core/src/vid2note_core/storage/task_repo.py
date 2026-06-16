@@ -1,10 +1,11 @@
 """任务仓库"""
+
 import json
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional, List
+
 from vid2note_core.storage.db import Database
-from vid2note_core.types import TaskStatus, NodeStatus, TaskId
+from vid2note_core.types import NodeStatus, TaskStatus
 
 
 @dataclass
@@ -13,24 +14,24 @@ class TaskRecord:
     status: TaskStatus
     progress: int = 0
     current_step: str = ""
-    message: Optional[str] = None
-    video_url: Optional[str] = None
-    video_file: Optional[str] = None
-    audio_file: Optional[str] = None
-    srt_file: Optional[str] = None
-    txt_file: Optional[str] = None
-    pdf_file: Optional[str] = None
-    output_file: Optional[str] = None
-    mindmap_file: Optional[str] = None
-    llm_provider: Optional[str] = None
-    llm_model: Optional[str] = None
-    asr_provider: Optional[str] = None
+    message: str | None = None
+    video_url: str | None = None
+    video_file: str | None = None
+    audio_file: str | None = None
+    srt_file: str | None = None
+    txt_file: str | None = None
+    pdf_file: str | None = None
+    output_file: str | None = None
+    mindmap_file: str | None = None
+    llm_provider: str | None = None
+    llm_model: str | None = None
+    asr_provider: str | None = None
     export_mindmap: bool = False
     mindmap_format: str = "xmind"
-    error_message: Optional[str] = None
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
+    error_message: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    completed_at: datetime | None = None
 
 
 @dataclass
@@ -40,16 +41,16 @@ class TaskNodeRecord:
     status: NodeStatus
     artifacts: list[str] = field(default_factory=list)
     metadata: dict = field(default_factory=dict)
-    error: Optional[dict] = None
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
+    error: dict | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
 
 
 class TaskRepository:
-    def __init__(self, db: Optional[Database] = None):
+    def __init__(self, db: Database | None = None):
         self.db = db or Database()
 
-    def create(self, task_id: str, **kwargs) -> TaskRecord:
+    def create(self, task_id: str, **kwargs) -> TaskRecord | None:
         now = datetime.now().isoformat()
         fields = {
             "id": task_id,
@@ -79,13 +80,13 @@ class TaskRepository:
         )
         return self.get_by_id(task_id)
 
-    def get_by_id(self, task_id: str) -> Optional[TaskRecord]:
+    def get_by_id(self, task_id: str) -> TaskRecord | None:
         row = self.db.fetchone("SELECT * FROM tasks WHERE id = ?", (task_id,))
         if not row:
             return None
         return self._row_to_task(row)
 
-    def reserve_pending_task(self) -> Optional[TaskRecord]:
+    def reserve_pending_task(self) -> TaskRecord | None:
         """原子预留一个 pending 任务，返回后状态变 running"""
         with self.db.get_connection() as conn:
             cursor = conn.execute(
@@ -98,7 +99,12 @@ class TaskRepository:
             task_id = row["id"]
             conn.execute(
                 "UPDATE tasks SET status = ?, updated_at = ? WHERE id = ? AND status = ?",
-                (TaskStatus.RUNNING.value, datetime.now().isoformat(), task_id, TaskStatus.PENDING.value),
+                (
+                    TaskStatus.RUNNING.value,
+                    datetime.now().isoformat(),
+                    task_id,
+                    TaskStatus.PENDING.value,
+                ),
             )
             if conn.total_changes == 0:
                 return None  # 被别的线程抢走了
@@ -107,24 +113,31 @@ class TaskRepository:
     def update(self, task_id: str, **kwargs) -> bool:
         if not kwargs:
             return False
-        fields = [f"{k} = ?" for k in kwargs.keys()]
-        values = list(kwargs.values()) + [task_id]
+        fields = [f"{k} = ?" for k in kwargs]
         self.db.execute(
             f"UPDATE tasks SET {', '.join(fields)}, updated_at = ? WHERE id = ?",
             (*list(kwargs.values()), datetime.now().isoformat(), task_id),
         )
         return True
 
-    def update_node(self, task_id: str, node_name: str, status: NodeStatus,
-                    artifacts: Optional[list] = None, metadata: Optional[dict] = None,
-                    error: Optional[dict] = None) -> None:
+    def update_node(
+        self,
+        task_id: str,
+        node_name: str,
+        status: NodeStatus,
+        artifacts: list | None = None,
+        metadata: dict | None = None,
+        error: dict | None = None,
+    ) -> None:
         now = datetime.now().isoformat()
         self.db.execute(
             """INSERT OR REPLACE INTO task_nodes
                (task_id, node_name, status, artifacts, metadata, error, started_at, completed_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                task_id, node_name, status.value,
+                task_id,
+                node_name,
+                status.value,
                 json.dumps(artifacts or []),
                 json.dumps(metadata or {}),
                 json.dumps(error) if error else None,
@@ -133,7 +146,7 @@ class TaskRepository:
             ),
         )
 
-    def get_node(self, task_id: str, node_name: str) -> Optional[TaskNodeRecord]:
+    def get_node(self, task_id: str, node_name: str) -> TaskNodeRecord | None:
         row = self.db.fetchone(
             "SELECT * FROM task_nodes WHERE task_id = ? AND node_name = ?",
             (task_id, node_name),
@@ -149,7 +162,7 @@ class TaskRepository:
             error=json.loads(row["error"]) if row["error"] else None,
         )
 
-    def list_all(self, status: Optional[TaskStatus] = None, limit: int = 100) -> List[TaskRecord]:
+    def list_all(self, status: TaskStatus | None = None, limit: int = 100) -> list[TaskRecord]:
         if status:
             rows = self.db.fetchall(
                 "SELECT * FROM tasks WHERE status = ? ORDER BY created_at DESC LIMIT ?",
@@ -162,9 +175,7 @@ class TaskRepository:
         return [self._row_to_task(r) for r in rows]
 
     def count_by_status(self, status: TaskStatus) -> int:
-        row = self.db.fetchone(
-            "SELECT COUNT(*) FROM tasks WHERE status = ?", (status.value,)
-        )
+        row = self.db.fetchone("SELECT COUNT(*) FROM tasks WHERE status = ?", (status.value,))
         return row[0] if row else 0
 
     def count_active(self) -> int:
@@ -177,6 +188,7 @@ class TaskRepository:
     def _row_to_task(self, row) -> TaskRecord:
         def _dt(val):
             return datetime.fromisoformat(val) if val else None
+
         return TaskRecord(
             id=row["id"],
             status=TaskStatus(row["status"]),

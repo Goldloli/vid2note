@@ -1,4 +1,5 @@
 """测试日志模块"""
+
 import json
 import logging
 from vid2note_core.utils.logger import get_logger, JsonFormatter
@@ -6,9 +7,7 @@ from vid2note_core.utils.logger import get_logger, JsonFormatter
 
 def test_json_formatter():
     fmt = JsonFormatter()
-    record = logging.LogRecord(
-        "test", logging.INFO, "", 0, "hello", (), None
-    )
+    record = logging.LogRecord("test", logging.INFO, "", 0, "hello", (), None)
     record.task_id = "task_abc"
     output = fmt.format(record)
     data = json.loads(output)
@@ -24,6 +23,7 @@ def test_get_logger_returns_logger():
 
 def test_task_logger():
     from vid2note_core.utils.logger import TaskLogger
+
     tlog = TaskLogger("task_abc")
     # 不抛异常即可
     tlog.info("test", provider="qwen")

@@ -2,7 +2,7 @@
 Mock LLM 实现
 用于测试环境，避免真实API调用
 """
-from typing import List, Dict
+
 from .base import BaseLLM
 
 
@@ -12,9 +12,9 @@ class MockLLM(BaseLLM):
     def __init__(self, api_key: str = "mock_key", model: str = "mock_model", **kwargs):
         super().__init__(api_key, model, **kwargs)
         self.call_count = 0
-        self.last_messages = None
+        self.last_messages: list[dict[str, str]] | None = None
 
-    def chat(self, messages: List[Dict[str, str]], **kwargs) -> str:
+    def chat(self, messages: list[dict[str, str]], **kwargs) -> str:
         """
         模拟聊天调用
 
@@ -93,4 +93,4 @@ MCP（Model Context Protocol）是Anthropic提出的开放标准，用于统一A
     def reset(self):
         """重置计数器"""
         self.call_count = 0
-        self.last_messages = None
+        self.last_messages: list[dict[str, str]] | None = None

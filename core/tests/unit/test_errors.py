@@ -1,8 +1,16 @@
 """测试错误体系"""
+
 import pytest
 from vid2note_core.errors import (
-    Vid2NoteError, DownloadError, DownloadURLInvalid, DownloadCookieExpired,
-    ASRError, ASRToolBChanged, LLMError, LLMRateLimited, PipelineError,
+    Vid2NoteError,
+    DownloadError,
+    DownloadURLInvalid,
+    DownloadCookieExpired,
+    ASRError,
+    ASRToolBChanged,
+    LLMError,
+    LLMRateLimited,
+    PipelineError,
 )
 
 

@@ -1,4 +1,5 @@
 """测试下载器路由"""
+
 from pathlib import Path
 from unittest.mock import MagicMock
 from vid2note_core.downloaders.router import DownloaderRouter

@@ -1,8 +1,10 @@
 """Qwen3-ASR 适配器"""
+
 from pathlib import Path
+
 from vid2note_core.asr.base import IASR, ASRResult
-from vid2note_core.asr.local.model_manager import ModelManager
 from vid2note_core.asr.local.device import detect_device
+from vid2note_core.asr.local.model_manager import ModelManager
 
 
 class Qwen3ASRAdapter(IASR):
@@ -16,7 +18,7 @@ class Qwen3ASRAdapter(IASR):
         self.device = detect_device()
 
     def transcribe(self, audio_path: Path, opts: dict) -> ASRResult:
-        model_path = self.manager.get_path(self.model_id)
+        self.manager.get_path(self.model_id)  # 校验模型已下载
         # Phase 7 实际实现：加载 Qwen3-ASR 模型、推理、返回 ASRResult
         raise NotImplementedError("Phase 7 实现")
 

@@ -1,4 +1,5 @@
 """测试 Qwen3-ASR 适配器"""
+
 from vid2note_core.asr.local.qwen_asr import Qwen3ASRAdapter
 
 

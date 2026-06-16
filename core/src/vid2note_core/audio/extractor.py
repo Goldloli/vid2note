@@ -1,6 +1,8 @@
 """ffmpeg 音频提取器"""
+
 import subprocess
 from pathlib import Path
+
 from vid2note_core.audio.ffmpeg_binary import get_ffmpeg
 from vid2note_core.errors import DownloadError
 
@@ -10,11 +12,15 @@ class AudioExtractor:
         output = dest_dir / "audio.wav"
         cmd = [
             str(get_ffmpeg()),
-            "-i", str(video_path),
+            "-i",
+            str(video_path),
             "-vn",
-            "-acodec", "pcm_s16le",
-            "-ar", str(sample_rate),
-            "-ac", "1",
+            "-acodec",
+            "pcm_s16le",
+            "-ar",
+            str(sample_rate),
+            "-ac",
+            "1",
             "-y",
             str(output),
         ]

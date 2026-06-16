@@ -1,4 +1,5 @@
 """测试 LLM 工厂"""
+
 import pytest
 from vid2note_core.llm.factory import LLMFactory
 from vid2note_core.llm.mock import MockLLM

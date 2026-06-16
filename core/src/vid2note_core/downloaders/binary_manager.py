@@ -1,8 +1,8 @@
 """外部二进制管理"""
+
 import os
 import shutil
 from pathlib import Path
-from typing import Optional
 
 
 class BinaryManager:

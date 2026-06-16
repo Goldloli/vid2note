@@ -1,4 +1,5 @@
 """测试 yt-dlp 下载器"""
+
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 from vid2note_core.downloaders.ytdlp import YtdlpDownloader

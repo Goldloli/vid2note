@@ -1,8 +1,8 @@
 """产物文件系统存储"""
-from pathlib import Path
-from typing import Optional
-from vid2note_core.types import NodeName
 
+from pathlib import Path
+
+from vid2note_core.types import NodeName
 
 # 节点拓扑顺序（用于判断上下游）
 _NODE_ORDER = [
@@ -16,7 +16,7 @@ _NODE_ORDER = [
 
 
 class ArtifactStore:
-    def __init__(self, base_dir: Optional[Path] = None):
+    def __init__(self, base_dir: Path | None = None):
         self.base_dir = Path(base_dir or "data/tasks")
         self.base_dir.mkdir(parents=True, exist_ok=True)
 

@@ -1,7 +1,8 @@
 """测试 ASR 工厂"""
+
 import pytest
-from vid2note_core.asr.factory import ASRFactory
 from vid2note_core.asr.cloud.asrtools import AsrToolsBLLM
+from vid2note_core.asr.factory import ASRFactory
 
 
 def test_create_asrtools():

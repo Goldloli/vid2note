@@ -1,6 +1,15 @@
 """测试类型定义"""
+
 from pathlib import Path
-from vid2note_core.types import TaskId, ArtifactRef, NodeName, NodeStatus, NodeResult, TaskStatus, RunMode
+from vid2note_core.types import (
+    TaskId,
+    ArtifactRef,
+    NodeName,
+    NodeStatus,
+    NodeResult,
+    TaskStatus,
+    RunMode,
+)
 
 
 def test_task_id_creation():

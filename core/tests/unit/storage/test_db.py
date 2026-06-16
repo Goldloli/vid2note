@@ -1,4 +1,5 @@
 """测试数据库管理"""
+
 import sqlite3
 import pytest
 from vid2note_core.storage.db import Database

@@ -1,4 +1,5 @@
 """测试音频提取"""
+
 from unittest.mock import patch, MagicMock
 from pathlib import Path
 from vid2note_core.audio.extractor import AudioExtractor

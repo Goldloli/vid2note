@@ -1,7 +1,9 @@
 """yt-dlp 下载器"""
+
 import subprocess
 from pathlib import Path
-from vid2note_core.downloaders.base import IDownloader, DownloadOpts, DownloadResult
+
+from vid2note_core.downloaders.base import DownloadOpts, DownloadResult, IDownloader
 from vid2note_core.downloaders.binary_manager import BinaryManager
 
 
@@ -18,8 +20,10 @@ class YtdlpDownloader(IDownloader):
         binary = BinaryManager("yt-dlp").resolve()
         cmd = [
             str(binary),
-            "-f", opts.quality,
-            "-o", str(dest_dir / "%(title)s.%(ext)s"),
+            "-f",
+            opts.quality,
+            "-o",
+            str(dest_dir / "%(title)s.%(ext)s"),
             "--no-playlist",
             url,
         ]
@@ -30,5 +34,5 @@ class YtdlpDownloader(IDownloader):
             raise RuntimeError(f"yt-dlp failed: {result.stderr}")
         # 查找下载的文件
         files = list(dest_dir.iterdir())
-        video = next((f for f in files if f.suffix in {".mp4",".webm",".mkv"}), None)
+        video = next((f for f in files if f.suffix in {".mp4", ".webm", ".mkv"}), None)
         return DownloadResult(video_path=video, raw_output=result.stdout)

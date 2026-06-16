@@ -1,4 +1,5 @@
 """vid2note 核心类型定义"""
+
 from __future__ import annotations
 
 import re
@@ -20,6 +21,13 @@ class TaskId:
     @property
     def value(self) -> str:
         return self._value
+
+    @classmethod
+    def generate(cls) -> str:
+        """Generate a new valid task_id."""
+        import secrets
+
+        return f"task_{secrets.token_hex(6)}"
 
     @classmethod
     def is_valid(cls, value: str) -> bool:
@@ -102,7 +110,7 @@ class NodeResult:
         node: NodeName,
         artifacts: list[ArtifactRef] | None = None,
         metadata: dict[str, Any] | None = None,
-    ) -> "NodeResult":
+    ) -> NodeResult:
         return cls(
             node=node,
             status=NodeStatus.COMPLETED,
@@ -118,7 +126,7 @@ class NodeResult:
         error_code: str,
         error_message: str,
         artifacts: list[ArtifactRef] | None = None,
-    ) -> "NodeResult":
+    ) -> NodeResult:
         return cls(
             node=node,
             status=NodeStatus.FAILED,
