@@ -39,11 +39,14 @@
     ],
     "extraResources": [
       {
-        "from": "../python-dist",
-        "to": "python",
-        "filter": [
-          "**/*"
-        ]
+        "from": "../core",
+        "to": "core-src",
+        "filter": ["src/**/*", "pyproject.toml", "README.md"]
+      },
+      {
+        "from": "../server",
+        "to": "server-src",
+        "filter": ["src/**/*", "pyproject.toml", "README.md"]
       }
     ],
     "mac": {
