@@ -32,7 +32,9 @@ config/config.yaml
 # 评估报告（运行时生成）
 tests/fixtures/eval-report.json
 
-.DS_Store
+# 前端设计模板（HTML 原型，不入库）
+前端模板设计/
+
 .idea/
 .vscode/
 *.swp
