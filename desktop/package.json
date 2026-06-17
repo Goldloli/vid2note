@@ -53,6 +53,12 @@
           "arch": [
             "arm64"
           ]
+        },
+        {
+          "target": "pkg",
+          "arch": [
+            "arm64"
+          ]
         }
       ],
       "category": "public.app-category.productivity"
