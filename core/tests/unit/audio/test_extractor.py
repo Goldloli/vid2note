@@ -1,25 +1,46 @@
-"""测试音频提取"""
+"""测试音频提取
 
-from unittest.mock import patch, MagicMock
+ffmpeg 为外部二进制，CI 环境可能未安装。测试用 mock 注入，
+不依赖真实 ffmpeg。
+"""
+
 from pathlib import Path
+from unittest.mock import MagicMock, patch
+
 from vid2note_core.audio.extractor import AudioExtractor
 
 
 def test_extract_success(tmp_path):
-    with patch("subprocess.run") as mock_run:
+    # mock ffmpeg 解析（避免依赖真实二进制）+ subprocess
+    with (
+        patch(
+            "vid2note_core.audio.ffmpeg_binary.BinaryManager.resolve",
+            return_value=Path("/fake/ffmpeg"),
+        ),
+        patch("subprocess.run") as mock_run,
+    ):
         mock_run.return_value = MagicMock(returncode=0, stderr="")
         extractor = AudioExtractor()
-        result = extractor.extract(Path("/tmp/video.mp4"), tmp_path)
-        assert result.name == "audio.wav"
+        # extract 内部会检查输出文件存在性，预先创建
+        result = tmp_path / "audio.wav"
+        result.write_bytes(b"fake wav")
+        out = extractor.extract(Path("/tmp/video.mp4"), tmp_path)
+        assert out.name == "audio.wav"
         mock_run.assert_called_once()
 
 
-def test_extract_failure():
-    with patch("subprocess.run") as mock_run:
+def test_extract_failure(tmp_path):
+    with (
+        patch(
+            "vid2note_core.audio.ffmpeg_binary.BinaryManager.resolve",
+            return_value=Path("/fake/ffmpeg"),
+        ),
+        patch("subprocess.run") as mock_run,
+    ):
         mock_run.return_value = MagicMock(returncode=1, stderr="error")
         extractor = AudioExtractor()
         try:
-            extractor.extract(Path("/tmp/video.mp4"), Path("/tmp"))
+            extractor.extract(Path("/tmp/video.mp4"), tmp_path)
             assert False, "should raise"
         except Exception as e:
             assert "AUDIO_EXTRACT_FAILED" in str(e) or "ffmpeg" in str(e)

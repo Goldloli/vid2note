@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "kind": "html",
+  "title": "note.html",
+  "entry": "note.html",
+  "renderer": "html",
+  "status": "complete",
+  "exports": [
+    "html",
+    "pdf",
+    "zip"
+  ],
+  "createdAt": "2026-06-15T14:34:26.875Z",
+  "updatedAt": "2026-06-15T14:34:26.875Z",
+  "metadata": {
+    "inferred": true,
+    "reconciled": true
+  }
+}

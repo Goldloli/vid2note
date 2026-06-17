@@ -46,7 +46,7 @@ warn_return_any = false
 warn_unused_ignores = true
 
 [[tool.mypy.overrides]]
-module = ["funasr.*", "torch.*", "modelscope.*", "respx.*"]
+module = ["funasr.*", "torch.*", "modelscope.*", "respx.*", "yaml.*"]
 ignore_missing_imports = true
 
 [tool.coverage.run]
