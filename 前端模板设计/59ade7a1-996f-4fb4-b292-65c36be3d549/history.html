@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vid2note · 历史</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="css/app.css">
+<style>
+  .hist-bar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:18px; }
+  .hist-check { width:15px; height:15px; accent-color: var(--accent); }
+  .row-sel { background: var(--accent-soft) !important; }
+  .pager { display:flex; align-items:center; gap:6px; justify-content:flex-end; padding:14px 4px 0; }
+  .pager .p-info { margin-right:auto; font-size:12.5px; color:var(--muted); }
+  .pager button { width:30px; height:30px; border-radius:7px; border:1px solid var(--border); background:var(--surface); color:var(--muted); font-size:12.5px; font-family:var(--font-mono); }
+  .pager button.active { background:var(--accent); border-color:var(--accent); color:var(--accent-fg); }
+  .pager button[disabled] { opacity:0.4; }
+</style>
+</head>
+<body data-page="history">
+<div class="app">
+  <div class="titlebar">
+    <div class="traffic"><span class="t-close"></span><span class="t-min"></span><span class="t-max"></span></div>
+    <a href="index.html" class="tb-title"><b>vid2note</b> — 历史</a>
+    <div class="tb-spacer"></div>
+    <span class="tb-pill"><span class="dot-live"></span>本地服务 · :8765</span>
+    <button class="btn btn-icon btn-sm" data-theme-toggle title="切换明暗"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg></button>
+  </div>
+
+  <div class="body">
+    <aside class="sidebar">
+      <a class="brand" href="index.html"><div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h10M4 18h7"/><circle cx="18" cy="16" r="3" fill="currentColor" stroke="none"/></svg></div><div><div class="name">vid2note</div><div class="ver">v0.1.0 · electron</div></div></a>
+      <div class="nav-group">
+        <div class="nav-label">工作台</div>
+        <a class="nav-item" href="console.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>主控台</a>
+        <a class="nav-item" href="task-detail.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><circle cx="3.5" cy="6" r="1.4"/><circle cx="3.5" cy="12" r="1.4"/><circle cx="3.5" cy="18" r="1.4"/></svg>任务详情</a>
+        <a class="nav-item" href="note.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 3H6a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V9z"/><path d="M14 3v6h6"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>笔记</a>
+        <a class="nav-item" href="mindmap.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="9" width="6" height="6" rx="1.5"/><rect x="15" y="3" width="6" height="6" rx="1.5"/><rect x="15" y="15" width="6" height="6" rx="1.5"/><path d="M9 12h3a3 3 0 003-3M9 12h3a3 3 0 013 3"/></svg>思维导图</a>
+        <div class="nav-label" style="margin-top:14px">数据</div>
+        <a class="nav-item active" href="history.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>历史<span class="count">34</span></a>
+        <a class="nav-item" href="settings.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3.2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></svg>设置</a>
+      </div>
+      <div class="sidebar-foot"><div class="engine-card">
+        <div class="row"><span class="lbl">ASR</span><span class="val">asrtools-b · 云端</span></div>
+        <div class="row"><span class="lbl">LLM</span><span class="val">qwen-turbo</span></div>
+        <div class="row"><span class="lbl">引擎</span><span class="row gap-xs"><span class="dot-live" style="width:6px;height:6px"></span><span class="val" style="color:var(--success)">Python 运行中</span></span></div>
+      </div></div>
+    </aside>
+
+    <main class="content">
+      <div class="topbar">
+        <div class="crumbs"><b>历史</b> <span class="muted mono-sm">· 34 个任务</span></div>
+        <div class="topbar-actions">
+          <button class="btn btn-sm">批量导出</button>
+          <button class="btn btn-sm">清理 7 天前</button>
+        </div>
+      </div>
+
+      <div class="scroll">
+        <div class="page">
+
+          <div class="page-head reveal">
+            <h1>任务历史</h1>
+            <div class="sub">按状态、来源与关键词筛选，点击行进入任务详情。</div>
+          </div>
+
+          <!-- 筛选条 -->
+          <div class="hist-bar reveal">
+            <div class="row gap-xs">
+              <button class="chip active" data-filter="all">全部 <span class="muted mono-sm">34</span></button>
+              <button class="chip" data-filter="running">进行中 <span class="muted mono-sm">2</span></button>
+              <button class="chip" data-filter="completed">已完成 <span class="muted mono-sm">31</span></button>
+              <button class="chip" data-filter="failed">失败 <span class="muted mono-sm">1</span></button>
+            </div>
+            <div class="divider"></div>
+            <div class="seg"><button class="active" data-value="all">全部来源</button><button data-value="url">链接</button><button data-value="file">上传</button><button data-value="pdf">PDF 对照</button></div>
+            <div class="search" style="margin-left:auto">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+              <input data-history-search placeholder="搜索标题、链接、任务 ID…">
+            </div>
+          </div>
+
+          <!-- 表格 -->
+          <div class="card reveal" style="overflow:hidden">
+            <div class="table">
+              <table data-history>
+                <thead><tr>
+                  <th style="width:34px"><input type="checkbox" class="hist-check"></th>
+                  <th>来源</th><th>状态</th><th>耗时</th><th>创建时间</th><th>ASR / LLM</th><th style="text-align:right">操作</th>
+                </tr></thead>
+                <tbody>
+                  <tr data-status="running">
+                    <td><input type="checkbox" class="hist-check"></td>
+                    <td><div class="src-cell"><span class="plat-ico plat-yt">▶</span><div><div style="font-weight:500">Transformer 自注意力机制详解</div><div class="muted mono-sm">task_a1b2c3d4e5f6 · youtube.com</div></div></div></td>
+                    <td><span class="badge running"><span class="d"></span>转录中</span></td>
+                    <td class="mono-sm muted">2m 12s …</td>
+                    <td class="mono-sm muted">今天 09:38</td>
+                    <td class="mono-sm muted">asrtools-b · qwen</td>
+                    <td><div class="row gap-xs" style="justify-content:flex-end"><a class="btn btn-ghost btn-sm" href="task-detail.html">详情</a></div></td>
+                  </tr>
+                  <tr data-status="running">
+                    <td><input type="checkbox" class="hist-check"></td>
+                    <td><div class="src-cell"><span class="plat-ico plat-bili">B</span><div><div style="font-weight:500">Rust 异步运行时 Tokio 源码走读（上）</div><div class="muted mono-sm">task_b9c8d7e6f5g4 · bilibili.com</div></div></div></td>
+                    <td><span class="badge running"><span class="d"></span>提取音频</span></td>
+                    <td class="mono-sm muted">1m 04s …</td>
+                    <td class="mono-sm muted">今天 09:36</td>
+                    <td class="mono-sm muted">FunASR · deepseek</td>
+                    <td><div class="row gap-xs" style="justify-content:flex-end"><a class="btn btn-ghost btn-sm" href="task-detail.html">详情</a></div></td>
+                  </tr>
+                  <tr data-status="completed">
+                    <td><input type="checkbox" class="hist-check"></td>
+                    <td><div class="src-cell"><span class="plat-ico plat-yt">▶</span><div><div style="font-weight:500">深入理解 Linux 内核调度器 CFS</div><div class="muted mono-sm">task_c1d2e3f4a5b6 · youtube.com · 24:08</div></div></div></td>
+                    <td><span class="badge completed"><span class="d"></span>已完成</span></td>
+                    <td class="mono-sm muted">4m 51s</td>
+                    <td class="mono-sm muted">今天 09:42</td>
+                    <td class="mono-sm muted">asrtools-b · qwen</td>
+                    <td><div class="row gap-xs" style="justify-content:flex-end"><a class="btn btn-sm" href="note.html">笔记</a><a class="btn btn-ghost btn-sm" href="task-detail.html">详情</a></div></td>
+                  </tr>
+                  <tr data-status="completed">
+                    <td><input type="checkbox" class="hist-check"></td>
+                    <td><div class="src-cell"><span class="plat-ico plat-file">▲</span><div><div style="font-weight:500">Q3 产品评审会录像（内部）</div><div class="muted mono-sm">task_d3e4f5a6b7c8 · 本地上传 · 1:12:40</div></div></div></td>
+                    <td><span class="badge completed"><span class="d"></span>已完成</span></td>
+                    <td class="mono-sm muted">9m 02s</td>
+                    <td class="mono-sm muted">今天 08:15</td>
+                    <td class="mono-sm muted">FunASR · glm-4</td>
+                    <td><div class="row gap-xs" style="justify-content:flex-end"><a class="btn btn-sm" href="note.html">笔记</a><a class="btn btn-ghost btn-sm" href="task-detail.html">详情</a></div></td>
+                  </tr>
+                  <tr data-status="completed">
+                    <td><input type="checkbox" class="hist-check"></td>
+                    <td><div class="src-cell"><span class="plat-ico plat-bili">B</span><div><div style="font-weight:500">机器学习｜梯度下降与学习率调度</div><div class="muted mono-sm">task_e5f6a7b8c9d0 · bilibili.com · 38:55</div></div></div></td>
+                    <td><span class="badge completed"><span class="d"></span>已完成</span></td>
+                    <td class="mono-sm muted">6m 18s</td>
+                    <td class="mono-sm muted">昨天 22:30</td>
+                    <td class="mono-sm muted">asrtools-b · qwen</td>
+                    <td><div class="row gap-xs" style="justify-content:flex-end"><a class="btn btn-sm" href="note.html">笔记</a><a class="btn btn-ghost btn-sm" href="task-detail.html">详情</a></div></td>
+                  </tr>
+                  <tr data-status="completed">
+                    <td><input type="checkbox" class="hist-check"></td>
+                    <td><div class="src-cell"><span class="plat-ico plat-pdf">P</span><div><div style="font-weight:500">分布式系统 · CAP 定理（视频 + 讲义对照）</div><div class="muted mono-sm">task_f7a8b9c0d1e2 · youtube.com + slides.pdf</div></div></div></td>
+                    <td><span class="badge completed"><span class="d"></span>已完成</span></td>
+                    <td class="mono-sm muted">5m 27s</td>
+                    <td class="mono-sm muted">昨天 16:04</td>
+                    <td class="mono-sm muted">Qwen-ASR · deepseek</td>
+                    <td><div class="row gap-xs" style="justify-content:flex-end"><a class="btn btn-sm" href="note.html">笔记</a><a class="btn btn-ghost btn-sm" href="task-detail.html">详情</a></div></td>
+                  </tr>
+                  <tr data-status="failed">
+                    <td><input type="checkbox" class="hist-check"></td>
+                    <td><div class="src-cell"><span class="plat-ico plat-yt">▶</span><div><div style="font-weight:500">Kubernetes Operator 开发实战</div><div class="muted mono-sm">task_a0b1c2d3e4f5 · youtube.com · 56:20</div></div></div></td>
+                    <td><span class="badge failed"><span class="d"></span>转录失败</span></td>
+                    <td class="mono-sm muted">3m 40s</td>
+                    <td class="mono-sm muted">昨天 14:12</td>
+                    <td class="mono-sm muted">asrtools-b · qwen</td>
+                    <td><div class="row gap-xs" style="justify-content:flex-end"><button class="btn btn-sm">重跑</button><a class="btn btn-ghost btn-sm" href="task-detail.html">详情</a></div></td>
+                  </tr>
+                  <tr data-status="completed">
+                    <td><input type="checkbox" class="hist-check"></td>
+                    <td><div class="src-cell"><span class="plat-ico plat-yt">▶</span><div><div style="font-weight:500">数据库索引原理与优化实战</div><div class="muted mono-sm">task_b2c3d4e5f6a7 · youtube.com · 42:10</div></div></div></td>
+                    <td><span class="badge completed"><span class="d"></span>已完成</span></td>
+                    <td class="mono-sm muted">7m 33s</td>
+                    <td class="mono-sm muted">06-13 19:48</td>
+                    <td class="mono-sm muted">asrtools-b · glm-4</td>
+                    <td><div class="row gap-xs" style="justify-content:flex-end"><a class="btn btn-sm" href="note.html">笔记</a><a class="btn btn-ghost btn-sm" href="task-detail.html">详情</a></div></td>
+                  </tr>
+                  <tr data-status="completed">
+                    <td><input type="checkbox" class="hist-check"></td>
+                    <td><div class="src-cell"><span class="plat-ico plat-file">▲</span><div><div style="font-weight:500">客户访谈录音 · 项目 A 第二轮</div><div class="muted mono-sm">task_c4d5e6f7a8b9 · 本地上传 · 28:45</div></div></div></td>
+                    <td><span class="badge completed"><span class="d"></span>已完成</span></td>
+                    <td class="mono-sm muted">4m 09s</td>
+                    <td class="mono-sm muted">06-13 11:20</td>
+                    <td class="mono-sm muted">FunASR · qwen</td>
+                    <td><div class="row gap-xs" style="justify-content:flex-end"><a class="btn btn-sm" href="note.html">笔记</a><a class="btn btn-ghost btn-sm" href="task-detail.html">详情</a></div></td>
+                  </tr>
+                  <tr data-status="completed">
+                    <td><input type="checkbox" class="hist-check"></td>
+                    <td><div class="src-cell"><span class="plat-ico plat-bili">B</span><div><div style="font-weight:500">Go 语言内存模型与垃圾回收</div><div class="muted mono-sm">task_d6e7f8a9b0c1 · bilibili.com · 51:33</div></div></div></td>
+                    <td><span class="badge completed"><span class="d"></span>已完成</span></td>
+                    <td class="mono-sm muted">8m 14s</td>
+                    <td class="mono-sm muted">06-12 21:05</td>
+                    <td class="mono-sm muted">asrtools-b · deepseek</td>
+                    <td><div class="row gap-xs" style="justify-content:flex-end"><a class="btn btn-sm" href="note.html">笔记</a><a class="btn btn-ghost btn-sm" href="task-detail.html">详情</a></div></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="pager">
+              <span class="p-info">显示 1–10 / 共 34 条</span>
+              <button disabled>‹</button>
+              <button class="active">1</button><button>2</button><button>3</button><button>4</button>
+              <button>›</button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+<script src="js/app.js"></script>
+<script>
+  // 行选中高亮
+  document.querySelectorAll('.hist-check').forEach(function(c){
+    c.addEventListener('change', function(){
+      var tr = c.closest('tr');
+      if (tr) tr.classList.toggle('row-sel', c.checked);
+    });
+  });
+</script>
+</body>
+</html>

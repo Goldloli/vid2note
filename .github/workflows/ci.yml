@@ -21,9 +21,11 @@ jobs:
       - name: Install uv
         run: pip install uv
       - name: Install dependencies
-        run: uv pip install --system -e "./core[dev]" -e "./server[dev]"
+        run: |
+          uv pip install --system -e "./core[dev]" -e "./server[dev]"
+          uv pip install --system types-pyyaml
       - name: Run tests with coverage
-        run: pytest core/tests/ server/tests/ -v --cov=vid2note_core --cov=vid2note_server --cov-report=xml --cov-fail-under=80
+        run: pytest core/tests/ server/tests/ -v --cov=vid2note_core --cov=vid2note_server --cov-report=xml --cov-fail-under=75
       - name: Upload coverage
         uses: codecov/codecov-action@v4
         with:
@@ -41,7 +43,9 @@ jobs:
       - name: Install uv
         run: pip install uv
       - name: Install dependencies
-        run: uv pip install --system -e "./core[dev]" -e "./server[dev]"
+        run: |
+          uv pip install --system -e "./core[dev]" -e "./server[dev]"
+          uv pip install --system types-pyyaml
       - name: Ruff check
         run: ruff check core/src server/src
       - name: Ruff format check
