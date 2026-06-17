@@ -1,243 +1,205 @@
 <template>
-  <div class="settings">
-    <el-page-header @back="$router.push('/')" content="设置" />
-
-    <!-- LLM 配置 -->
-    <el-card class="section">
-      <template #header><span>LLM 大模型</span></template>
-      <el-form label-width="160px" :model="form">
-        <el-form-item label="LLM 提供商">
-          <el-select v-model="form.llm_provider" @change="saveField('llm_provider', form.llm_provider)">
-            <el-option v-for="p in providers.llm" :key="p" :label="p" :value="p" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="API Key">
-          <el-input v-model="form.api_key" placeholder="sk-..." show-password>
-            <template #append>
-              <el-button :loading="verifying" @click="verifyKey">验证</el-button>
-            </template>
-          </el-input>
-        </el-form-item>
-        <el-form-item label="Ollama 状态">
-          <el-tag :type="ollama.running ? 'success' : 'info'">
-            {{ ollama.running ? '运行中' : '未运行' }}
-          </el-tag>
-          <el-button size="small" link @click="checkOllama">刷新</el-button>
-          <div v-if="ollama.models?.length" class="ollama-models">
-            本地模型：{{ ollama.models.join(', ') }}
-          </div>
-        </el-form-item>
-      </el-form>
-    </el-card>
-
-    <!-- ASR 配置 -->
-    <el-card class="section">
-      <template #header><span>ASR 语音识别</span></template>
-      <el-form label-width="160px" :model="form">
-        <el-form-item label="ASR 提供商">
-          <el-select v-model="form.asr_provider" @change="saveField('asr_provider', form.asr_provider)">
-            <el-option v-for="p in providers.asr" :key="p" :label="p" :value="p" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="本地模型管理">
-          <div class="model-mgmt">
-            <div class="model-row" v-for="m in asrAvailable" :key="m.name">
-              <span class="model-name">{{ m.name }} ({{ m.size }})</span>
-              <el-tag size="small" :type="isInstalled(m.name) ? 'success' : 'info'">
-                {{ isInstalled(m.name) ? '已下载' : '未下载' }}
-              </el-tag>
-              <el-button
-                v-if="!isInstalled(m.name)"
-                size="small"
-                type="primary"
-                plain
-                :loading="downloading === m.name"
-                @click="downloadModel(m.name)"
-              >下载</el-button>
+  <div class="page">
+    <div class="set-tabs">
+      <button class="tab" :class="{active: tab === 'asr'}" @click="tab = 'asr'">ASR 语音识别</button>
+      <button class="tab" :class="{active: tab === 'llm'}" @click="tab = 'llm'">LLM 大模型</button>
+      <button class="tab" :class="{active: tab === 'proc'}" @click="tab = 'proc'">处理选项</button>
+      <button class="tab" :class="{active: tab === 'keep'}" @click="tab = 'keep'">保留策略</button>
+      <button class="tab" :class="{active: tab === 'adv'}" @click="tab = 'adv'">高级</button>
+      <button class="tab" :class="{active: tab === 'about'}" @click="tab = 'about'">关于</button>
+    </div>
+    <div class="set-grid">
+      <div>
+        <!-- ASR -->
+        <div v-show="tab === 'asr'" class="card card-pad reveal">
+          <div class="section-title"><h2>语音识别引擎 (ASR)</h2><span class="tag">默认 asrtools-b</span></div>
+          <div class="opt-grid">
+            <div v-for="p in asrProviders" :key="p.name" class="opt-card" :class="{sel: form.asr_provider === p.name}" @click="selectAsr(p.name)">
+              <span class="opt-radio"></span>
+              <div><div class="o-name">{{ p.name }}</div><div class="o-meta">{{ p.meta }}</div></div>
             </div>
-            <el-empty v-if="!asrAvailable.length" description="暂无可用模型" />
           </div>
-        </el-form-item>
-      </el-form>
-    </el-card>
+          <div class="divider-h"></div>
+          <div class="form-row">
+            <div><div class="fr-label">云端 API Key</div><div class="fr-desc">asrtools-b 云端识别密钥（存钥匙串）。</div></div>
+            <div class="fr-control">
+              <div class="input-affix"><input class="input" type="password" v-model="form.api_key" placeholder="sk-asr-…"><span class="append"><button class="btn btn-sm" @click="verifyKey">测试</button></span></div>
+              <span v-if="verifyMsg" class="mono-sm" :style="{color: verifyOk ? 'var(--success)' : 'var(--danger)'}">{{ verifyMsg }}</span>
+            </div>
+          </div>
+        </div>
 
-    <!-- Cookie 管理 -->
-    <el-card class="section">
-      <template #header><span>Cookie 管理（用于会员视频下载）</span></template>
-      <el-form label-width="160px">
-        <el-form-item label="Bilibili Cookie">
-          <el-input v-model="form.bilibili_cookie" type="textarea" :rows="3" placeholder="SESSDATA=...; bili_jct=..." />
-        </el-form-item>
-        <el-form-item label="YouTube Cookie">
-          <el-input v-model="form.youtube_cookie" type="textarea" :rows="3" placeholder="cookies.txt 内容或 cookie 字符串" />
-        </el-form-item>
-        <el-form-item>
-          <el-button type="primary" @click="saveCookies">保存 Cookie</el-button>
-        </el-form-item>
-      </el-form>
-    </el-card>
+        <!-- LLM -->
+        <div v-show="tab === 'llm'" class="card card-pad reveal">
+          <div class="section-title"><h2>大语言模型 (LLM)</h2><span class="muted mono-sm">{{ llmProviders.length }} 个提供商 · 当前 {{ form.llm_provider }}</span></div>
+          <div class="col" style="gap:10px">
+            <div v-for="p in llmProviders" :key="p" class="prov-card" :class="{selected: form.llm_provider === p}" @click="selectLlm(p)">
+              <div class="prov-head"><span class="prov-radio"></span><span class="prov-name">{{ p }}</span><span class="prov-model">{{ defaultModel(p) }}</span></div>
+              <div v-if="form.llm_provider === p" class="prov-body" style="display:block">
+                <div class="grid grid-2" style="padding-top:14px">
+                  <div class="field"><span class="label">API Key</span><input class="input" type="password" v-model="form.llm_keys[p]" placeholder="sk-…"></div>
+                  <div class="field"><span class="label">模型</span><input class="input" :value="defaultModel(p)" disabled></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
 
-    <!-- 保留策略 -->
-    <el-card class="section">
-      <template #header><span>保留策略</span></template>
-      <el-form label-width="160px" :model="form">
-        <el-form-item label="保留视频文件">
-          <el-switch v-model="form.keep_video" @change="saveField('keep_video', form.keep_video)" />
-          <span class="hint">关闭则处理后自动删除视频（节省空间）</span>
-        </el-form-item>
-        <el-form-item label="保留音频文件">
-          <el-switch v-model="form.keep_audio" @change="saveField('keep_audio', form.keep_audio)" />
-        </el-form-item>
-        <el-form-item label="保留 SRT 字幕">
-          <el-switch v-model="form.keep_srt" @change="saveField('keep_srt', form.keep_srt)" />
-          <span class="hint">始终建议保留</span>
-        </el-form-item>
-      </el-form>
-    </el-card>
+        <!-- 处理选项 -->
+        <div v-show="tab === 'proc'" class="card card-pad reveal">
+          <div class="section-title"><h2>处理选项</h2></div>
+          <div class="toggle-row"><div><div class="t-label">提取视频关键帧图片</div><div class="t-desc">在笔记中嵌入视频关键帧。</div></div><label class="switch"><input type="checkbox" v-model="form.extract_images"><span class="track"></span><span class="thumb"></span></label></div>
+          <div class="form-row"><div><div class="fr-label">输出语言</div><div class="fr-desc">整理笔记使用的语言。</div></div><div class="seg"><button :class="{active: form.language === 'zh'}" @click="form.language = 'zh'">中文</button><button :class="{active: form.language === 'en'}" @click="form.language = 'en'">English</button></div></div>
+        </div>
+
+        <!-- 保留策略 -->
+        <div v-show="tab === 'keep'" class="card card-pad reveal">
+          <div class="section-title"><h2>文件保留策略</h2><span class="muted mono-sm">cleanup 节点依据</span></div>
+          <div class="toggle-row"><div><div class="t-label">保留原始视频</div><div class="t-desc">保留 video.mp4（占用空间较大）。</div></div><label class="switch"><input type="checkbox" v-model="form.keep_video"><span class="track"></span><span class="thumb"></span></label></div>
+          <div class="toggle-row"><div><div class="t-label">保留音频</div><div class="t-desc">保留 audio.wav。</div></div><label class="switch"><input type="checkbox" v-model="form.keep_audio"><span class="track"></span><span class="thumb"></span></label></div>
+          <div class="toggle-row"><div><div class="t-label">保留字幕 SRT</div><div class="t-desc">保留 transcript.srt。</div></div><label class="switch"><input type="checkbox" v-model="form.keep_srt"><span class="track"></span><span class="thumb"></span></label></div>
+        </div>
+
+        <!-- 高级 -->
+        <div v-show="tab === 'adv'" class="card card-pad reveal">
+          <div class="section-title"><h2>高级参数</h2></div>
+          <div class="form-row"><div><div class="fr-label">分块大小 (chunk_size)</div><div class="fr-desc">送入 LLM 的单块最大 token 数。</div></div><div class="fr-control" style="max-width:280px"><div class="row gap-s"><input class="range" type="range" min="1000" max="8000" step="500" v-model.number="form.chunk_size"><span class="mono" style="min-width:64px">{{ form.chunk_size }}</span></div></div></div>
+          <div class="form-row"><div><div class="fr-label">温度 (temperature)</div><div class="fr-desc">生成随机性。建议 0.2–0.4。</div></div><div class="fr-control" style="max-width:280px"><div class="row gap-s"><input class="range" type="range" min="0" max="1" step="0.1" v-model.number="form.temperature"><span class="mono" style="min-width:48px">{{ form.temperature }}</span></div></div></div>
+        </div>
+
+        <!-- 关于 -->
+        <div v-show="tab === 'about'" class="card card-pad reveal">
+          <div class="section-title"><h2>关于 vid2note</h2></div>
+          <div class="form-row"><div class="fr-label">版本</div><div class="mono">v0.1.0</div></div>
+          <div class="form-row"><div class="fr-label">运行模式</div><div class="mono">electron · macOS arm64</div></div>
+          <div class="form-row"><div class="fr-label">服务地址</div><div class="mono">http://localhost:8765</div></div>
+          <div class="form-row" style="border:0"><div class="fr-label">开源协议</div><div class="mono">MIT</div></div>
+        </div>
+      </div>
+
+      <aside class="set-side">
+        <div class="card card-pad reveal">
+          <div class="kicker" style="margin-bottom:10px">当前配置</div>
+          <dl class="kv">
+            <dt>ASR</dt><dd>{{ form.asr_provider }}</dd>
+            <dt>LLM</dt><dd>{{ form.llm_provider }}</dd>
+            <dt>语言</dt><dd>{{ form.language === 'zh' ? '中文' : 'English' }}</dd>
+            <dt>分块</dt><dd>{{ form.chunk_size }}</dd>
+            <dt>温度</dt><dd>{{ form.temperature }}</dd>
+            <dt>保留</dt><dd>{{ form.keep_srt ? 'SRT' : '无' }}</dd>
+          </dl>
+          <div class="divider-h"></div>
+          <div class="kicker" style="margin-bottom:8px">安全提示</div>
+          <p class="muted" style="font-size:12px; line-height:1.6">所有 API Key 通过系统钥匙串加密存储，绝不写入明文配置或日志。</p>
+          <div style="margin-top:14px"><button class="btn btn-primary btn-sm" @click="save">保存配置</button></div>
+        </div>
+      </aside>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
 import { getConfig, updateConfig, verifyApiKey } from '../api/config'
-import { listModels, listAsrAvailable, listAsrInstalled, getOllamaStatus } from '../api/models'
+import { listModels } from '../api/models'
 
-const providers = reactive({ llm: [], asr: [] })
-const ollama = reactive({ running: false, models: [] })
-const asrAvailable = ref([])
-const asrInstalled = ref([])
-const verifying = ref(false)
-const downloading = ref(null)
+const tab = ref('asr')
+const asrProviders = [
+  { name: 'asrtools-b', meta: '云端 · 高精度 · 中文最佳' },
+  { name: 'funasr', meta: '本地 · paraformer-small' },
+]
+const llmProviders = ref([])
+const verifyMsg = ref('')
+const verifyOk = ref(false)
 
 const form = reactive({
-  llm_provider: 'qwen',
   asr_provider: 'asrtools-b',
+  llm_provider: 'qwen',
   api_key: '',
-  bilibili_cookie: '',
-  youtube_cookie: '',
+  llm_keys: {},
+  language: 'zh',
+  extract_images: true,
   keep_video: false,
   keep_audio: false,
   keep_srt: true,
+  chunk_size: 4000,
+  temperature: 0.3,
 })
 
-const isInstalled = (name) => asrInstalled.value.some((m) => m.name === name || m === name)
+const defaultModel = (p) => ({ qwen: 'qwen-turbo', deepseek: 'deepseek-chat', glm: 'glm-4-flash', moonshot: 'moonshot-v1-8k', ollama: 'llama3', mock: 'mock' }[p] || p)
+const selectAsr = (name) => { form.asr_provider = name; saveField('asr_provider', name) }
+const selectLlm = (name) => { form.llm_provider = name; saveField('llm_provider', name) }
 
-const loadConfig = async () => {
-  try {
-    const cfg = await getConfig()
-    Object.assign(form, cfg)
-  } catch (e) {
-    ElMessage.warning('加载配置失败')
-  }
+async function saveField(field, value) {
+  try { await updateConfig({ [field]: value }) } catch (e) {}
 }
-
-const loadProviders = async () => {
-  try {
-    const data = await listModels()
-    providers.llm = data.llm_providers || []
-    providers.asr = data.asr_providers || []
-  } catch (e) {
-    // 后端未就绪时静默
-  }
-}
-
-const loadAsrModels = async () => {
-  try {
-    const [avail, inst] = await Promise.all([listAsrAvailable(), listAsrInstalled()])
-    asrAvailable.value = avail.models || []
-    asrInstalled.value = inst.models || []
-  } catch (e) {
-    // 静默
-  }
-}
-
-const checkOllama = async () => {
-  try {
-    const s = await getOllamaStatus()
-    ollama.running = s.running
-    ollama.models = s.models || []
-  } catch (e) {
-    ollama.running = false
-  }
-}
-
-const verifyKey = async () => {
-  if (!form.api_key) return ElMessage.warning('请输入 API Key')
-  verifying.value = true
-  try {
-    const res = await verifyApiKey(form.llm_provider, form.api_key)
-    ElMessage[res.valid ? 'success' : 'error'](res.valid ? '验证通过' : `验证失败：${res.error}`)
-  } catch (e) {
-    ElMessage.error(e.message)
-  } finally {
-    verifying.value = false
-  }
-}
-
-const downloadModel = async (name) => {
-  downloading.value = name
-  ElMessage.info(`开始下载 ${name}（后台进行，请稍后在本地模型列表刷新）`)
-  downloading.value = null
-}
-
-const saveField = async (field, value) => {
-  try {
-    await updateConfig({ [field]: value })
-    ElMessage.success('已保存')
-  } catch (e) {
-    ElMessage.error(e.message)
-  }
-}
-
-const saveCookies = async () => {
+async function save() {
   try {
     await updateConfig({
-      bilibili_cookie: form.bilibili_cookie,
-      youtube_cookie: form.youtube_cookie,
+      llm_provider: form.llm_provider,
+      asr_provider: form.asr_provider,
+      keep_video: form.keep_video,
+      keep_audio: form.keep_audio,
+      keep_srt: form.keep_srt,
     })
-    ElMessage.success('Cookie 已保存')
+  } catch (e) {}
+}
+async function verifyKey() {
+  verifyMsg.value = '验证中…'
+  try {
+    const res = await verifyApiKey(form.llm_provider, form.api_key)
+    verifyOk.value = res.valid
+    verifyMsg.value = res.valid ? '✓ 验证通过' : `✗ ${res.error || '验证失败'}`
   } catch (e) {
-    ElMessage.error(e.message)
+    verifyOk.value = false
+    verifyMsg.value = `✗ ${e.message}`
   }
 }
 
 onMounted(async () => {
-  await Promise.all([loadConfig(), loadProviders(), loadAsrModels(), checkOllama()])
+  try {
+    const cfg = await getConfig()
+    Object.assign(form, cfg)
+  } catch (e) {}
+  try {
+    const data = await listModels()
+    llmProviders.value = data.llm_providers || []
+  } catch (e) {}
 })
 </script>
 
 <style scoped>
-.settings {
-  max-width: 800px;
-  margin: 0 auto;
-  padding: 20px;
-}
-.section {
-  margin-top: 16px;
-}
-.hint {
-  margin-left: 12px;
-  font-size: 12px;
-  color: #909399;
-}
-.model-mgmt {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.model-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.model-name {
-  font-size: 13px;
-  min-width: 200px;
-}
-.ollama-models {
-  margin-top: 8px;
-  font-size: 12px;
-  color: #606266;
-}
+.set-tabs { display:flex; gap:2px; border-bottom:1px solid var(--border); margin-bottom:24px; }
+.set-grid { display:grid; grid-template-columns: 1fr 290px; gap:24px; align-items:start; }
+.set-side { position:sticky; top:18px; }
+.form-row { display:grid; grid-template-columns: 220px 1fr; gap:18px 24px; align-items:start; padding:16px 0; border-bottom:1px solid var(--border); }
+.form-row:last-child { border:0; }
+.form-row .fr-label { font-size:13px; font-weight:600; color:var(--fg-strong); }
+.form-row .fr-desc { font-size:12px; color:var(--muted); margin-top:4px; line-height:1.5; }
+.fr-control { display:flex; flex-direction:column; gap:10px; }
+.opt-card { border:1px solid var(--border-strong); border-radius:var(--radius-sm); padding:12px 14px; cursor:pointer; transition: all var(--t-fast) var(--ease); display:flex; align-items:center; gap:12px; }
+.opt-card:hover { border-color:var(--muted-2); }
+.opt-card.sel { border-color:var(--accent); background:var(--accent-soft); }
+.opt-radio { width:18px; height:18px; border-radius:50%; border:2px solid var(--border-strong); flex-shrink:0; display:grid; place-items:center; transition:all var(--t-fast) var(--ease); }
+.opt-card.sel .opt-radio { border-color:var(--accent); }
+.opt-card.sel .opt-radio::after { content:""; width:9px; height:9px; border-radius:50%; background:var(--accent); }
+.opt-card .o-name { font-weight:600; font-size:13px; }
+.opt-card .o-meta { font-size:11.5px; color:var(--muted); }
+.opt-grid { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px; }
+.prov-card { border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; transition: all var(--t) var(--ease); }
+.prov-card.selected { border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); }
+.prov-head { display:flex; align-items:center; gap:12px; padding:13px 15px; cursor:pointer; }
+.prov-radio { width:18px; height:18px; border-radius:50%; border:2px solid var(--border-strong); flex-shrink:0; display:grid; place-items:center; transition:all var(--t-fast) var(--ease); }
+.prov-card.selected .prov-radio { border-color:var(--accent); }
+.prov-card.selected .prov-radio::after { content:""; width:9px; height:9px; border-radius:50%; background:var(--accent); }
+.prov-name { font-weight:600; font-size:13px; }
+.prov-model { font-family:var(--font-mono); font-size:11.5px; color:var(--muted); margin-left:auto; }
+.prov-body { padding:4px 15px 15px; border-top:1px solid var(--border); }
+.toggle-row { display:flex; align-items:center; justify-content:space-between; padding:13px 0; border-bottom:1px solid var(--border); }
+.toggle-row:last-child { border:0; }
+.toggle-row .t-label { font-size:13px; font-weight:500; }
+.toggle-row .t-desc { font-size:12px; color:var(--muted); margin-top:2px; }
+.kv { display:grid; grid-template-columns: 70px 1fr; gap:6px 12px; font-size:12.5px; }
+.kv dt { color:var(--muted-2); }
+.kv dd { color:var(--fg); font-family:var(--font-mono); }
 </style>
