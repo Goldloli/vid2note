@@ -185,10 +185,6 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
-    // macOS: 保留原生 traffic light（关闭/最小化/最大化），但隐藏标题文字，
-    // 这样左上角只显示系统原生的三个圆点，不与 HTML 内绘制的按钮重复。
-    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
-    trafficLightPosition: { x: 14, y: 13 },
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,

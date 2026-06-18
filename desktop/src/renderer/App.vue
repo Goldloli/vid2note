@@ -1,13 +1,9 @@
 <template>
   <div class="app">
-    <!-- 标题栏（macOS traffic light 风格）-->
+    <!-- 标题栏：macOS 原生 traffic light 由系统绘制，这里只放标题与右侧按钮 -->
     <div class="titlebar">
-      <div class="traffic">
-        <span class="t-close"></span><span class="t-min"></span><span class="t-max"></span>
-      </div>
       <div class="tb-title"><b>vid2note</b> — {{ pageTitle }}</div>
       <div class="tb-spacer"></div>
-      <span class="tb-pill"><span class="dot-live"></span>本地服务 · :8765</span>
       <button class="btn btn-icon btn-sm" @click="toggleTheme" title="切换明暗">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/>
@@ -83,10 +79,13 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { useReveal } from './composables/useReveal'
 
 const route = useRoute()
+const router = useRouter()
+useReveal(router)
 const currentTaskId = ref(null)
 
 const isHome = computed(() => route.path === '/')
