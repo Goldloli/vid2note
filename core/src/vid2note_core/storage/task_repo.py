@@ -47,8 +47,8 @@ class TaskNodeRecord:
 
 
 class TaskRepository:
-    def __init__(self, db: Database | None = None):
-        self.db = db or Database()
+    def __init__(self, db: Database):
+        self.db = db
 
     def create(self, task_id: str, **kwargs) -> TaskRecord | None:
         now = datetime.now().isoformat()

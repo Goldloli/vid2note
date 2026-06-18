@@ -11,7 +11,7 @@ from vid2note_core.types import TaskStatus, NodeStatus
 def repo(tmp_path):
     Database.reset_instance()
     db = Database(str(tmp_path / "tasks.db"))
-    yield TaskRepository()
+    yield TaskRepository(db)
     Database.reset_instance()
 
 

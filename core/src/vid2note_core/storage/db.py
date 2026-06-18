@@ -14,7 +14,7 @@ class Database:
     _lock = threading.Lock()
     _initialized: bool = False
 
-    def __new__(cls, db_path: str | None = None):
+    def __new__(cls, db_path: str | Path):
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
@@ -22,14 +22,13 @@ class Database:
                     cls._instance._initialized = False
         return cls._instance
 
-    def __init__(self, db_path: str | None = None):
+    def __init__(self, db_path: str | Path):
         if self._initialized:
             return
-        if db_path is None:
-            db_dir = Path("data")
-            db_dir.mkdir(exist_ok=True, parents=True)
-            db_path = str(db_dir / "tasks.db")
-        self.db_path = db_path
+        path = Path(db_path)
+        if path != Path(":memory:"):
+            path.parent.mkdir(parents=True, exist_ok=True)
+        self.db_path = str(path)
         self._local = threading.local()
         self._initialized = True
         self._connections: set = set()
