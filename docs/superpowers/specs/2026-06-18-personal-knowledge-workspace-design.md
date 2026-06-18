@@ -8,7 +8,7 @@
 
 **性质**：目标架构规格，不是逐文件实施计划
 
-**第二版依据**：2026-06-18 对 `main`（`a148b2f`）、更新后的 CodeGraph 与 `前端模板设计/knowledge-workspace-v1` 的复审
+**第二版依据**：2026-06-18 对 `main`（`a148b2f`）、更新后的 CodeGraph、`前端模板设计/knowledge-workspace-v1` 与 `/Users/gejiawei/Desktop/ai_code/项目参考` 的复审
 
 ---
 
@@ -105,6 +105,19 @@ vid2note 将从“视频转 Markdown 笔记工具”升级为一个**本地优�
 | 视觉方向 | 以 `knowledge-workspace-v1` 为方向：暖灰、白色阅读面、单一 azure 强调、细边框 |
 | Obsidian | Vault 可直接打开并允许用户手工编辑 |
 
+### 4.1 本地参考项目及借鉴边界
+
+`/Users/gejiawei/Desktop/ai_code/项目参考` 是设计与实现调研区，不是 vid2note 的源码目录或运行时依赖目录。实施时按下表选择性借鉴，不整体合并，也不从这些本地副本直接加载代码：
+
+| 参考项目 | 在本项目中的定位 | 可借鉴内容 | 明确边界 |
+|---|---|---|---|
+| `open-design-main` | Agent Runtime 的主要架构参考 | Runtime Registry、外部 CLI 探测与适配、流式事件归一化、会话恢复、工作区隔离、审批与诊断模式 | 借鉴协议和分层，不移植其 Node Daemon、React UI 或完整插件系统；vid2note 仍由 FastAPI/Python 承担本地控制面 |
+| `BiliTools-master` | 桌面媒体任务与 Vue 交互参考 | 下载队列、任务/调度器分层、FFmpeg 与下载器进程管理、进度展示、历史与设置界面、桌面打包中的第三方二进制许可证清单 | 不因其采用 Tauri/Rust 而替换 Electron/Python；项目为 GPLv3，默认不复制源码，只参考交互、状态模型和工程经验 |
+| `AsrTools-main` | ASR Provider 与字幕模型参考 | 多 ASR Provider 的统一入口、带时间段的字幕数据模型、SRT/ASS/TXT 转换、批处理状态呈现 | 当前实现依赖若干非正式在线接口，稳定性、授权与隐私边界不可作为产品承诺；项目为 GPLv3，默认不继续复制源码，新增 ASR 能力应实现为自有 Provider Adapter |
+| `yt-dlp-master` | 在线视频下载的上游工具与能力基线 | 站点提取、格式选择、进度 hook、后处理 hook、Cookie/代理配置与结构化元数据 | 通过受控子进程或正式 Python API 适配，不 fork 或复制庞大的 extractor 体系；固定并记录版本，升级需回归测试；分发二进制前审计其第三方组件许可证 |
+
+参考优先级遵循：先复用 vid2note 已有稳定能力，再引入上游工具，最后才参考代码重写。任何源码级复用都必须先完成许可证、隐私、服务条款和分发方式审查；“本地已有副本”不等于“可直接合并”。
+
 ---
 
 ## 5. 当前基线与实施门槛
@@ -128,6 +141,7 @@ vid2note 将从“视频转 Markdown 笔记工具”升级为一个**本地优�
 6. Worker 的轮询循环会等待单个任务完成，`max_concurrent` 目前没有形成真实并发；`rerun(from_node)` 也未把起点传给 Worker，DAG 的 resume 产物检查仍需修正；
 7. 下载和音频节点通过 `read_bytes()`/`write_bytes()` 整体复制大媒体，长视频会产生不必要的内存峰值和磁盘复制；
 8. `uv.lock` 尚未同步 `core/pyproject.toml` 新增的 `requests` 与 `tenacity` 依赖。
+9. 当前 `vid2note_core/asr/bk_asr` 与 GPLv3 的 AsrTools 存在源码沿用关系；发布新版本前必须完成来源、修改记录、许可证义务与产品分发策略审计，不能把它当作普通内部实现继续扩展。
 
 这些是迁移基线任务，不改变本规格的产品范围。未关闭前不得宣称后台恢复、自动重试、data-root 隔离或真实 E2E 已完成。
 
