@@ -425,6 +425,27 @@ async def test_cleanup_noop_when_nothing_to_delete(store):
     assert manifest["deleted"] == []
 
 
+# ── 默认 provider 失败应显式抛错（不再静默回退 mock） ──────────
+
+
+def test_default_asr_invalid_provider_raises():
+    """asr_provider 错误时应抛 ASRError 而非回退 mock。"""
+    from vid2note_core.errors import ASRError
+    from vid2note_core.pipeline.real_nodes import _default_asr
+
+    with pytest.raises(ASRError, match="不支持的 ASR 提供商"):
+        _default_asr({"asr_provider": "nonexistent_provider"})
+
+
+def test_default_llm_missing_key_raises():
+    """api_key 缺失时应抛 LLMError 而非回退 MockLLM。"""
+    from vid2note_core.errors import LLMError
+    from vid2note_core.pipeline.real_nodes import _default_llm
+
+    with pytest.raises(LLMError, match="缺少 API Key"):
+        _default_llm({"llm_provider": "qwen", "api_key": ""})
+
+
 # ── 辅助函数 ────────────────────────────────────────────────
 
 
