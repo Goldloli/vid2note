@@ -24,7 +24,7 @@ from vid2note_core.pipeline.real_nodes import (
 )
 from vid2note_core.storage.artifact_store import ArtifactStore
 from vid2note_core.storage.task_repo import TaskRepository
-from vid2note_core.types import NodeFailure, NodeStatus, TaskId, TaskStatus
+from vid2note_core.types import NodeFailure, NodeName, NodeStatus, TaskId, TaskStatus
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +72,7 @@ class TaskWorker:
         self._nodes = nodes  # 可注入（测试用）；None 则用默认真实节点链路
         self._running = False
         self._task: asyncio.Task | None = None
-        self._semaphore = asyncio.Semaphore(max_concurrent)
+        self._active: set[asyncio.Task[None]] = set()
 
     async def start(self) -> None:
         """Start the worker loop."""
@@ -104,7 +104,6 @@ class TaskWorker:
         """Stop the worker loop. 等待 in-flight 任务最多 30s。"""
         self._running = False
         if self._task:
-            self._task.cancel()
             with contextlib.suppress(asyncio.CancelledError, asyncio.TimeoutError):
                 await asyncio.wait_for(self._task, timeout=30)
         logger.info("TaskWorker stopped")
@@ -116,17 +115,29 @@ class TaskWorker:
                 await self._tick()
             except Exception as e:
                 logger.exception("Worker tick failed: %s", e)
-            await asyncio.sleep(self.poll_interval)
+            if self._active:
+                await asyncio.wait(
+                    self._active,
+                    timeout=self.poll_interval,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+            else:
+                await asyncio.sleep(self.poll_interval)
+        if self._active:
+            await asyncio.gather(*self._active, return_exceptions=True)
 
     async def _tick(self) -> None:
-        """Reserve and process one pending task."""
-        repo = self.repository
-        task = repo.reserve_pending_task()
-        if task is None:
-            return
-
-        async with self._semaphore:
-            await self._process(task)
+        """Fill the bounded active-task set from pending work."""
+        completed = {task for task in self._active if task.done()}
+        for task in completed:
+            with contextlib.suppress(Exception):
+                task.result()
+        self._active.difference_update(completed)
+        while len(self._active) < self.max_concurrent:
+            record = self.repository.reserve_pending_task()
+            if record is None:
+                break
+            self._active.add(asyncio.create_task(self._process(record)))
 
     async def _process(self, task) -> None:
         """Execute the full pipeline for a task."""
@@ -164,7 +175,8 @@ class TaskWorker:
                 },
             )
             dag = self._build_dag()
-            results = await dag.run(ctx)
+            from_node = NodeName(task.rerun_from_node) if task.rerun_from_node else None
+            results = await dag.run(ctx, from_node=from_node)
 
             # Check if any node failed
             failed = [r for r in results if r.status == NodeStatus.FAILED]
@@ -185,6 +197,7 @@ class TaskWorker:
                 status=TaskStatus.COMPLETED,
                 progress=100,
                 current_step="pipeline.completed",
+                rerun_from_node=None,
             )
             bus.publish(
                 TaskEvent(

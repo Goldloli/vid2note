@@ -4,6 +4,7 @@ TaskWorker 端到端测试：注入真实节点（mock 掉下载器/ffmpeg/ASR/L
 """
 
 from unittest.mock import MagicMock
+import asyncio
 
 import pytest
 from vid2note_core.asr.base import ASRResult, ASRSegment
@@ -135,3 +136,75 @@ async def test_worker_preserves_retryable_node_failure(env):
     assert record.status is TaskStatus.PENDING
     assert record.error_code == "DOWNLOAD_TIMEOUT"
     assert record.error_retryable is True
+
+
+class RecordingNode(PipelineNode):
+    def __init__(self, name, produces):
+        self.name = name
+        self.produces = produces
+        self.calls = 0
+
+    async def run(self, ctx):
+        self.calls += 1
+        return NodeResult.success(self.name)
+
+
+@pytest.mark.asyncio
+async def test_rerun_passes_from_node_to_pipeline(env):
+    root, repo = env
+    store = ArtifactStore(root)
+    task_id = TaskId.generate()
+    repo.create(task_id=task_id, video_url="https://example.com/v", status=TaskStatus.PENDING)
+    repo.update(task_id, rerun_from_node="transcribe")
+    store.write_artifact(task_id, "download", "video_file", b"video")
+    store.write_artifact(task_id, "extract_audio", "audio_file", b"audio")
+    download = RecordingNode(NodeName.DOWNLOAD, ["video_file"])
+    extract = RecordingNode(NodeName.EXTRACT_AUDIO, ["audio_file"])
+    transcribe = RecordingNode(NodeName.TRANSCRIBE, ["srt_file"])
+    worker = TaskWorker(repo, store, nodes=[download, extract, transcribe])
+
+    await worker._process(repo.reserve_pending_task())
+
+    assert download.calls == 0
+    assert extract.calls == 0
+    assert transcribe.calls == 1
+
+
+class BlockingNode(PipelineNode):
+    name = NodeName.DOWNLOAD
+
+    def __init__(self, entered, release):
+        self.entered = entered
+        self.release = release
+        self.count = 0
+
+    async def run(self, ctx):
+        self.count += 1
+        if self.count >= 2:
+            self.entered.set()
+        await self.release.wait()
+        return NodeResult.success(self.name)
+
+
+@pytest.mark.asyncio
+async def test_worker_runs_up_to_configured_concurrency(env):
+    root, repo = env
+    store = ArtifactStore(root)
+    for _ in range(3):
+        repo.create(
+            task_id=TaskId.generate(),
+            video_url="https://example.com/v",
+            status=TaskStatus.PENDING,
+        )
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    node = BlockingNode(entered, release)
+    worker = TaskWorker(repo, store, poll_interval=0.01, max_concurrent=2, nodes=[node])
+
+    await worker.start()
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=0.5)
+        assert node.count == 2
+    finally:
+        release.set()
+        await worker.stop()

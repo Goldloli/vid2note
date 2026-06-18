@@ -2,7 +2,6 @@
 
 from typing import TYPE_CHECKING
 
-from vid2note_core.errors import PipelineUpstreamMissing
 from vid2note_core.pipeline.node import PipelineNode
 from vid2note_core.storage.artifact_store import ArtifactStore
 from vid2note_core.types import NodeName, NodeResult
@@ -44,21 +43,20 @@ class PipelineDAG:
         """运行 pipeline，可选从指定节点开始（断点续传）"""
         results = []
         store = self.artifacts
-        skip_until = from_node is not None
+        resume_before = from_node
+        executing = from_node is None
 
         for node in self._ordered_nodes():
-            if skip_until:
-                if node.name == from_node:
-                    skip_until = False
-                else:
-                    # 检查上游产物是否存在（resume 场景）
-                    missing = []
-                    for req in node.requires:
-                        if not store.exists(ctx.task_id.value, node.name.value, req):
-                            missing.append(req)
-                    if missing:
-                        raise PipelineUpstreamMissing(node.name.value, missing)
+            if not executing and node.name == resume_before:
+                executing = True
+            if not executing:
+                outputs_complete = bool(node.produces) and all(
+                    store.is_complete(ctx.task_id.value, node.name.value, name)
+                    for name in node.produces
+                )
+                if outputs_complete:
                     continue
+                executing = True
 
             result = await node.run(ctx)
             results.append(result)
