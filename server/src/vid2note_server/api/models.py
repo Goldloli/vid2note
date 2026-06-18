@@ -7,6 +7,8 @@ from fastapi import APIRouter
 from vid2note_core.asr.factory import ASRFactory
 from vid2note_core.llm.factory import LLMFactory
 
+from vid2note_server.dependencies import ServicesDependency
+
 router = APIRouter(tags=["models"])
 
 
@@ -20,21 +22,15 @@ async def list_models():
 
 
 @router.get("/models/asr/available")
-async def list_asr_models():
+async def list_asr_models(services: ServicesDependency):
     """列出本地 ASR 支持的模型档位（FunASR 等）"""
-    from vid2note_core.asr.local.model_manager import ModelManager
-
-    manager = ModelManager()
-    return {"models": manager.list_available()}
+    return {"models": services.models.list_available()}
 
 
 @router.get("/models/asr/installed")
-async def list_installed_asr_models():
+async def list_installed_asr_models(services: ServicesDependency):
     """列出已下载的本地 ASR 模型"""
-    from vid2note_core.asr.local.model_manager import ModelManager
-
-    manager = ModelManager()
-    return {"models": manager.list_installed()}
+    return {"models": services.models.list_installed()}
 
 
 @router.get("/models/llm/ollama/status")

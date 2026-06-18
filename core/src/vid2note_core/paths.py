@@ -11,6 +11,7 @@ class RuntimePaths:
     tasks: Path
     uploads: Path
     models: Path
+    config: Path
     vault: Path
 
     @classmethod
@@ -24,5 +25,6 @@ class RuntimePaths:
             tasks=data_root / "tasks",
             uploads=data_root / "uploads",
             models=data_root / "models",
+            config=data_root / "config.yaml",
             vault=vault,
         )

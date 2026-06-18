@@ -84,7 +84,10 @@ class _RealNodeMixin:
         metadata: dict[str, Any] | None = None,
         error: dict[str, str] | None = None,
     ) -> None:
-        TaskRepository().update_node(
+        repository = getattr(self, "repository", None)
+        if repository is None:
+            return
+        repository.update_node(
             task_id,
             self.name.value,
             status,
@@ -101,9 +104,12 @@ class RealDownloadNode(PipelineNode, _RealNodeMixin):
     requires: list[str] = []
     produces: list[str] = ["video_file"]
 
-    def __init__(self, router: DownloaderRouter | None = None, store: ArtifactStore | None = None):
+    def __init__(self, router=None, store: ArtifactStore | None = None, repository=None):
         self.router = router or _build_default_router()
-        self.store = store or ArtifactStore()
+        if store is None:
+            raise TypeError("store is required")
+        self.store = store
+        self.repository = repository
 
     async def run(self, ctx: TaskContext) -> NodeResult:
         task_id = ctx.task_id.value
@@ -164,9 +170,12 @@ class RealExtractAudioNode(PipelineNode, _RealNodeMixin):
     requires: list[str] = ["video_file"]
     produces: list[str] = ["audio_file"]
 
-    def __init__(self, extractor: AudioExtractor | None = None, store: ArtifactStore | None = None):
+    def __init__(self, extractor=None, store: ArtifactStore | None = None, repository=None):
         self.extractor = extractor or AudioExtractor()
-        self.store = store or ArtifactStore()
+        if store is None:
+            raise TypeError("store is required")
+        self.store = store
+        self.repository = repository
 
     async def run(self, ctx: TaskContext) -> NodeResult:
         task_id = ctx.task_id.value
@@ -217,10 +226,13 @@ class RealTranscribeNode(PipelineNode, _RealNodeMixin):
     requires: list[str] = ["audio_file"]
     produces: list[str] = ["srt_file"]
 
-    def __init__(self, asr=None, store: ArtifactStore | None = None):
+    def __init__(self, asr=None, store: ArtifactStore | None = None, repository=None):
         # asr: 实现了 transcribe(audio_path, opts) -> ASRResult 的对象
         self.asr = asr
-        self.store = store or ArtifactStore()
+        if store is None:
+            raise TypeError("store is required")
+        self.store = store
+        self.repository = repository
 
     async def run(self, ctx: TaskContext) -> NodeResult:
         task_id = ctx.task_id.value
@@ -266,9 +278,12 @@ class RealOrganizeNode(PipelineNode, _RealNodeMixin):
     requires: list[str] = ["srt_file"]
     produces: list[str] = ["markdown_file"]
 
-    def __init__(self, llm=None, store: ArtifactStore | None = None):
+    def __init__(self, llm=None, store: ArtifactStore | None = None, repository=None):
         self.llm = llm
-        self.store = store or ArtifactStore()
+        if store is None:
+            raise TypeError("store is required")
+        self.store = store
+        self.repository = repository
 
     async def run(self, ctx: TaskContext) -> NodeResult:
         task_id = ctx.task_id.value
@@ -320,11 +335,18 @@ class RealMindmapNode(PipelineNode, _RealNodeMixin):
     produces: list[str] = ["mindmap_file"]
 
     def __init__(
-        self, llm=None, store: ArtifactStore | None = None, mindmap_format: str = "mermaid"
+        self,
+        llm=None,
+        store: ArtifactStore | None = None,
+        mindmap_format: str = "mermaid",
+        repository=None,
     ):
         self.llm = llm
-        self.store = store or ArtifactStore()
+        if store is None:
+            raise TypeError("store is required")
+        self.store = store
         self.mindmap_format = mindmap_format  # "mermaid" 或 "outline"
+        self.repository = repository
 
     def _build_prompt(self, markdown: str) -> str:
         """根据格式选择 prompt 模板并填充内容。"""
@@ -389,8 +411,11 @@ class RealCleanupNode(PipelineNode, _RealNodeMixin):
     requires: list[str] = ["markdown_file"]
     produces: list[str] = ["cleanup_manifest"]
 
-    def __init__(self, store: ArtifactStore | None = None):
-        self.store = store or ArtifactStore()
+    def __init__(self, store: ArtifactStore | None = None, repository=None):
+        if store is None:
+            raise TypeError("store is required")
+        self.store = store
+        self.repository = repository
 
     async def run(self, ctx: TaskContext) -> NodeResult:
         task_id = ctx.task_id.value

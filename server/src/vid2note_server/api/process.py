@@ -15,9 +15,9 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from vid2note_core.events.bus import TaskEvent, get_event_bus
-from vid2note_core.storage.artifact_store import ArtifactStore
-from vid2note_core.storage.task_repo import TaskRepository
 from vid2note_core.types import NodeName, TaskId, TaskStatus
+
+from vid2note_server.dependencies import ServicesDependency
 
 router = APIRouter(tags=["process"])
 
@@ -56,12 +56,12 @@ class StatusResponse(BaseModel):
 
 
 @router.post("/process/start", response_model=StartResponse)
-async def start_process(req: StartRequest):
+async def start_process(req: StartRequest, services: ServicesDependency):
     """创建任务并入队。worker 会轮询 pending 任务并执行。"""
     if not any([req.video_url, req.video_file, req.srt_file]):
         raise HTTPException(400, "必须提供 video_url / video_file / srt_file 之一")
 
-    repo = TaskRepository()
+    repo = services.tasks
     task_id = TaskId.generate()
     repo.create(
         task_id=task_id,
@@ -87,11 +87,11 @@ async def start_process(req: StartRequest):
 
 
 @router.get("/process/status/{task_id}", response_model=StatusResponse)
-async def get_status(task_id: str):
+async def get_status(task_id: str, services: ServicesDependency):
     """查询任务实时状态。"""
     if not TaskId.is_valid(task_id):
         raise HTTPException(400, "非法 task_id")
-    repo = TaskRepository()
+    repo = services.tasks
     task = repo.get_by_id(task_id)
     if not task:
         raise HTTPException(404, "任务不存在")
@@ -106,11 +106,11 @@ async def get_status(task_id: str):
 
 
 @router.get("/process/result/{task_id}")
-async def get_result(task_id: str):
+async def get_result(task_id: str, services: ServicesDependency):
     """查询任务产物。任务未完成时返回已有状态；完成时附带产物文本。"""
     if not TaskId.is_valid(task_id):
         raise HTTPException(400, "非法 task_id")
-    repo = TaskRepository()
+    repo = services.tasks
     task = repo.get_by_id(task_id)
     if not task:
         raise HTTPException(404, "任务不存在")
@@ -126,7 +126,7 @@ async def get_result(task_id: str):
         return result
 
     # 读取产物（从 ArtifactStore）
-    store = ArtifactStore()
+    store = services.artifacts
     artifacts: dict[str, str] = {}
     _artifact_map = {
         "markdown": (NodeName.ORGANIZE.value, "markdown_file"),

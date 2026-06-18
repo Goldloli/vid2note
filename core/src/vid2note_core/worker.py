@@ -22,6 +22,7 @@ from vid2note_core.pipeline.real_nodes import (
     RealOrganizeNode,
     RealTranscribeNode,
 )
+from vid2note_core.storage.artifact_store import ArtifactStore
 from vid2note_core.storage.task_repo import TaskRepository
 from vid2note_core.types import NodeStatus, TaskId, TaskStatus
 
@@ -56,6 +57,8 @@ class TaskWorker:
 
     def __init__(
         self,
+        repository: TaskRepository,
+        artifacts: ArtifactStore,
         poll_interval: float = 2.0,
         max_concurrent: int = 3,
         max_retries: int = 3,
@@ -64,6 +67,8 @@ class TaskWorker:
         self.poll_interval = poll_interval
         self.max_concurrent = max_concurrent
         self.max_retries = max_retries
+        self.repository = repository
+        self.artifacts = artifacts
         self._nodes = nodes  # 可注入（测试用）；None 则用默认真实节点链路
         self._running = False
         self._task: asyncio.Task | None = None
@@ -79,14 +84,14 @@ class TaskWorker:
         # 注册信号处理：SIGTERM/SIGINT 时优雅关闭
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGTERM, signal.SIGINT):
-            with contextlib.suppress(NotImplementedError):
+            with contextlib.suppress(NotImplementedError, RuntimeError):
                 loop.add_signal_handler(sig, lambda: asyncio.create_task(self.stop()))
         self._task = asyncio.create_task(self._loop())
         logger.info("TaskWorker started")
 
     async def _recover_stale_tasks(self) -> None:
         """启动时把残留的 RUNNING 任务重置为 PENDING（进程崩溃后未正常关闭）。"""
-        repo = TaskRepository()
+        repo = self.repository
         try:
             stale = repo.list_all(status=TaskStatus.RUNNING, limit=100)
             for task in stale:
@@ -115,7 +120,7 @@ class TaskWorker:
 
     async def _tick(self) -> None:
         """Reserve and process one pending task."""
-        repo = TaskRepository()
+        repo = self.repository
         task = repo.reserve_pending_task()
         if task is None:
             return
@@ -126,7 +131,7 @@ class TaskWorker:
     async def _process(self, task) -> None:
         """Execute the full pipeline for a task."""
         task_id = task.id
-        repo = TaskRepository()
+        repo = self.repository
         bus = get_event_bus()
 
         logger.info("[Worker] Processing task %s", task_id)
@@ -229,12 +234,12 @@ class TaskWorker:
             return PipelineDAG(self._nodes)
         return PipelineDAG(
             [
-                RealDownloadNode(),
-                RealExtractAudioNode(),
-                RealTranscribeNode(),
-                RealOrganizeNode(),
-                RealMindmapNode(),
-                RealCleanupNode(),
+                RealDownloadNode(store=self.artifacts, repository=self.repository),
+                RealExtractAudioNode(store=self.artifacts, repository=self.repository),
+                RealTranscribeNode(store=self.artifacts, repository=self.repository),
+                RealOrganizeNode(store=self.artifacts, repository=self.repository),
+                RealMindmapNode(store=self.artifacts, repository=self.repository),
+                RealCleanupNode(store=self.artifacts, repository=self.repository),
             ]
         )
 
@@ -243,8 +248,8 @@ class TaskWorker:
 _worker: TaskWorker | None = None
 
 
-def get_worker() -> TaskWorker:
+def get_worker(repository: TaskRepository, artifacts: ArtifactStore) -> TaskWorker:
     global _worker
     if _worker is None:
-        _worker = TaskWorker()
+        _worker = TaskWorker(repository, artifacts)
     return _worker
