@@ -1,8 +1,15 @@
 import request from './request'
 
 // 任务 API
+// export_mindmap 默认 true：思维导图是核心产物，除非显式关闭
 export const createTask = (videoUrl, opts = {}) =>
-  request.post('/tasks', { video_url: videoUrl, ...opts })
+  request.post('/tasks', {
+    video_url: videoUrl,
+    export_mindmap: opts.export_mindmap ?? true,
+    asr_provider: opts.asr_provider,
+    llm_provider: opts.llm_provider,
+    ...opts,
+  })
 
 export const listTasks = () => request.get('/tasks')
 
