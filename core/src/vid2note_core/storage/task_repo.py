@@ -162,6 +162,52 @@ class TaskRepository:
             error=json.loads(row["error"]) if row["error"] else None,
         )
 
+    def reset_task_for_rerun(self, task_id: str, from_node: str | None = None) -> None:
+        """重置任务以重跑：清零进度、清错误、把状态改回 PENDING。
+
+        from_node 为 None 时重跑整个 pipeline；否则只重置 from_node 及其下游节点状态
+        （产物删除由 ArtifactStore.delete_downstream 负责，调用方处理）。
+        """
+        with self.db.get_connection() as conn:
+            conn.execute(
+                "UPDATE tasks SET status = ?, progress = 0, error_message = NULL, "
+                "current_step = NULL WHERE id = ?",
+                (TaskStatus.PENDING.value, task_id),
+            )
+            downstream = self._node_and_downstream(from_node) if from_node else None
+            if downstream:
+                placeholders = ",".join("?" * len(downstream))
+                conn.execute(
+                    f"UPDATE task_nodes SET status = 'pending', error = NULL, "
+                    f"started_at = NULL, completed_at = NULL "
+                    f"WHERE task_id = ? AND node_name IN ({placeholders})",
+                    [task_id, *downstream],
+                )
+            else:
+                conn.execute(
+                    "UPDATE task_nodes SET status = 'pending', error = NULL, "
+                    "started_at = NULL, completed_at = NULL WHERE task_id = ?",
+                    (task_id,),
+                )
+            conn.commit()
+
+    @staticmethod
+    def _node_and_downstream(from_node: str) -> list[str]:
+        """返回 from_node 及其拓扑下游的节点名列表。"""
+        order = [
+            "download",
+            "extract_audio",
+            "transcribe",
+            "organize",
+            "mindmap",
+            "cleanup",
+        ]
+        try:
+            idx = order.index(from_node)
+        except ValueError:
+            return []
+        return order[idx:]
+
     def list_all(self, status: TaskStatus | None = None, limit: int = 100) -> list[TaskRecord]:
         if status:
             rows = self.db.fetchall(

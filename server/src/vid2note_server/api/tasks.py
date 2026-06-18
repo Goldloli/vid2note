@@ -5,6 +5,7 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from vid2note_core.events.bus import TaskEvent, get_event_bus
+from vid2note_core.storage.artifact_store import ArtifactStore
 from vid2note_core.storage.task_repo import TaskRepository
 from vid2note_core.types import TaskId, TaskStatus
 
@@ -62,11 +63,42 @@ async def get_task(task_id: str):
     return task
 
 
+class RerunRequest(BaseModel):
+    from_node: str | None = None
+
+
 @router.post("/tasks/{task_id}/rerun")
-async def rerun_task(task_id: str, from_node: str | None = None):
+async def rerun_task(task_id: str, req: RerunRequest | None = None):
+    """重跑任务：删除 from_node 下游产物 + 重置节点状态 + 重新入队。
+
+    from_node 为 None 时重跑整个 pipeline；否则只重跑该节点及下游。
+    支持请求体 {"from_node": "..."}（前端约定）或空 body 重跑全部。
+    """
+    if not TaskId.is_valid(task_id):
+        raise HTTPException(404, "任务不存在")
+
+    from_node = req.from_node if req else None
+
     repo = TaskRepository()
     task = repo.get_by_id(task_id)
     if not task:
         raise HTTPException(404, "任务不存在")
-    repo.update(task_id, status=TaskStatus.PENDING)
-    return {"task_id": task_id, "message": "已触发重跑"}
+
+    # 1. 删除 from_node 下游产物（若有）
+    if from_node:
+        ArtifactStore().delete_downstream(task_id, from_node)
+
+    # 2. 重置任务和节点状态 → PENDING
+    repo.reset_task_for_rerun(task_id, from_node)
+
+    # 3. 发事件通知前端
+    get_event_bus().publish(
+        TaskEvent(
+            task_id=task_id,
+            event_type="task.rerun",
+            progress=0,
+            message=f"已触发重跑（from {from_node or 'start'}）",
+            timestamp=datetime.now().isoformat(),
+        )
+    )
+    return {"task_id": task_id, "status": "pending", "message": "已触发重跑"}
