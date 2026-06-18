@@ -25,9 +25,7 @@ class BBDownDownloader(IDownloader):
         if opts.cookie_path:
             cmd.extend(["-c", str(opts.cookie_path)])
         try:
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=_DOWNLOAD_TIMEOUT
-            )
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=_DOWNLOAD_TIMEOUT)
         except subprocess.TimeoutExpired as e:
             raise DownloadError(
                 f"下载超时（>{_DOWNLOAD_TIMEOUT}s）",

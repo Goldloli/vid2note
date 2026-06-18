@@ -497,9 +497,7 @@ def _default_llm(config: dict):
             step="organize",
         )
     try:
-        return LLMFactory.create(
-            provider, {"api_key": api_key, "model": config.get("llm_model")}
-        )
+        return LLMFactory.create(provider, {"api_key": api_key, "model": config.get("llm_model")})
     except Exception as e:
         raise LLMError(
             f"LLM 初始化失败: {e}",
