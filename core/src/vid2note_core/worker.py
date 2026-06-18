@@ -191,9 +191,7 @@ class TaskWorker:
             retryable = isinstance(e, Vid2NoteError) and e.retryable
             attempt = getattr(task, "retry_count", 0) or 0
             if retryable and attempt < self.max_retries:
-                logger.warning(
-                    "任务 %s 第 %d 次失败（retryable），稍后重试", task_id, attempt + 1
-                )
+                logger.warning("任务 %s 第 %d 次失败（retryable），稍后重试", task_id, attempt + 1)
                 repo.update(
                     task_id,
                     status=TaskStatus.PENDING,
