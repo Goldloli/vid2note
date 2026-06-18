@@ -29,6 +29,10 @@ class TaskRecord:
     export_mindmap: bool = False
     mindmap_format: str = "xmind"
     error_message: str | None = None
+    retry_count: int = 0
+    error_code: str | None = None
+    error_retryable: bool = False
+    rerun_from_node: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
     completed_at: datetime | None = None
@@ -255,6 +259,10 @@ class TaskRepository:
             export_mindmap=bool(row["export_mindmap"]),
             mindmap_format=row["mindmap_format"] or "xmind",
             error_message=row["error_message"],
+            retry_count=row["retry_count"] or 0,
+            error_code=row["error_code"],
+            error_retryable=bool(row["error_retryable"]),
+            rerun_from_node=row["rerun_from_node"],
             created_at=_dt(row["created_at"]),
             updated_at=_dt(row["updated_at"]),
             completed_at=_dt(row["completed_at"]),

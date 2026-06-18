@@ -24,7 +24,7 @@ from vid2note_core.pipeline.real_nodes import (
 )
 from vid2note_core.storage.artifact_store import ArtifactStore
 from vid2note_core.storage.task_repo import TaskRepository
-from vid2note_core.types import NodeStatus, TaskId, TaskStatus
+from vid2note_core.types import NodeFailure, NodeStatus, TaskId, TaskStatus
 
 logger = logging.getLogger(__name__)
 
@@ -170,8 +170,15 @@ class TaskWorker:
             failed = [r for r in results if r.status == NodeStatus.FAILED]
             if failed:
                 first = failed[0]
-                err_msg = first.error["message"] if first.error else "unknown"
-                raise RuntimeError(f"节点 {first.node.value} 失败: {err_msg}")
+                failure = first.error or NodeFailure(
+                    code="PIPELINE_NODE_FAILED",
+                    message=f"节点 {first.node.value} 失败",
+                    user_message="处理步骤失败",
+                    retryable=False,
+                    step=first.node.value,
+                )
+                self._handle_failure(task, failure)
+                return
 
             repo.update(
                 task_id,
@@ -192,37 +199,50 @@ class TaskWorker:
 
         except Exception as e:
             logger.exception("[Worker] Task %s failed: %s", task_id, e)
-            # retryable 错误（限流、超时、临时网络错误）自动重试，而非永久失败
-            retryable = isinstance(e, Vid2NoteError) and e.retryable
-            attempt = getattr(task, "retry_count", 0) or 0
-            if retryable and attempt < self.max_retries:
-                logger.warning("任务 %s 第 %d 次失败（retryable），稍后重试", task_id, attempt + 1)
-                repo.update(
-                    task_id,
-                    status=TaskStatus.PENDING,
-                    retry_count=attempt + 1,
-                    error_message=str(e),
-                )
-                bus.publish(
-                    TaskEvent(
-                        task_id=task_id,
-                        event_type="task.retrying",
-                        progress=0,
-                        message=f"任务失败（第 {attempt + 1} 次），稍后重试: {e}",
-                        timestamp=datetime.now().isoformat(),
-                    )
+            if isinstance(e, Vid2NoteError):
+                failure = NodeFailure(
+                    code=e.code,
+                    message=str(e),
+                    user_message=e.user_message,
+                    retryable=e.retryable,
+                    step=e.step,
                 )
             else:
-                repo.update(task_id, status=TaskStatus.FAILED, error_message=str(e))
-                bus.publish(
-                    TaskEvent(
-                        task_id=task_id,
-                        event_type="task.failed",
-                        progress=0,
-                        message=f"任务失败: {e}",
-                        timestamp=datetime.now().isoformat(),
-                    )
+                failure = NodeFailure(
+                    code="PIPELINE_RUNTIME_ERROR",
+                    message=str(e),
+                    user_message="任务处理失败",
+                    retryable=False,
+                    step="pipeline",
                 )
+            self._handle_failure(task, failure)
+
+    def _handle_failure(self, task, failure: NodeFailure) -> None:
+        attempt = task.retry_count or 0
+        retry = failure.retryable and attempt < self.max_retries
+        next_status = TaskStatus.PENDING if retry else TaskStatus.FAILED
+        next_attempt = attempt + 1 if retry else attempt
+        self.repository.update(
+            task.id,
+            status=next_status,
+            retry_count=next_attempt,
+            error_message=failure.message,
+            error_code=failure.code,
+            error_retryable=failure.retryable,
+        )
+        get_event_bus().publish(
+            TaskEvent(
+                task_id=task.id,
+                event_type="task.retrying" if retry else "task.failed",
+                progress=0,
+                message=(
+                    f"任务失败（第 {next_attempt} 次），稍后重试: {failure.user_message}"
+                    if retry
+                    else f"任务失败: {failure.user_message}"
+                ),
+                timestamp=datetime.now().isoformat(),
+            )
+        )
 
     def _build_dag(self) -> PipelineDAG:
         """Build the default pipeline DAG.
@@ -231,7 +251,7 @@ class TaskWorker:
         测试可通过构造参数注入自定义节点。
         """
         if self._nodes is not None:
-            return PipelineDAG(self._nodes)
+            return PipelineDAG(self._nodes, self.artifacts)
         return PipelineDAG(
             [
                 RealDownloadNode(store=self.artifacts, repository=self.repository),
@@ -240,7 +260,8 @@ class TaskWorker:
                 RealOrganizeNode(store=self.artifacts, repository=self.repository),
                 RealMindmapNode(store=self.artifacts, repository=self.repository),
                 RealCleanupNode(store=self.artifacts, repository=self.repository),
-            ]
+            ],
+            self.artifacts,
         )
 
 

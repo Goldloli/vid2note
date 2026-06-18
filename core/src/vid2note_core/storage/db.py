@@ -76,7 +76,11 @@ class Database:
                     asr_provider TEXT,
                     video_url TEXT,
                     video_file TEXT,
-                    audio_file TEXT
+                    audio_file TEXT,
+                    retry_count INTEGER NOT NULL DEFAULT 0,
+                    error_code TEXT,
+                    error_retryable INTEGER NOT NULL DEFAULT 0,
+                    rerun_from_node TEXT
                 )
             """)
             cursor.execute("""
@@ -133,7 +137,10 @@ class Database:
                 "video_url": "TEXT",
                 "video_file": "TEXT",
                 "audio_file": "TEXT",
-                "retry_count": "INTEGER DEFAULT 0",
+                "retry_count": "INTEGER NOT NULL DEFAULT 0",
+                "error_code": "TEXT",
+                "error_retryable": "INTEGER NOT NULL DEFAULT 0",
+                "rerun_from_node": "TEXT",
             }
             for col, dtype in new_cols.items():
                 if col not in columns:

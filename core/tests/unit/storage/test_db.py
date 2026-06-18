@@ -40,3 +40,4 @@ def test_migrations_add_mindmap_columns(tmp_path):
         cursor = conn.execute("PRAGMA table_info(tasks)")
         columns = {r[1] for r in cursor.fetchall()}
     assert "mindmap_url" in columns
+    assert {"retry_count", "error_code", "error_retryable", "rerun_from_node"} <= columns

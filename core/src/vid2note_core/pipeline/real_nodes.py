@@ -134,7 +134,7 @@ class RealDownloadNode(PipelineNode, _RealNodeMixin):
             )
         except Vid2NoteError as e:
             self._update_db(task_id, NodeStatus.FAILED, error={"code": e.code, "message": str(e)})
-            return NodeResult.failure(self.name, e.code, str(e))
+            return NodeResult.failure(self.name, e)
         except Exception as e:  # noqa: BLE001 - 下载器底层异常兜底
             self._update_db(
                 task_id, NodeStatus.FAILED, error={"code": "DOWNLOAD_ERROR", "message": str(e)}
@@ -195,7 +195,7 @@ class RealExtractAudioNode(PipelineNode, _RealNodeMixin):
             )
         except Vid2NoteError as e:
             self._update_db(task_id, NodeStatus.FAILED, error={"code": e.code, "message": str(e)})
-            return NodeResult.failure(self.name, e.code, str(e))
+            return NodeResult.failure(self.name, e)
         except Exception as e:  # noqa: BLE001
             self._update_db(
                 task_id,
@@ -250,7 +250,7 @@ class RealTranscribeNode(PipelineNode, _RealNodeMixin):
             result = await _maybe_await(asr.transcribe(audio_tmp, opts))
         except Vid2NoteError as e:
             self._update_db(task_id, NodeStatus.FAILED, error={"code": e.code, "message": str(e)})
-            return NodeResult.failure(self.name, e.code, str(e))
+            return NodeResult.failure(self.name, e)
         except Exception as e:  # noqa: BLE001
             self._update_db(
                 task_id, NodeStatus.FAILED, error={"code": "ASR_ERROR", "message": str(e)}
@@ -301,7 +301,7 @@ class RealOrganizeNode(PipelineNode, _RealNodeMixin):
             )
         except Vid2NoteError as e:
             self._update_db(task_id, NodeStatus.FAILED, error={"code": e.code, "message": str(e)})
-            return NodeResult.failure(self.name, e.code, str(e))
+            return NodeResult.failure(self.name, e)
         except Exception as e:  # noqa: BLE001
             self._update_db(
                 task_id, NodeStatus.FAILED, error={"code": "LLM_ERROR", "message": str(e)}
@@ -377,7 +377,7 @@ class RealMindmapNode(PipelineNode, _RealNodeMixin):
             mindmap = await asyncio.to_thread(llm.chat, messages, temperature=0.3, max_tokens=3000)
         except Vid2NoteError as e:
             self._update_db(task_id, NodeStatus.FAILED, error={"code": e.code, "message": str(e)})
-            return NodeResult.failure(self.name, e.code, str(e))
+            return NodeResult.failure(self.name, e)
         except Exception as e:  # noqa: BLE001
             self._update_db(
                 task_id, NodeStatus.FAILED, error={"code": "LLM_ERROR", "message": str(e)}
