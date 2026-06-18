@@ -16,6 +16,7 @@ def test_runtime_paths_derive_every_directory_from_data_root(tmp_path: Path) -> 
     assert paths.tasks == tmp_path / "data" / "tasks"
     assert paths.uploads == tmp_path / "data" / "uploads"
     assert paths.models == tmp_path / "data" / "models"
+    assert paths.config == tmp_path / "data" / "config.yaml"
     assert paths.vault == tmp_path / "data" / "vault"
 
 

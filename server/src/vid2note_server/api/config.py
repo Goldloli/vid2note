@@ -6,7 +6,8 @@
 
 from fastapi import APIRouter
 from pydantic import BaseModel
-from vid2note_core.config.manager import ConfigManager
+
+from vid2note_server.dependencies import ServicesDependency
 
 router = APIRouter(tags=["config"])
 
@@ -23,9 +24,9 @@ def _safe_config_dump(config) -> dict:
 
 
 @router.get("/config")
-async def get_config():
+async def get_config(services: ServicesDependency):
     """返回当前配置（脱敏，不含密钥）"""
-    manager = ConfigManager()
+    manager = services.config
     config = manager.load()
     return _safe_config_dump(config)
 
@@ -47,9 +48,9 @@ class UpdateConfigRequest(BaseModel):
 
 
 @router.put("/config")
-async def update_config(req: UpdateConfigRequest):
+async def update_config(req: UpdateConfigRequest, services: ServicesDependency):
     """更新配置（部分字段），持久化到 yaml"""
-    manager = ConfigManager()
+    manager = services.config
     config = manager.load()
     changed = []
     if req.llm_provider is not None:

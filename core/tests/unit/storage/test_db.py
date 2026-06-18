@@ -5,10 +5,10 @@ import pytest
 from vid2note_core.storage.db import Database
 
 
-def test_singleton():
+def test_database_instances_are_isolated():
     db1 = Database(":memory:")
     db2 = Database(":memory:")
-    assert db1 is db2
+    assert db1 is not db2
 
 
 def test_init_creates_tables(tmp_path):

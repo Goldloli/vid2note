@@ -4,36 +4,24 @@ import atexit
 import contextlib
 import sqlite3
 import threading
+import weakref
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Optional
 
 
 class Database:
-    _instance: Optional["Database"] = None
-    _lock = threading.Lock()
-    _initialized: bool = False
-
-    def __new__(cls, db_path: str | Path):
-        if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    cls._instance = super().__new__(cls)
-                    cls._instance._initialized = False
-        return cls._instance
+    _instances: weakref.WeakSet["Database"] = weakref.WeakSet()
 
     def __init__(self, db_path: str | Path):
-        if self._initialized:
-            return
         path = Path(db_path)
         if path != Path(":memory:"):
             path.parent.mkdir(parents=True, exist_ok=True)
         self.db_path = str(path)
         self._local = threading.local()
-        self._initialized = True
         self._connections: set = set()
         self._connections_lock = threading.Lock()
         self._init_db()
+        self._instances.add(self)
         atexit.register(self.close_all_connections)
 
     def _get_connection(self) -> sqlite3.Connection:
@@ -180,8 +168,6 @@ class Database:
 
     @classmethod
     def reset_instance(cls):
-        if cls._instance:
-            cls._instance.close_all_connections()
-            with contextlib.suppress(Exception):
-                Path(cls._instance.db_path).unlink(missing_ok=True)
-        cls._instance = None
+        for instance in list(cls._instances):
+            instance.close_all_connections()
+        cls._instances.clear()

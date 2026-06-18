@@ -3,12 +3,6 @@
 import zipfile
 from io import BytesIO
 
-from vid2note_core.storage.artifact_store import ArtifactStore
-from vid2note_core.storage.db import Database
-from vid2note_core.storage.task_repo import TaskRepository
-from vid2note_core.types import TaskId, TaskStatus
-
-
 def _make_task(client):
     """创建一个任务并返回 task_id。"""
     r = client.post("/api/v1/tasks", json={"video_url": "https://example.com/v"})
@@ -18,7 +12,7 @@ def _make_task(client):
 def test_list_artifacts(client):
     """列出产物应返回文件名、类型、大小。"""
     task_id = _make_task(client)
-    store = ArtifactStore()
+    store = client.app.state.services.artifacts
     payload = "# 笔记\n正文".encode("utf-8")
     store.write_artifact(task_id, "organize", "markdown_file", payload)
 
@@ -46,7 +40,9 @@ def test_download_artifact(client):
     """下载 markdown 产物应返回正确内容和 Content-Type。"""
     task_id = _make_task(client)
     content = "# 标题\n\n正文内容".encode("utf-8")
-    ArtifactStore().write_artifact(task_id, "organize", "markdown_file", content)
+    client.app.state.services.artifacts.write_artifact(
+        task_id, "organize", "markdown_file", content
+    )
 
     resp = client.get(f"/api/v1/tasks/{task_id}/artifacts/organize_markdown_file")
     assert resp.status_code == 200
@@ -65,7 +61,7 @@ def test_download_artifact_not_found(client):
 def test_download_artifact_srt(client):
     """下载 srt 产物。"""
     task_id = _make_task(client)
-    ArtifactStore().write_artifact(
+    client.app.state.services.artifacts.write_artifact(
         task_id, "transcribe", "srt_file", b"1\n00:00:00,000 --> 00:00:01,000\nhi\n"
     )
     resp = client.get(f"/api/v1/tasks/{task_id}/artifacts/transcribe_srt_file")
@@ -76,7 +72,7 @@ def test_download_artifact_srt(client):
 def test_export_all_zip(client):
     """导出 zip 应包含所有产物。"""
     task_id = _make_task(client)
-    store = ArtifactStore()
+    store = client.app.state.services.artifacts
     store.write_artifact(task_id, "organize", "markdown_file", b"# md")
     store.write_artifact(task_id, "transcribe", "srt_file", b"srt content")
     store.write_artifact(task_id, "mindmap", "mindmap_file", b"mindmap")

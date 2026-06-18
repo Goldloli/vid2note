@@ -4,27 +4,7 @@
 404 不存在、非法 task_id、result 产物查询（未完成/已完成含产物）。
 """
 
-import pytest
-
-from vid2note_core.storage.artifact_store import ArtifactStore
-from vid2note_core.storage.task_repo import TaskRepository
 from vid2note_core.types import NodeName, TaskStatus
-from vid2note_core.utils.security import validate_file_id
-
-
-@pytest.fixture
-def isolated_store(tmp_path, monkeypatch):
-    """把 ArtifactStore 默认目录指到 tmp_path，隔离产物落盘。"""
-    target = tmp_path / "tasks"
-    monkeypatch.setattr(
-        ArtifactStore,
-        "__init__",
-        lambda self, base_dir=None: (
-            object.__setattr__(self, "base_dir", target)
-            and target.mkdir(parents=True, exist_ok=True)
-        ),
-    )
-    return ArtifactStore()
 
 
 def test_start_creates_pending_task(client):
@@ -41,7 +21,7 @@ def test_start_creates_pending_task(client):
     assert data["status"] == "pending"
 
     # 任务确实入库且为 pending
-    repo = TaskRepository()
+    repo = client.app.state.services.tasks
     task = repo.get_by_id(data["task_id"])
     assert task is not None
     assert task.status == TaskStatus.PENDING
@@ -60,7 +40,7 @@ def test_start_with_srt_file(client):
         json={"srt_file": "file_abcdef012345"},
     )
     assert resp.status_code == 200
-    repo = TaskRepository()
+    repo = client.app.state.services.tasks
     task = repo.get_by_id(resp.json()["task_id"])
     assert task.srt_file == "file_abcdef012345"
 
@@ -81,7 +61,7 @@ def test_status_reflects_running(client):
     """手动把任务更新为 running 后，status 反映真实状态"""
     start = client.post("/api/v1/process/start", json={"video_url": "https://x.com/v"})
     task_id = start.json()["task_id"]
-    repo = TaskRepository()
+    repo = client.app.state.services.tasks
     repo.update(task_id, status=TaskStatus.RUNNING, progress=50, current_step="transcribe")
 
     resp = client.get(f"/api/v1/process/status/{task_id}")
@@ -102,7 +82,7 @@ def test_status_invalid_task_id(client):
     assert resp.status_code == 400
 
 
-def test_result_not_completed(client, isolated_store):
+def test_result_not_completed(client):
     """任务未完成时 result 仅返回状态，无 artifacts"""
     start = client.post("/api/v1/process/start", json={"video_url": "https://x.com/v"})
     task_id = start.json()["task_id"]
@@ -113,18 +93,18 @@ def test_result_not_completed(client, isolated_store):
     assert "artifacts" not in data
 
 
-def test_result_completed_with_artifacts(client, isolated_store):
+def test_result_completed_with_artifacts(client):
     """任务完成后 result 返回产物文本"""
     start = client.post("/api/v1/process/start", json={"video_url": "https://x.com/v"})
     task_id = start.json()["task_id"]
 
     # 写入产物 + 标记完成
-    store = ArtifactStore()
+    store = client.app.state.services.artifacts
     store.write_artifact(
         task_id, NodeName.ORGANIZE.value, "markdown_file", "# 笔记".encode("utf-8")
     )
     store.write_artifact(task_id, NodeName.MINDMAP.value, "mindmap_file", "mindmap".encode("utf-8"))
-    repo = TaskRepository()
+    repo = client.app.state.services.tasks
     repo.update(task_id, status=TaskStatus.COMPLETED, progress=100)
 
     resp = client.get(f"/api/v1/process/result/{task_id}")
