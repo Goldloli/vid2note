@@ -10,6 +10,7 @@ dependencies = [
     "openai>=1.10,<2",
     "httpx>=0.26,<1",
     "requests>=2.31,<3",
+    "tenacity>=8.2,<9",
     "pymupdf>=1.23,<2",
     "pillow>=10.2,<11",
     "aiofiles>=23.2,<24",

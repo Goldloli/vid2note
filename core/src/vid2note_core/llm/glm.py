@@ -3,9 +3,17 @@
 使用 OpenAI 兼容接口
 """
 
-from openai import APIConnectionError, APIError, APITimeoutError, OpenAI, RateLimitError
+from openai import (
+    APIConnectionError,
+    APIStatusError,
+    APITimeoutError,
+    OpenAI,
+    RateLimitError,
+)
+from vid2note_core.errors import LLMAPIError, LLMRateLimited, LLMTimeout
 
 from .base import BaseLLM
+from .retry import llm_retry
 
 
 class GLMLLM(BaseLLM):
@@ -19,6 +27,7 @@ class GLMLLM(BaseLLM):
         **kwargs,
     ):
         super().__init__(api_key, model, **kwargs)
+        self.base_url = base_url
         self.client = OpenAI(api_key=api_key, base_url=base_url)
 
     def _process_messages(self, messages: list[dict[str, str]]) -> list[dict[str, str]]:
@@ -42,41 +51,29 @@ class GLMLLM(BaseLLM):
                 processed.append(msg)
         return processed
 
+    @llm_retry(max_attempts=3)
     def chat(self, messages: list[dict[str, str]], **kwargs) -> str:
         """
         调用 GLM 模型
 
-        Args:
-            messages: 消息列表
-            **kwargs: 额外参数（temperature, max_tokens, timeout等）
-
-        Returns:
-            模型生成的文本
-
         Raises:
-            RuntimeError: 当API调用失败时
+            LLMRateLimited / LLMTimeout / LLMAPIError
         """
+        timeout = kwargs.get("timeout")
+        request_kwargs: dict = {}
+        if timeout:
+            request_kwargs["timeout"] = timeout
+
         try:
-            timeout = kwargs.get("timeout")
-            if timeout:
-                from openai import OpenAI
-
-                client = OpenAI(
-                    api_key=self.api_key,
-                    base_url="https://open.bigmodel.cn/api/paas/v4/",
-                    timeout=timeout,
-                )
-            else:
-                client = self.client
-
             # 处理消息：glm-4.7 不支持 system 角色，需要转换
             processed_messages = self._process_messages(messages)
 
-            response = client.chat.completions.create(
+            response = self.client.chat.completions.create(
                 model=self.model,
                 messages=processed_messages,  # type: ignore[arg-type]
                 temperature=kwargs.get("temperature", 0.3),
                 max_tokens=kwargs.get("max_tokens", 4096),
+                **request_kwargs,
             )
 
             # 处理响应内容
@@ -131,15 +128,9 @@ class GLMLLM(BaseLLM):
                 return reasoning
 
             return content
-        except APIConnectionError as e:
-            raise RuntimeError(
-                f"GLM API连接错误: 无法连接到服务器，请检查网络连接。{str(e)}"
-            ) from e
         except RateLimitError as e:
-            raise RuntimeError(f"GLM API速率限制: {str(e)}") from e
+            raise LLMRateLimited("glm") from e
         except APITimeoutError as e:
-            raise RuntimeError(f"GLM API超时: {str(e)}") from e
-        except APIError as e:
-            raise RuntimeError(f"GLM API错误: {str(e)}") from e
-        except Exception as e:
-            raise RuntimeError(f"GLM API调用失败: {str(e)}") from e
+            raise LLMTimeout("glm") from e
+        except (APIConnectionError, APIStatusError) as e:
+            raise LLMAPIError("glm", str(e)) from e
