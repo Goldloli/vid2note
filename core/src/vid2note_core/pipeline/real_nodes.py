@@ -23,7 +23,7 @@ from vid2note_core.downloaders.direct import DirectDownloader
 from vid2note_core.downloaders.local_file import LocalFileDownloader
 from vid2note_core.downloaders.router import DownloaderRouter
 from vid2note_core.downloaders.ytdlp import YtdlpDownloader
-from vid2note_core.errors import Vid2NoteError
+from vid2note_core.errors import ASRError, LLMError, Vid2NoteError
 from vid2note_core.events.bus import TaskEvent, get_event_bus
 from vid2note_core.pipeline.context import TaskContext
 from vid2note_core.pipeline.node import PipelineNode
@@ -458,38 +458,56 @@ class RealCleanupNode(PipelineNode, _RealNodeMixin):
 
 
 def _default_asr(config: dict):
-    """根据 config 创建默认 ASR（asr_provider），失败回退到 mock。"""
+    """根据 config 创建 ASR。provider 错误或初始化失败时显式抛 ASRError（不再静默回退 mock）。"""
     from vid2note_core.asr.factory import ASRFactory
 
     provider = config.get("asr_provider", "asrtools-b")
     try:
         return ASRFactory.create(provider, {})
-    except Exception:  # noqa: BLE001 - 默认 ASR 不可用时给一个 mock，避免硬失败
-        from vid2note_core.asr.base import ASRResult, ASRSegment
-
-        class _MockASR:
-            name = "mock"
-            is_cloud = False
-
-            def transcribe(self, audio_path: Path, opts: dict) -> ASRResult:
-                return ASRResult(
-                    text_full="[mock] 示例转录文本",
-                    segments=[ASRSegment(start_ms=0, end_ms=1000, text="示例转录文本")],
-                    language=opts.get("language", "zh"),
-                )
-
-        return _MockASR()
+    except ValueError as e:
+        raise ASRError(
+            f"不支持的 ASR 提供商: {provider}（{e}）",
+            code="ASR_PROVIDER_INVALID",
+            retryable=False,
+            user_message=f"ASR 提供商 {provider} 不可用，请到设置页检查",
+            step="transcribe",
+        ) from e
+    except Exception as e:
+        raise ASRError(
+            f"ASR 初始化失败: {e}",
+            code="ASR_INIT_FAILED",
+            retryable=True,
+            user_message=f"语音识别初始化失败：{e}",
+            step="transcribe",
+        ) from e
 
 
 def _default_llm(config: dict):
-    """根据 config 创建默认 LLM。"""
+    """根据 config 创建 LLM。缺少 API Key 或初始化失败时显式抛 LLMError（不再回退 MockLLM）。"""
     from vid2note_core.llm.factory import LLMFactory
 
-    provider = config.get("llm_provider", "mock")
-    return LLMFactory.create(
-        provider,
-        {"api_key": config.get("api_key", "mock"), "model": config.get("llm_model", "mock")},
-    )
+    provider = config.get("llm_provider", "qwen")
+    api_key = config.get("api_key", "")
+    if not api_key:
+        raise LLMError(
+            f"LLM provider {provider} 缺少 API Key",
+            code="LLM_API_KEY_MISSING",
+            retryable=False,
+            user_message=f"未配置 {provider} 的 API Key，请到设置页填写",
+            step="organize",
+        )
+    try:
+        return LLMFactory.create(
+            provider, {"api_key": api_key, "model": config.get("llm_model")}
+        )
+    except Exception as e:
+        raise LLMError(
+            f"LLM 初始化失败: {e}",
+            code="LLM_INIT_FAILED",
+            retryable=False,
+            user_message=f"AI 服务初始化失败：{e}",
+            step="organize",
+        ) from e
 
 
 def _format_timestamp(ms: int) -> str:
