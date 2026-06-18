@@ -517,7 +517,10 @@ def _default_llm(config: dict):
             step="organize",
         )
     try:
-        return LLMFactory.create(provider, {"api_key": api_key, "model": config.get("llm_model")})
+        llm_config = {"api_key": api_key, "model": config.get("llm_model")}
+        if provider == "baidu":
+            llm_config["secret_key"] = config.get("secret_key", "")
+        return LLMFactory.create(provider, llm_config)
     except Exception as e:
         raise LLMError(
             f"LLM 初始化失败: {e}",

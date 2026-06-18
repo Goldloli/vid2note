@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "electron:dev": "NODE_ENV=development electron .",
     "electron:build": "vite build && electron-builder",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:main": "node --test tests/unit/*.test.js"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.0",
