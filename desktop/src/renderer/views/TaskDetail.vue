@@ -134,7 +134,13 @@ function _applyEvent(event) {
   if (event.event_type === 'task.failed' && task.value) task.value = { ...task.value, status: 'failed' }
 }
 async function rerunFrom(nodeKey) { try { await rerunTask(props.id, nodeKey); logs.value = []; _subscribe() } catch (e) {} }
-async function _loadResult() { try { artifacts.value = await getProcessResult(props.id) } catch (e) {} }
+async function _loadResult() {
+  try {
+    const res = await getProcessResult(props.id)
+    // 后端返回 {task_id,status,progress,artifacts:{...}}，模板只读 artifacts 内层
+    artifacts.value = res.artifacts || res || {}
+  } catch (e) {}
+}
 function _subscribe() { if (es) es.close(); es = new TaskEventSource(props.id, _applyEvent, () => {}); es.connect() }
 onMounted(async () => { try { task.value = await getTask(props.id); _loadResult(); _subscribe() } catch (e) {} })
 onUnmounted(() => { if (es) es.close() })
