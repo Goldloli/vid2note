@@ -4,8 +4,11 @@
 
 **作者**：用户与 Codex 共同设计
 
-**状态**：目标设计已确认，待用户审阅书面规格
+**状态**：第二版目标设计，待用户复核
+
 **性质**：目标架构规格，不是逐文件实施计划
+
+**第二版依据**：2026-06-18 对 `main`（`a148b2f`）、更新后的 CodeGraph 与 `前端模板设计/knowledge-workspace-v1` 的复审
 
 ---
 
@@ -94,34 +97,39 @@ vid2note 将从“视频转 Markdown 笔记工具”升级为一个**本地优�
 | Agent | 内置 Agent + 外部 CLI Adapter |
 | 外部 Agent 首发 | Codex、Claude Code |
 | Agent 参考 | 借鉴 Open Design 的 Runtime Registry 与事件归一化 |
-| 桌面控制面 | Electron + React + TypeScript + Vite |
-| 知识守护进程 | Node.js Knowledge Daemon |
-| 媒体处理 | Python Media Sidecar，复用现有下载/FFmpeg/ASR/LLM 资产 |
+| 桌面控制面 | 保留 Electron + Vue 3 + Vite；新代码使用 TypeScript，存量 JavaScript 渐进迁移 |
+| 本地服务 | 保留并扩展 Python FastAPI Knowledge Service，不新增 Node 控制面 |
+| 媒体处理 | 继续使用 `vid2note_core` 的 Python artifact-driven pipeline |
 | 主界面 | 工具轨 + Wiki 树 + 主阅读区 + Agent 面板 |
-| 视觉方向 | 延续当前暖灰、细边框、紫色强调和克制桌面工具感 |
+| 专注视图 | Wiki 阅读、来源证据、ChangeSet 审批、Agent 会话使用独立工作区视图 |
+| 视觉方向 | 以 `knowledge-workspace-v1` 为方向：暖灰、白色阅读面、单一 azure 强调、细边框 |
 | Obsidian | Vault 可直接打开并允许用户手工编辑 |
 
 ---
 
-## 5. 迁移前置条件
+## 5. 当前基线与实施门槛
 
-当前仓库仍在执行以下稳定性计划：
+截至第二版复审，原 Phase 1–4 的主要改进已经进入 `main`。现场验证结果：
 
-1. Phase 1：CI / 测试套件恢复；
-2. Phase 2：前后端契约对齐；
-3. Phase 3：产物下载与导出；
-4. Phase 4：稳定性与错误处理。
+- Python：237 passed、1 xfailed；
+- Ruff check 与 format check 通过；
+- mypy 通过；
+- Vue/Vite production build 通过；
+- Electron 已能启动 FastAPI，真实节点链覆盖下载、音频、ASR、笔记、思维导图和清理；
+- 任务预留、结构化错误、SSE、产物导出、启动恢复和基础关闭流程已经存在。
 
-本规格可以现在冻结，但逐文件实施计划必须等待迁移基线稳定。开始实施计划前必须满足：
+因此不再把整个旧系统视为待替换原型。逐文件实施计划可以在本规格获批后开始，但新的知识库功能编码前，Phase 0 必须关闭或明确接管以下问题：
 
-- Phase 1–4 的目标提交均已落地；
-- 工作树干净，或用户明确指定哪些未提交内容属于迁移基线；
-- Python 测试、mypy、ruff 和前端构建重新验证；
-- 修复或显式登记 `VID2NOTE_DATA_DIR` 没有贯穿数据库/产物/上传存储的问题；
-- E2E 不再只验证“任务出现在 UI”，而是验证后台任务与产物确实成功；
-- 当前分支已合并，或被明确指定为新架构的基线分支。
+1. `VID2NOTE_DATA_DIR` 虽由 Electron 注入，但 `Database`、`ArtifactStore`、`UploadStore` 仍默认使用进程相对路径；
+2. 节点把 `Vid2NoteError` 转成 `NodeResult.failure` 后，Worker 又包装成 `RuntimeError`，会丢失 `retryable`；同时 `TaskRecord` 未读取 `retry_count`，重试上限缺少可信闭环；
+3. 当前“全链路”测试手工写入产物和任务状态，没有实际驱动 Worker 完成 SRT → Markdown；桌面 E2E 仍只断言任务轨出现，且无效 URL 断言会吞掉失败；
+4. `baidu` 密钥环境变量映射仍以 xfail 记录；
+5. Electron 退出当前直接 `kill()` Python，尚未证明与 Worker 的 30 秒优雅停止契约一致；
+6. Worker 的轮询循环会等待单个任务完成，`max_concurrent` 目前没有形成真实并发；`rerun(from_node)` 也未把起点传给 Worker，DAG 的 resume 产物检查仍需修正；
+7. 下载和音频节点通过 `read_bytes()`/`write_bytes()` 整体复制大媒体，长视频会产生不必要的内存峰值和磁盘复制；
+8. `uv.lock` 尚未同步 `core/pyproject.toml` 新增的 `requests` 与 `tenacity` 依赖。
 
-迁移不得以“新架构会替换旧代码”为理由跳过这些基线。旧流水线需要先成为可信的可迁移资产。
+这些是迁移基线任务，不改变本规格的产品范围。未关闭前不得宣称后台恢复、自动重试、data-root 隔离或真实 E2E 已完成。
 
 ---
 
@@ -131,23 +139,21 @@ vid2note 将从“视频转 Markdown 笔记工具”升级为一个**本地优�
 
 ```mermaid
 flowchart LR
-    UI[Electron Renderer\nReact + TypeScript + Vite]
-    KD[Knowledge Daemon\nNode.js]
-    PY[Media Sidecar\nPython]
+    UI[Electron Renderer\nVue 3 + TypeScript + Vite]
+    API[Knowledge Service\nFastAPI + Python]
+    CORE[vid2note_core\nMedia + Pipeline + Wiki + Agent]
     VAULT[Markdown Vault\ndata/vault]
     CLI[External Agents\nCodex / Claude Code]
     LLM[Model APIs / Local Models]
 
-    UI <-->|HTTP + SSE| KD
-    KD <-->|JSON-RPC over stdio| PY
-    KD <-->|scoped subprocess| CLI
-    KD <-->|read / ChangeSet / atomic write| VAULT
-    PY -->|source artifacts| VAULT
-    KD <-->|tool calls| LLM
-    PY <-->|ASR / note generation| LLM
+    UI <-->|HTTP + SSE| API
+    API -->|typed service calls| CORE
+    CORE <-->|scoped subprocess| CLI
+    CORE <-->|read / ChangeSet / atomic write| VAULT
+    CORE <-->|ASR / note / agent calls| LLM
 ```
 
-Renderer 只连接 Knowledge Daemon。Renderer 不直接访问 Python，也不直接授权 Agent 修改正式 Vault。
+Renderer 只连接 FastAPI Knowledge Service。Renderer 不直接访问文件系统，也不直接授权 Agent 修改正式 Vault。`vid2note_core` 保持无 FastAPI 依赖，服务层只负责协议翻译和生命周期。
 
 ### 6.2 Electron Shell
 
@@ -155,7 +161,7 @@ Renderer 只连接 Knowledge Daemon。Renderer 不直接访问 Python，也不�
 
 - 管理桌面窗口和原生菜单；
 - 选择或创建 Vault 文件夹；
-- 启动、监控和关闭 Knowledge Daemon；
+- 启动、监控和优雅关闭 FastAPI Knowledge Service；
 - 向 Renderer 暴露最小化的 preload API；
 - 使用系统 Keychain 保存密钥；
 - 管理应用更新、单实例和崩溃恢复入口。
@@ -164,7 +170,7 @@ Electron Shell 不承载 Wiki、Agent 或媒体业务逻辑。
 
 ### 6.3 Renderer
 
-技术栈：React、TypeScript、Vite、轻量状态管理、CodeMirror 6。
+技术栈：Vue 3、TypeScript、Vite、Pinia、Vue Router、CodeMirror 6。
 
 职责：
 
@@ -175,52 +181,40 @@ Electron Shell 不承载 Wiki、Agent 或媒体业务逻辑。
 - 任务状态、错误恢复和设置；
 - 自治模式切换。
 
-选择 React/TypeScript 的理由不是 Vue 不可用，而是：
+不从 Vue 切换到 React。当前 Renderer、路由、状态管理、E2E 和打包链已经可用，静态前端模板也不依赖 React。框架替换不会直接提高 Wiki 编译、证据追溯或 Agent 质量。
 
-- 本次主界面和数据模型本来就需要大幅重构；
-- 与 Open Design 的 TypeScript Agent Runtime 更容易共享模型和测试思路；
-- CodeMirror、Lexical 等富编辑/审阅生态更直接；
-- Renderer、Daemon 与共享 contracts 可以端到端类型一致。
+TypeScript 采用渐进策略：新 contracts、stores、services 和组件使用 TypeScript；只有在功能迁移触达时才转换现有 JavaScript/Vue 文件，不做一次性语法重写。
 
-不采用 Next.js。Open Design 使用 Next.js 是为了 SSR、Vercel 和纯 Web 拓扑；本产品首要形态是本地桌面应用，Vite 更简单。
+### 6.4 FastAPI Knowledge Service
 
-### 6.4 Knowledge Daemon
-
-Knowledge Daemon 是产品控制面，负责：
+Knowledge Service 是本地协议面，负责：
 
 - 唯一 data-root 与 Vault 路径解析；
 - 文件树、Markdown 读取、双链与 `index.md`；
 - Wiki Compiler 与 ChangeSet；
-- Agent Runtime、CLI 检测和会话；
-- Job 状态、SSE 事件与错误归一化；
-- 媒体引用到 Python Job 的桥接；
+- Agent Runtime、CLI 检测、会话与审批；
+- Task 状态、SSE 事件与错误归一化；
+- 媒体引用与现有 Task/Pipeline 的编排；
 - 安全路径解析、原子写入与版本快照；
 - 可重建缓存和 SQLite 状态。
 
-Knowledge Daemon 通过 loopback 随机端口提供本地 HTTP API。Renderer 从 preload 获取地址和短期会话令牌。所有流式任务使用 SSE；控制命令使用普通 HTTP。
+Knowledge Service 通过 loopback 随机端口提供本地 HTTP API。Renderer 从 preload 获取地址和短期会话令牌。流式任务使用 SSE；控制命令使用普通 HTTP。
 
-### 6.5 Python Media Sidecar
+### 6.5 `vid2note_core` 领域层
 
-Python Sidecar 只负责视频来源处理：
+现有 Python Core 继续负责：
 
 - 下载在线视频或接收本地视频；
 - FFmpeg 音频提取、截图和片段生成；
 - ASR 与时间轴标准化；
 - 单来源结构化笔记生成；
 - 思维导图等来源级衍生产物；
+- Vault、Wiki Compiler、ChangeSet 与 Agent Runtime；
 - 清理可再生中间文件。
 
-它复用现有 `core/` 中成熟部分，但不再拥有 Wiki、Agent 会话或桌面配置。
+领域层不依赖 FastAPI、Electron 或 Vue。现有 artifact-driven pipeline 保留；Wiki 相关能力以新的、可单测的模块加入，而不是塞入 API handler 或 `worker.py`。
 
-Node 与 Python 使用 JSON-RPC 2.0 风格的 NDJSON stdio 协议：
-
-- 每个请求有稳定 `request_id`；
-- 进度通过 notification 推送；
-- 支持取消、超时和进程重启；
-- 二进制不经 stdio 传输，只返回共享 data-root 下的规范化文件引用；
-- 消息 schema 在 TypeScript 和 Python 两侧均生成或验证。
-
-不让 Python 再开放第二套面向 Renderer 的 HTTP API，避免双 API 真相源。
+本目标不再引入 Node ↔ Python NDJSON Sidecar 协议。减少一个常驻进程、一套 RPC schema 和一套打包/关闭故障面，比语言统一更有价值。
 
 ---
 
@@ -276,11 +270,11 @@ data/vault/
 
 | 层 | 写入者 | 修改规则 |
 |---|---|---|
-| `raw/` | Media Sidecar | 只追加；来源元数据、字幕和逐字稿不可原地改写；原视频可按保留策略移除，但必须记录可用状态与重新获取信息 |
+| `raw/` | Media Pipeline | 只追加；来源元数据、字幕和逐字稿不可原地改写；原视频可按保留策略移除，但必须记录可用状态与重新获取信息 |
 | `sources/` | Source Note Compiler | 可重新生成，但必须保留来源身份和时间引用 |
 | `wiki/` | Wiki Compiler / 用户 | Agent 与 Compiler 只能通过 ChangeSet 修改；用户可在应用编辑器、Obsidian 或文本编辑器中直接修改 |
 | `index.md` | Wiki Compiler | 每次已批准 Wiki 变更后同步更新 |
-| `log.md` | Knowledge Daemon | 只追加，不重写历史 |
+| `log.md` | Knowledge Service | 只追加，不重写历史 |
 | `assets/` | Media Citation / 用户 | 正式引用后持久保留 |
 | `.vid2note/` | 应用 | 不包含唯一知识正文；删除后可重建检索和运行状态，但会丢失待审批项，并可能丢失仅存于本地的回滚快照 |
 
@@ -324,7 +318,7 @@ tags:
 约定：
 
 - `start`、`end` 使用毫秒；
-- Knowledge Daemon 校验 `source_id` 和时间边界；
+- Knowledge Service 校验 `source_id` 和时间边界；
 - 应用内点击后定位原视频或按需生成片段；
 - Obsidian 中仍能看到可读链接文本；
 - `transcript.md` 的每个分段有稳定 block id，供 Agent 和人工回查；
@@ -537,17 +531,17 @@ validation_result
 
 ### 11.2 统一 Runtime 接口
 
-概念接口：
+概念接口使用 Python Protocol 表达；具体模型由 Pydantic 校验：
 
-```ts
-interface AgentRuntime {
-  id: string
-  detect(): Promise<DetectionResult>
-  capabilities(): AgentCapabilities
-  run(input: AgentRunInput): AsyncIterable<AgentEvent>
-  cancel(runId: string): Promise<void>
-  resume?(sessionId: string, message: string): AsyncIterable<AgentEvent>
-}
+```python
+class AgentRuntime(Protocol):
+    id: str
+
+    async def detect(self) -> DetectionResult: ...
+    def capabilities(self) -> AgentCapabilities: ...
+    def run(self, input: AgentRunInput) -> AsyncIterator[AgentEvent]: ...
+    async def cancel(self, run_id: str) -> None: ...
+    def resume(self, session_id: str, message: str) -> AsyncIterator[AgentEvent]: ...
 ```
 
 首版事件类型：
@@ -574,7 +568,7 @@ run.cancelled
 #### Built-in Runtime
 
 - 通过模型 API 或本地 OpenAI-compatible endpoint 运行；
-- 由产品实现最小工具循环；
+- 在 Python Core 内实现最小工具循环；
 - 工具仅包括读取 schema/index/page/source、普通搜索、提交 ChangeSet、请求媒体引用；
 - 没有任意 Shell 权限；
 - 是默认、稳定、可产品化的路径。
@@ -586,6 +580,7 @@ run.cancelled
 - prompt 优先通过 stdin，避免命令行长度限制；
 - CWD 指向临时 Vault 副本；
 - 只把最终文件差异转换为 ChangeSet；
+- 使用 `asyncio` subprocess 管理进程；
 - CLI 参数和输出 parser 必须有录制回放测试。
 
 #### Claude Code Adapter
@@ -595,6 +590,7 @@ run.cancelled
 - 可加载项目级 schema/skill；
 - CWD 指向临时 Vault 副本；
 - 外部 MCP 只通过显式配置注入；
+- 使用 `asyncio` subprocess 管理进程；
 - 最终文件差异转换为 ChangeSet。
 
 ### 11.4 外部 Agent 安全模型
@@ -609,7 +605,7 @@ run.cancelled
 6. 对临时工作区与正式基线做 Diff；
 7. 把合法差异转换为 ChangeSet；
 8. 删除未引用的临时文件；
-9. 经审批策略后由 Knowledge Daemon 写入正式 Vault。
+9. 经审批策略后由 Knowledge Service 写入正式 Vault。
 
 CLI 失败时不得静默切换 Agent。UI 可以提供用户明确选择的一键 fallback。
 
@@ -718,13 +714,25 @@ Agent 回答可以包含：
 ### 13.5 Agent 面板
 
 - 显示当前 Runtime、模型和自治模式；
+- 默认自治模式必须在标题栏、面板控制和设置中一致显示为 A 审批；模式状态只允许有一个事实源；
 - 区分思考摘要、工具调用、正文与证据；
 - 证据卡可播放或打开逐字稿；
 - “建议写回 Wiki”进入统一 Diff Review；
 - 用户可将当前页面、选中文本或来源作为显式上下文；
 - 不默认把整个 Vault 注入上下文。
 
-### 13.6 响应式行为
+### 13.6 专注视图
+
+`knowledge-workspace-v1` 证明四区主页适合日常浏览，但复杂任务需要更大的工作面积。首版保留同一信息架构，并提供四类专注视图：
+
+- **Wiki 阅读 / 编辑**：Wiki 树 + 主文档 + 目录/反向链接；
+- **来源证据**：来源笔记 + 视频播放器 + 章节化时间轴；
+- **ChangeSet 审批**：多文件 Diff + 变更块选择 + 矛盾处理 + 应用摘要；
+- **Agent 会话**：会话列表 + 完整回答 + 工具事件 + 证据 + 大输入区。
+
+这些不是五套独立产品，也不与旧页面双轨共存。它们共享工具轨、路由、设计 tokens、stores 和 API client；旧导入、任务详情、历史、思维导图和设置能力迁入统一外壳。
+
+### 13.7 响应式行为
 
 - 四区宽度可拖拽；
 - 工具轨常驻；
@@ -734,75 +742,88 @@ Agent 回答可以包含：
 - 低于约 850px 时 Agent 变为抽屉；
 - 精确断点在 UI 原型阶段根据真实内容验证。
 
-### 13.7 视觉语言
+### 13.8 视觉语言
 
-延续当前产品：
+视觉基准为 `前端模板设计/knowledge-workspace-v1`，但该目录是静态参考，不直接复制为生产代码。生产实现遵循：
 
 - 暖灰背景与白色阅读面；
 - 细边框而非厚重阴影；
-- 紫色只用于选中、链接和关键动作；
+- 单一 azure 强调色只用于选中、链接和关键动作；
 - 标题与正文保持编辑器式排版；
 - 等宽字体用于时间码、路径和任务信息；
 - 支持浅色与深色主题；
 - 不照抄 Obsidian chrome，只复用其信息架构直觉。
 
+原型中缺失的 `css/app.css`、指向未包含旧页面的链接、大量 inline style、内联手绘图标和仅用于演示的 DOM 脚本都不属于交付资产。生产实现必须把 tokens 纳入主设计系统、使用现有图标库、建立真实路由，并由 Vue 状态驱动交互。
+
+### 13.9 可访问性与离线约束
+
+- 运行时不依赖 Google Fonts 或其他公网视觉资源；字体随应用打包，失败时使用系统字体；
+- 所有图标按钮必须有稳定的 accessible name，不能只依赖 `title` 或 hover tooltip；
+- 文件树分组、tabs、自治模式和 Diff 选择必须使用正确语义与键盘操作；
+- 所有交互元素有可见 `:focus-visible` 状态；
+- 文本、状态色和 Diff 色满足 WCAG AA 对比度，不能只用颜色表达增删、冲突或成功；
+- 支持 `prefers-reduced-motion`；reveal、闪烁和自动推进动画不得阻碍阅读；
+- 桌面主要点击目标不小于 36×36px，核心工具轨目标采用约 40×40px；
+- 10–11px 字号只用于非关键辅助元数据，正文和操作标签不得依赖极小字号。
+
 ---
 
 ## 14. API 与共享 Contracts
 
-### 14.1 Renderer ↔ Knowledge Daemon
+### 14.1 Renderer ↔ Knowledge Service
 
 代表性 API：
 
 ```text
-GET    /api/health
-GET    /api/vault/tree
-GET    /api/vault/page
-PUT    /api/vault/page
-GET    /api/vault/search
+GET    /api/v1/health
+GET    /api/v1/vault/tree
+GET    /api/v1/vault/page
+PUT    /api/v1/vault/page
+GET    /api/v1/vault/search
 
-POST   /api/sources/ingest
-GET    /api/jobs/:id
-POST   /api/jobs/:id/cancel
-GET    /api/jobs/:id/events
+POST   /api/v1/sources/ingest
+GET    /api/v1/tasks/:id
+POST   /api/v1/tasks/:id/cancel
+GET    /api/v1/tasks/:id/events
 
-GET    /api/changesets
-GET    /api/changesets/:id
-POST   /api/changesets/:id/approve
-POST   /api/changesets/:id/reject
-POST   /api/changesets/:id/revert
+GET    /api/v1/changesets
+GET    /api/v1/changesets/:id
+POST   /api/v1/changesets/:id/approve
+POST   /api/v1/changesets/:id/reject
+POST   /api/v1/changesets/:id/revert
 
-GET    /api/agents
-POST   /api/agent/sessions
-POST   /api/agent/sessions/:id/messages
-GET    /api/agent/sessions/:id/events
-POST   /api/agent/runs/:id/cancel
+GET    /api/v1/agents
+POST   /api/v1/agent/sessions
+POST   /api/v1/agent/sessions/:id/messages
+GET    /api/v1/agent/sessions/:id/events
+POST   /api/v1/agent/runs/:id/cancel
 
-POST   /api/media/clip
-POST   /api/media/frame
+POST   /api/v1/media/clip
+POST   /api/v1/media/frame
 ```
 
-`PUT /api/vault/page` 只服务于用户在编辑器中的直接编辑，并记录为 human edit；Agent Runtime 不获得该接口，只能提交 ChangeSet。
+`PUT /api/v1/vault/page` 只服务于用户在编辑器中的直接编辑，并记录为 human edit；Agent Runtime 不获得该接口，只能提交 ChangeSet。现有 `/api/v1/tasks`、`process`、`artifacts`、`upload`、`config` 和 `models` 在迁移期保持兼容，不并行创造第二套任务资源。
 
 具体 URL 可以在实施计划阶段调整，但资源边界不得重新混合。
 
-### 14.2 Contracts Package
+### 14.2 Contracts
 
-共享 TypeScript contracts 至少定义：
+Python Pydantic models 是 API schema 的事实源，通过 OpenAPI 生成或校验 Renderer 的 TypeScript 类型。Contracts 至少定义：
 
 - API request/response；
-- SSE AgentEvent 与 JobEvent；
+- SSE AgentEvent 与 TaskEvent；
 - ChangeSet；
 - VaultPage 和 SourceRecord；
 - MediaReference；
 - ErrorEnvelope；
 - Runtime capabilities。
 
-Contracts 包保持纯 TypeScript，不依赖 Electron、React、Node fs 或 Python 实现。
+Renderer 不手写重复响应结构，也不从任意 JSON 猜测字段。生成的 TypeScript 类型不依赖 Electron、Vue 或具体状态管理实现。
 
 ### 14.3 错误结构
 
-所有 API 和 Sidecar 错误归一为：
+所有 API、Pipeline 和 Agent Runtime 错误归一为：
 
 ```text
 code
@@ -829,9 +850,9 @@ cause_id?
 - 记录 applied ChangeSet 和版本快照；
 - `index.md`、页面与 `log.md` 视为同一逻辑事务。
 
-### 15.2 Daemon 重启
+### 15.2 Service 重启
 
-- 运行中 Job 标记为 interrupted；
+- 运行中 Task 标记为 interrupted；
 - 可恢复节点基于已经落盘的 artifact 继续；
 - Agent 流不伪造续传；Runtime 支持续传时显式恢复，否则重新开始；
 - UI 展示真实状态，不把 interrupted 当 failed 或 completed。
@@ -841,7 +862,7 @@ cause_id?
 删除 `.vid2note/state.sqlite3` 和 `cache/` 后：
 
 - Wiki、来源笔记和 Raw sources 不丢失；
-- Daemon 能从 frontmatter、目录和 `log.md` 重建必要状态；
+- Knowledge Service 能从 frontmatter、目录和 `log.md` 重建必要状态；
 - 已批准变更的事实记录保留在 `log.md`；文件级回滚能力依赖仍保留的 applied ChangeSet、版本快照或 Git 历史；
 - 若删除整个 `.vid2note/`，pending ChangeSet 与仅存于其中的回滚快照可以丢失，但不影响正式知识正文。
 
@@ -850,7 +871,7 @@ cause_id?
 ## 16. 安全与隐私
 
 - 默认只监听 loopback；
-- Renderer 使用短期令牌连接 Daemon；
+- Renderer 使用短期令牌连接 Knowledge Service；
 - 所有路径在使用前 canonicalize，并验证位于允许 root；
 - 防止 `..`、symlink escape 和任意本地文件读取；
 - 外部 Agent 在临时工作区运行；
@@ -903,9 +924,9 @@ cause_id?
 
 ### 17.4 Contract 测试
 
-- TypeScript contracts 与 Python schema 互相验证；
+- OpenAPI/Pydantic schema 与生成的 TypeScript 类型保持同步；
 - SSE 事件顺序和终态唯一；
-- Sidecar request/response 版本兼容；
+- Renderer API client 不允许使用未声明字段；
 - 所有错误满足 ErrorEnvelope。
 
 ### 17.5 E2E
@@ -944,23 +965,27 @@ MVP 至少满足：
 
 ### Phase 0：可信迁移基线
 
-- 完成现有 Phase 1–4；
-- 修复 data-root、配置旁路、真实并发和假 E2E；
+- 修复 data-root 贯穿、retryable/`retry_count` 闭环和优雅关闭；
+- 修复 Worker 真实并发、按节点 rerun 和 resume 产物校验；
+- 为大媒体建立基于路径、流或原子移动的 Artifact API，禁止整段视频常驻内存复制；
+- 修复 `baidu` 环境变量映射并同步 `uv.lock`；
+- 用 Worker 驱动的真实 SRT → Markdown 集成测试替换手工产物测试；
+- 让桌面 E2E 验证后台终态与真实产物，不吞掉断言失败；
 - 建立 Source Note Golden Dataset；
-- 冻结 Python Media Sidecar 的输入输出契约。
+- 冻结现有 Pipeline artifact、TaskEvent 和 ErrorEnvelope 契约。
 
 **退出条件**：固定本地视频可以稳定、可重复地产出带时间证据的来源笔记。
 
-### Phase 1：新控制面骨架
+### Phase 1：现有控制面扩展
 
-- TypeScript monorepo；
-- Electron + React/Vite；
-- Knowledge Daemon；
-- shared contracts；
-- Python Sidecar 生命周期与 JSON-RPC；
-- 迁移现有视频处理入口。
+- 保留 Electron + Vue/Vite + FastAPI；
+- 建立 Pydantic/OpenAPI → TypeScript contracts 流程；
+- 为新模块引入 TypeScript，并按触达范围迁移存量 JavaScript；
+- 建立唯一 data-root、Vault lifecycle 和文件监听；
+- 把现有视频导入、任务详情、历史、思维导图和设置迁入统一外壳；
+- 实现 `knowledge-workspace-v1` 的共享设计 tokens 与路由骨架。
 
-**退出条件**：新 UI 能启动、监控、取消 Sidecar Job，并完成旧视频链路。
+**退出条件**：统一外壳能运行旧视频链路，且没有新增常驻控制进程或第二套任务真相源。
 
 ### Phase 2：Vault 与媒体证据
 
@@ -999,6 +1024,7 @@ MVP 至少满足：
 ### Phase 5：完整知识工作台
 
 - 四区可调布局；
+- Wiki、来源证据、ChangeSet 和 Agent 四类专注视图；
 - Markdown 编辑和反向链接；
 - Agent 证据卡；
 - 媒体工具；
@@ -1018,26 +1044,26 @@ MVP 至少满足：
 | Wiki schema 漂移 | 页面越多越难维护 | `AGENTS.md` 契约、lint、受限页面类型 |
 | LLM 过度重写页面 | 历史语义丢失 | ChangeSet、局部 Diff、base hash、审批 |
 | CLI 版本变化 | Adapter 随升级失效 | 能力探测、版本诊断、录制事件测试 |
-| 外部 Agent 越权 | 正式 Vault 被破坏 | 临时副本、严格 CWD、Daemon 唯一写入者 |
-| Node/Python 双进程复杂 | 打包、关闭、日志失控 | 单一 lifecycle manager、stdio RPC、进程树测试 |
+| 外部 Agent 越权 | 正式 Vault 被破坏 | 临时副本、严格 CWD、Knowledge Service 唯一 Agent 写入者 |
+| FastAPI 继续膨胀 | API、Wiki 与媒体逻辑重新耦合 | `vid2note_core` 领域模块隔离，API handler 只做协议翻译 |
 | Raw 视频占用大 | 磁盘快速增长 | 明确保留策略、可重新获取标记、按需片段 |
 | `index.md` 规模增长 | Agent 导航变慢 | 分区 index、摘要压缩；达到实际瓶颈后再评估搜索插件 |
 | 过早复刻 Obsidian | 工期被编辑器细节吞噬 | 阅读、审批、引用优先；高级编辑延后 |
-| 当前旧代码继续变化 | 实施计划失效 | Phase 4 后重新审计再写逐文件计划 |
+| 静态模板被直接复制 | 缺失依赖、无障碍和状态不一致进入生产 | 只提取 tokens 与信息架构，在 Vue 组件中重新实现并测试 |
 
 ---
 
 ## 20. 被拒绝的替代方案
 
-### 20.1 继续 Electron + Vue + FastAPI 作为最终架构
+### 20.1 React Renderer + Node Knowledge Daemon + Python Sidecar
 
-适合最快交付，但不利于直接借鉴 TypeScript Agent Runtime，也会让 Wiki 控制面继续和 Python 媒体域混合。它仍可作为迁移过渡态，不作为最终目标。
+类型可以统一到 TypeScript，也更容易直接移植 Open Design Runtime；但会同时重写已通过测试的 Vue Renderer、FastAPI API、Worker 生命周期和 Python pipeline 编排，并新增 Node ↔ Python RPC。第二版复审认为收益不足以覆盖迁移和打包风险，因此不作为目标架构。
 
 ### 20.2 全 TypeScript
 
 语言统一，但会丢失本地 ASR、模型管理和现有 Python 媒体资产。重写成本高，用户价值没有相应增加。
 
-### 20.3 Obsidian 插件 + Python Sidecar
+### 20.3 Obsidian 插件 + Python 服务
 
 可以快速获得成熟 Wiki UX，但产品能力、分发和媒体工作流受 Obsidian API 约束。未来可以提供兼容插件，不作为产品主体。
 
@@ -1063,9 +1089,9 @@ Open Design 的 Agent Adapter 是优秀参考，但其产品围绕设计 artifac
 - 三档自治模式已定义；
 - Built-in、Codex、Claude 的共同 Runtime 边界已定义；
 - 视频时间证据格式和按需媒体策略已定义；
-- 四区主界面和响应式原则已定义；
+- 四区主界面、四类专注视图、响应式和可访问性原则已定义；
 - 数据一致性、安全、测试和验收指标已定义；
 - Phase 0–5 的交付边界已定义；
-- 逐文件实施计划明确推迟到现有 Phase 1–4 收口之后。
+- 逐文件实施计划可在本规格复核后开始，Phase 0 基线问题必须先于知识库功能编码关闭。
 
 本规格获用户书面确认后，保持冻结。后续实现若要改变上述锁定决策，应先修订本规格，再更新实施计划。
