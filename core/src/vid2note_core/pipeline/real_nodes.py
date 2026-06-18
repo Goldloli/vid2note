@@ -18,7 +18,7 @@ from typing import Any
 
 from vid2note_core.audio.extractor import AudioExtractor
 from vid2note_core.downloaders.base import DownloadOpts
-from vid2note_core.downloaders.bbdown import BBDownDownloader
+from vid2note_core.downloaders.bili import BiliDownloader
 from vid2note_core.downloaders.direct import DirectDownloader
 from vid2note_core.downloaders.local_file import LocalFileDownloader
 from vid2note_core.downloaders.router import DownloaderRouter
@@ -33,12 +33,16 @@ from vid2note_core.types import ArtifactRef, NodeName, NodeResult, NodeStatus
 
 
 def _build_default_router() -> DownloaderRouter:
-    """按设计稿路由策略装配下载器（顺序即优先级）。"""
+    """按设计稿路由策略装配下载器（顺序即优先级）。
+
+    BiliDownloader 是纯 Python 实现（wbi 签名 + DASH 流 + ffmpeg 混流），
+    无需 BBDown 二进制。YtdlpDownloader 保留为 fallback（YouTube + bilibili 兜底）。
+    """
     return DownloaderRouter(
         [
             LocalFileDownloader(),
             DirectDownloader(),
-            BBDownDownloader(),
+            BiliDownloader(),
             YtdlpDownloader(),
         ]
     )
