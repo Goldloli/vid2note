@@ -71,3 +71,7 @@ class ArtifactStore:
 
     def exists(self, task_id: str, node: str, name: str) -> bool:
         return self.artifact_path(task_id, node, name).exists()
+
+    def is_complete(self, task_id: str, node: str, name: str) -> bool:
+        path = self.artifact_path(task_id, node, name)
+        return path.is_file() and path.stat().st_size > 0

@@ -175,8 +175,9 @@ class TaskRepository:
         with self.db.get_connection() as conn:
             conn.execute(
                 "UPDATE tasks SET status = ?, progress = 0, error_message = NULL, "
-                "current_step = NULL WHERE id = ?",
-                (TaskStatus.PENDING.value, task_id),
+                "error_code = NULL, error_retryable = 0, current_step = NULL, "
+                "rerun_from_node = ? WHERE id = ?",
+                (TaskStatus.PENDING.value, from_node, task_id),
             )
             downstream = self._node_and_downstream(from_node) if from_node else None
             if downstream:
