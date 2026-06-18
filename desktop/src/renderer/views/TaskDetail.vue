@@ -31,6 +31,7 @@
               <button class="tab" :class="{active: tab === 'mindmap'}" @click="tab = 'mindmap'">思维导图</button>
               <button class="tab" :class="{active: tab === 'meta'}" @click="tab = 'meta'">元数据</button>
             </div>
+            <button class="btn btn-sm" @click="onExportAll" title="导出全部产物（zip）">导出全部</button>
           </div>
           <div v-show="tab === 'srt'" style="padding:16px 18px"><pre v-if="artifacts?.srt" class="srt-pre">{{ artifacts.srt }}</pre><div v-else class="muted">暂无转录稿</div></div>
           <div v-show="tab === 'note'" style="padding:18px"><pre v-if="artifacts?.markdown" class="srt-pre note-pre">{{ artifacts.markdown }}</pre><div v-else class="muted">暂无笔记</div></div>
@@ -60,7 +61,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { getTask, rerunTask } from '../api/task'
+import { getTask, rerunTask, exportAllArtifacts } from '../api/task'
 import { getProcessResult } from '../api/process'
 import { TaskEventSource } from '../api/sse'
 
@@ -134,6 +135,7 @@ function _applyEvent(event) {
   if (event.event_type === 'task.failed' && task.value) task.value = { ...task.value, status: 'failed' }
 }
 async function rerunFrom(nodeKey) { try { await rerunTask(props.id, nodeKey); logs.value = []; _subscribe() } catch (e) {} }
+async function onExportAll() { try { await exportAllArtifacts(props.id) } catch (e) {} }
 async function _loadResult() {
   try {
     const res = await getProcessResult(props.id)
