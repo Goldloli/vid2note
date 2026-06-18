@@ -35,6 +35,15 @@ class UpdateConfigRequest(BaseModel):
 
     llm_provider: str | None = None
     asr_provider: str | None = None
+    # 保留策略（Settings.vue "保留策略" tab）
+    keep_video: bool | None = None
+    keep_audio: bool | None = None
+    keep_srt: bool | None = None
+    keep_markdown: bool | None = None
+    keep_mindmap: bool | None = None
+    # 处理选项
+    language: str | None = None
+    mindmap_format: str | None = None
 
 
 @router.put("/config")
@@ -49,6 +58,29 @@ async def update_config(req: UpdateConfigRequest):
     if req.asr_provider is not None and config.asr is not None:
         config.asr.provider = req.asr_provider
         changed.append("asr.provider")
+    # 保留策略
+    if req.keep_video is not None:
+        config.retention.keep_video = req.keep_video
+        changed.append("retention.keep_video")
+    if req.keep_audio is not None:
+        config.retention.keep_audio = req.keep_audio
+        changed.append("retention.keep_audio")
+    if req.keep_srt is not None:
+        config.retention.keep_srt = req.keep_srt
+        changed.append("retention.keep_srt")
+    if req.keep_markdown is not None:
+        config.retention.keep_markdown = req.keep_markdown
+        changed.append("retention.keep_markdown")
+    if req.keep_mindmap is not None:
+        config.retention.keep_mindmap = req.keep_mindmap
+        changed.append("retention.keep_mindmap")
+    # 处理选项
+    if req.language is not None:
+        config.processing.language = req.language  # type: ignore[assignment]
+        changed.append("processing.language")
+    if req.mindmap_format is not None:
+        config.processing.mindmap_format = req.mindmap_format  # type: ignore[assignment]
+        changed.append("processing.mindmap_format")
     if changed:
         manager.save(config)
     return {"message": "配置已更新", "changed": changed}
