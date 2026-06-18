@@ -24,7 +24,11 @@ class AudioExtractor:
             "-y",
             str(output),
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        # encoding/errors：ffmpeg stderr 可能含非 UTF-8 字符（中文文件名），
+        # 用 errors="replace" 避免 UnicodeDecodeError（仅用于错误信息展示）
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, encoding="utf-8", errors="replace"
+        )
         if result.returncode != 0:
             raise DownloadError(
                 f"ffmpeg 失败: {result.stderr}",

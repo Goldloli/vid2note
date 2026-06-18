@@ -77,8 +77,8 @@ class BaseLLM(ABC):
             },
         ]
 
-        # 平衡模式：减少token和超时以加快速度。失败时抛错（不再 _simple_format 兜底）
-        return self.chat(messages, temperature=0.3, max_tokens=3000, timeout=60)
+        # 详细笔记需要足够大的输出空间：max_tokens=8000 能容纳约 5000 字的详细笔记
+        return self.chat(messages, temperature=0.3, max_tokens=8000, timeout=120)
 
     def _simple_format(self, content: str) -> str:
         """简单格式化（仅保留供显式调用，不在异常路径自动调用）。"""
