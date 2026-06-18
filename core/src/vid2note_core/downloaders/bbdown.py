@@ -21,6 +21,7 @@ class BBDownDownloader(IDownloader):
         binary = BinaryManager("BBDown").resolve()
         dest_dir.mkdir(parents=True, exist_ok=True)
         # BBDown 用法：BBDown <url> --work-dir <dir>
+        # 不传 -p 时默认只下载 URL 指向的分集（合集不会全下）
         cmd = [str(binary), url, "--work-dir", str(dest_dir)]
         if opts.cookie_path:
             cmd.extend(["-c", str(opts.cookie_path)])
@@ -42,12 +43,17 @@ class BBDownDownloader(IDownloader):
                 user_message="视频下载失败，请检查链接是否有效",
                 step="download",
             )
-        # BBDown 会把混流后的 mp4 输出到 work-dir；找最新生成的视频文件
-        files = [f for f in dest_dir.iterdir() if f.is_file()]
-        videos = [f for f in files if f.suffix.lower() in {".mp4", ".flv", ".mkv"}]
+        # BBDown 可能把视频放在 work-dir 顶层，也可能放在以合集标题命名的子目录里。
+        # 用 rglob 递归查找最新生成的视频文件。
+        videos = [
+            p
+            for p in dest_dir.rglob("*")
+            if p.is_file() and p.suffix.lower() in {".mp4", ".flv", ".mkv"}
+        ]
         if not videos:
+            all_files = [p.name for p in dest_dir.rglob("*") if p.is_file()]
             raise DownloadError(
-                f"BBDown 完成但未找到视频文件，目录内容: {[f.name for f in files]}",
+                f"BBDown 完成但未找到视频文件，目录内容: {all_files}",
                 code="DOWNLOAD_NO_OUTPUT",
                 retryable=False,
                 step="download",
