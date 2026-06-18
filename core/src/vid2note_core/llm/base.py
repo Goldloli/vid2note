@@ -3,9 +3,12 @@ LLM 抽象基类
 定义统一的 LLM 接口
 """
 
+import logging
 import re
 from abc import ABC, abstractmethod
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 class BaseLLM(ABC):
@@ -50,16 +53,14 @@ class BaseLLM(ABC):
 
         Returns:
             重组后的Markdown文本
+
+        Raises:
+            LLMRateLimited / LLMTimeout / LLMAPIError: chat() 失败时透传（不再静默兜底）
         """
         total_tokens = self._estimate_tokens(subtitle)
-        print(f"处理内容（约{total_tokens} tokens），快速模式...")
-
-        try:
-            # 快速模式：2分钟超时，限制输出长度
-            return self._process_single_block_fast(subtitle, context, temperature)
-        except Exception as e:
-            print(f"LLM处理失败: {e}")
-            return self._simple_format(subtitle)
+        logger.info("处理内容（约 %d tokens），快速模式...", total_tokens)
+        # 不再 try/except：让 RateLimitError/TimeoutError/APIError 向上传播到 pipeline
+        return self._process_single_block_fast(subtitle, context, temperature)
 
     def _process_single_block_fast(self, content: str, context: str, temperature: float) -> str:
         """处理单块内容，平衡质量和速度"""
@@ -76,15 +77,11 @@ class BaseLLM(ABC):
             },
         ]
 
-        try:
-            # 平衡模式：减少token和超时以加快速度
-            return self.chat(messages, temperature=0.3, max_tokens=3000, timeout=60)
-        except Exception as e:
-            print(f"处理失败: {e}")
-            return self._simple_format(content)
+        # 平衡模式：减少token和超时以加快速度。失败时抛错（不再 _simple_format 兜底）
+        return self.chat(messages, temperature=0.3, max_tokens=3000, timeout=60)
 
     def _simple_format(self, content: str) -> str:
-        """简单格式化"""
+        """简单格式化（仅保留供显式调用，不在异常路径自动调用）。"""
         filler_words = ["嗯", "啊", "哦", "呃", "哎", "那个", "这个", "就是", "对吧", "是吧"]
         result = content
         for word in filler_words:
