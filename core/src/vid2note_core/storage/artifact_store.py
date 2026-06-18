@@ -16,8 +16,8 @@ _NODE_ORDER = [
 
 
 class ArtifactStore:
-    def __init__(self, base_dir: Path | None = None):
-        self.base_dir = Path(base_dir or "data/tasks")
+    def __init__(self, base_dir: Path):
+        self.base_dir = Path(base_dir)
         self.base_dir.mkdir(parents=True, exist_ok=True)
 
     def _task_dir(self, task_id: str) -> Path:
