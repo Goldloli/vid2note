@@ -146,12 +146,12 @@ class RealDownloadNode(PipelineNode, _RealNodeMixin):
             return NodeResult.failure(self.name, "DOWNLOAD_ERROR", "下载完成但未找到视频文件")
 
         # 落盘产物到标准产物名
-        self.store.write_artifact(
-            task_id, self.name.value, "video_file", Path(video_path).read_bytes()
+        stored_video = self.store.import_file(
+            task_id, self.name.value, "video_file", Path(video_path), move=True
         )
 
         metadata = {
-            "video_file": str(video_path),
+            "video_file": str(stored_video),
             "title": result.metadata.get("title"),
         }
         self._update_db(task_id, NodeStatus.COMPLETED, artifacts=["video_file"], metadata=metadata)
@@ -180,18 +180,16 @@ class RealExtractAudioNode(PipelineNode, _RealNodeMixin):
     async def run(self, ctx: TaskContext) -> NodeResult:
         task_id = ctx.task_id.value
         task_dir = self.store.ensure_task_dir(task_id)
-        video_bytes = self.store.read_artifact(task_id, NodeName.DOWNLOAD.value, "video_file")
-
-        # 把上游视频写入临时文件供 ffmpeg 处理
-        video_tmp = task_dir / "_source_video"
-        video_tmp.write_bytes(video_bytes)
+        video_path = self.store.artifact_path(
+            task_id, NodeName.DOWNLOAD.value, "video_file"
+        )
 
         self._update_db(task_id, NodeStatus.RUNNING)
         await self._publish(task_id, "node.started", 30, "提取音频中...")
 
         try:
             audio_path = await asyncio.to_thread(
-                self.extractor.extract, video_tmp, task_dir / "artifacts"
+                self.extractor.extract, video_path, task_dir / "artifacts"
             )
         except Vid2NoteError as e:
             self._update_db(task_id, NodeStatus.FAILED, error={"code": e.code, "message": str(e)})
@@ -203,13 +201,10 @@ class RealExtractAudioNode(PipelineNode, _RealNodeMixin):
                 error={"code": "AUDIO_EXTRACT_FAILED", "message": str(e)},
             )
             return NodeResult.failure(self.name, "AUDIO_EXTRACT_FAILED", str(e))
-        finally:
-            video_tmp.unlink(missing_ok=True)
-
-        self.store.write_artifact(
-            task_id, self.name.value, "audio_file", Path(audio_path).read_bytes()
+        stored_audio = self.store.import_file(
+            task_id, self.name.value, "audio_file", Path(audio_path), move=True
         )
-        metadata = {"audio_file": str(audio_path)}
+        metadata = {"audio_file": str(stored_audio)}
         self._update_db(task_id, NodeStatus.COMPLETED, artifacts=["audio_file"], metadata=metadata)
         await self._publish(task_id, "node.completed", 45, "音频提取完成", artifact="audio_file")
         return NodeResult.success(
@@ -236,10 +231,9 @@ class RealTranscribeNode(PipelineNode, _RealNodeMixin):
 
     async def run(self, ctx: TaskContext) -> NodeResult:
         task_id = ctx.task_id.value
-        task_dir = self.store.ensure_task_dir(task_id)
-        audio_bytes = self.store.read_artifact(task_id, NodeName.EXTRACT_AUDIO.value, "audio_file")
-        audio_tmp = task_dir / "_source_audio.wav"
-        audio_tmp.write_bytes(audio_bytes)
+        audio_path = self.store.artifact_path(
+            task_id, NodeName.EXTRACT_AUDIO.value, "audio_file"
+        )
 
         self._update_db(task_id, NodeStatus.RUNNING)
         await self._publish(task_id, "node.started", 50, "语音识别中...")
@@ -247,7 +241,7 @@ class RealTranscribeNode(PipelineNode, _RealNodeMixin):
         asr = self.asr or _default_asr(ctx.config)
         opts = {"language": ctx.config.get("language", "zh")}
         try:
-            result = await _maybe_await(asr.transcribe(audio_tmp, opts))
+            result = await _maybe_await(asr.transcribe(audio_path, opts))
         except Vid2NoteError as e:
             self._update_db(task_id, NodeStatus.FAILED, error={"code": e.code, "message": str(e)})
             return NodeResult.failure(self.name, e)
@@ -256,9 +250,6 @@ class RealTranscribeNode(PipelineNode, _RealNodeMixin):
                 task_id, NodeStatus.FAILED, error={"code": "ASR_ERROR", "message": str(e)}
             )
             return NodeResult.failure(self.name, "ASR_ERROR", str(e))
-        finally:
-            audio_tmp.unlink(missing_ok=True)
-
         srt_text = _asr_result_to_srt(result)
         self.store.write_artifact(task_id, self.name.value, "srt_file", srt_text.encode("utf-8"))
         metadata = {"srt_file": "srt_file", "language": getattr(result, "language", "zh")}
