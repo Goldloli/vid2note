@@ -35,7 +35,8 @@
     "files": [
       "src/main/**/*",
       "src/preload/**/*",
-      "src/renderer/dist/**/*"
+      "dist/**/*",
+      "package.json"
     ],
     "extraResources": [
       {
@@ -58,13 +59,16 @@
           ]
         },
         {
-          "target": "pkg",
+          "target": "zip",
           "arch": [
             "arm64"
           ]
         }
       ],
-      "category": "public.app-category.productivity"
+      "category": "public.app-category.productivity",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "darkModeSupport": true
     }
   }
 }
