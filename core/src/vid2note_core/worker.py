@@ -5,8 +5,11 @@ Task worker: polls pending tasks and executes PipelineDAG.
 import asyncio
 import contextlib
 import logging
+import os
+import signal
 from datetime import datetime
 
+from vid2note_core.errors import Vid2NoteError
 from vid2note_core.events.bus import TaskEvent, get_event_bus
 from vid2note_core.pipeline.context import TaskContext
 from vid2note_core.pipeline.dag import PipelineDAG
@@ -24,6 +27,29 @@ from vid2note_core.types import NodeStatus, TaskId, TaskStatus
 
 logger = logging.getLogger(__name__)
 
+# provider → (默认 model, 环境变量名) 映射，用于从环境变量解析 API Key
+_LLM_PROVIDER_ENV = {
+    "qwen": ("qwen-turbo", "DASHSCOPE_API_KEY"),
+    "glm": ("glm-4-flash", "ZHIPU_API_KEY"),
+    "deepseek": ("deepseek-chat", "DEEPSEEK_API_KEY"),
+    "moonshot": ("moonshot-v1-8k", "MOONSHOT_API_KEY"),
+    "baidu": ("ernie-bot-4", "BAICHUAN_API_KEY"),
+    "doubao": ("doubao-pro-4k", "VOLCANO_API_KEY"),
+}
+
+
+def _resolve_llm_creds(provider: str) -> tuple[str, str]:
+    """根据 provider 从环境变量解析 (api_key, model)。
+
+    qwen 用 DASHSCOPE_API_KEY（阿里云百炼）。
+    """
+    default_model, env_name = _LLM_PROVIDER_ENV.get(
+        provider, ("mock", f"{provider.upper()}_API_KEY")
+    )
+    api_key = os.environ.get(env_name, "")
+    model = os.environ.get(f"{provider.upper()}_MODEL", default_model)
+    return api_key, model
+
 
 class TaskWorker:
     """Background worker that polls pending tasks and runs the pipeline."""
@@ -32,10 +58,12 @@ class TaskWorker:
         self,
         poll_interval: float = 2.0,
         max_concurrent: int = 3,
+        max_retries: int = 3,
         nodes: list[PipelineNode] | None = None,
     ):
         self.poll_interval = poll_interval
         self.max_concurrent = max_concurrent
+        self.max_retries = max_retries
         self._nodes = nodes  # 可注入（测试用）；None 则用默认真实节点链路
         self._running = False
         self._task: asyncio.Task | None = None
@@ -46,16 +74,34 @@ class TaskWorker:
         if self._running:
             return
         self._running = True
+        # 启动时恢复上次崩溃留下的 RUNNING 任务（进程被 kill 后未正常关闭）
+        await self._recover_stale_tasks()
+        # 注册信号处理：SIGTERM/SIGINT 时优雅关闭
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            with contextlib.suppress(NotImplementedError):
+                loop.add_signal_handler(sig, lambda: asyncio.create_task(self.stop()))
         self._task = asyncio.create_task(self._loop())
         logger.info("TaskWorker started")
 
+    async def _recover_stale_tasks(self) -> None:
+        """启动时把残留的 RUNNING 任务重置为 PENDING（进程崩溃后未正常关闭）。"""
+        repo = TaskRepository()
+        try:
+            stale = repo.list_all(status=TaskStatus.RUNNING, limit=100)
+            for task in stale:
+                logger.warning("恢复残留 RUNNING 任务: %s", task.id)
+                repo.update(task.id, status=TaskStatus.PENDING)
+        except Exception as e:
+            logger.warning("恢复残留任务失败（可忽略）: %s", e)
+
     async def stop(self) -> None:
-        """Stop the worker loop."""
+        """Stop the worker loop. 等待 in-flight 任务最多 30s。"""
         self._running = False
         if self._task:
             self._task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._task
+            with contextlib.suppress(asyncio.CancelledError, asyncio.TimeoutError):
+                await asyncio.wait_for(self._task, timeout=30)
         logger.info("TaskWorker stopped")
 
     async def _loop(self) -> None:
@@ -98,13 +144,18 @@ class TaskWorker:
         try:
             # 优先用 url，其次用本地 video_file 路径
             source = task.video_url or task.video_file
+            llm_provider = task.llm_provider or "qwen"
+            api_key, llm_model = _resolve_llm_creds(llm_provider)
             ctx = TaskContext(
                 task_id=TaskId(task_id),
                 config={
                     "url": source,
                     "video_url": task.video_url,
-                    "llm_provider": task.llm_provider or "mock",
+                    "llm_provider": llm_provider,
+                    "llm_model": llm_model,
+                    "api_key": api_key,
                     "asr_provider": task.asr_provider or "asrtools-b",
+                    "language": "zh",
                 },
             )
             dag = self._build_dag()
@@ -136,16 +187,39 @@ class TaskWorker:
 
         except Exception as e:
             logger.exception("[Worker] Task %s failed: %s", task_id, e)
-            repo.update(task_id, status=TaskStatus.FAILED, error_message=str(e))
-            bus.publish(
-                TaskEvent(
-                    task_id=task_id,
-                    event_type="task.failed",
-                    progress=0,
-                    message=f"任务失败: {e}",
-                    timestamp=datetime.now().isoformat(),
+            # retryable 错误（限流、超时、临时网络错误）自动重试，而非永久失败
+            retryable = isinstance(e, Vid2NoteError) and e.retryable
+            attempt = getattr(task, "retry_count", 0) or 0
+            if retryable and attempt < self.max_retries:
+                logger.warning(
+                    "任务 %s 第 %d 次失败（retryable），稍后重试", task_id, attempt + 1
                 )
-            )
+                repo.update(
+                    task_id,
+                    status=TaskStatus.PENDING,
+                    retry_count=attempt + 1,
+                    error_message=str(e),
+                )
+                bus.publish(
+                    TaskEvent(
+                        task_id=task_id,
+                        event_type="task.retrying",
+                        progress=0,
+                        message=f"任务失败（第 {attempt + 1} 次），稍后重试: {e}",
+                        timestamp=datetime.now().isoformat(),
+                    )
+                )
+            else:
+                repo.update(task_id, status=TaskStatus.FAILED, error_message=str(e))
+                bus.publish(
+                    TaskEvent(
+                        task_id=task_id,
+                        event_type="task.failed",
+                        progress=0,
+                        message=f"任务失败: {e}",
+                        timestamp=datetime.now().isoformat(),
+                    )
+                )
 
     def _build_dag(self) -> PipelineDAG:
         """Build the default pipeline DAG.
