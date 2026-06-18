@@ -1,5 +1,7 @@
 """配置 API 集成测试"""
 
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 from vid2note_server.main import app
@@ -10,9 +12,25 @@ client = TestClient(app)
 
 
 @pytest.fixture(autouse=True)
-def reset_db():
+def reset_db(tmp_path, monkeypatch):
     Database.reset_instance()
+    # 把 ConfigManager 的默认路径指向临时目录，避免污染真实 config/config.yaml
+    tmp_config = tmp_path / "config.yaml"
+    monkeypatch.setattr(
+        "vid2note_core.config.manager.ConfigManager.__init__",
+        lambda self, config_path=None: _init(self, tmp_config),
+    )
     yield
+    Database.reset_instance()
+
+
+def _init(self, config_path):
+    """替代 ConfigManager.__init__，固定 config_path 到临时文件。"""
+    from vid2note_core.config.keychain import KeychainStore
+
+    self.config_path = Path(config_path)
+    self.keychain = KeychainStore()
+    self._config = None
 
 
 def test_update_retention_fields():
