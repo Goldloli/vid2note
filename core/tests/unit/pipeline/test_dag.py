@@ -1,10 +1,11 @@
 """测试 DAG"""
 
-import pytest
 from unittest.mock import AsyncMock
+
+import pytest
+from vid2note_core.pipeline.context import TaskContext
 from vid2note_core.pipeline.dag import PipelineDAG
 from vid2note_core.pipeline.node import PipelineNode
-from vid2note_core.pipeline.context import TaskContext
 from vid2note_core.storage.artifact_store import ArtifactStore
 from vid2note_core.types import NodeName, NodeResult, NodeStatus, TaskId
 
@@ -44,6 +45,21 @@ async def test_run_all_nodes(tmp_path):
     assert len(results) == 2
     n1._mock_run.assert_called_once()
     n2._mock_run.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_run_stops_after_failed_node(tmp_path):
+    download = MockNode(NodeName.DOWNLOAD)
+    download._mock_run.return_value = NodeResult.failure(
+        NodeName.DOWNLOAD, "DOWNLOAD_ERROR", "failed"
+    )
+    extract = MockNode(NodeName.EXTRACT_AUDIO)
+    dag = PipelineDAG([download, extract], ArtifactStore(tmp_path))
+
+    results = await dag.run(TaskContext(task_id=TaskId("task_abcdef012345")))
+
+    assert [result.status for result in results] == [NodeStatus.FAILED]
+    extract._mock_run.assert_not_called()
 
 
 @pytest.mark.asyncio

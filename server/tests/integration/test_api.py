@@ -3,7 +3,6 @@
 from pathlib import Path
 
 from fastapi.testclient import TestClient
-
 from vid2note_server.main import create_app
 
 

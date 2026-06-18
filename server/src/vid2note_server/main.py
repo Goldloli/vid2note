@@ -41,7 +41,12 @@ def create_app(data_root: str | Path | None = None) -> FastAPI:
     application.state.services = services
     application.add_middleware(
         CORSMiddleware,
-        allow_origins=["null", "http://localhost:5173", "app://"],
+        allow_origins=[
+            "null",
+            "http://localhost:5173",
+            "http://localhost:5174",
+            "app://",
+        ],
         allow_credentials=False,
         allow_methods=["GET", "POST", "PUT", "DELETE"],
         allow_headers=["*"],

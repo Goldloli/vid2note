@@ -3,6 +3,7 @@ EventBus tests
 """
 
 import asyncio
+
 import pytest
 from vid2note_core.events.bus import EventBus, TaskEvent
 
@@ -50,7 +51,7 @@ async def test_queue_full_drops_event():
     bus = EventBus()
     q = bus.subscribe("task_full")
     # Fill queue to capacity
-    for i in range(100):
+    for _i in range(100):
         bus.publish(TaskEvent(task_id="task_full", event_type="node.started"))
     # One more should be dropped without error
     bus.publish(TaskEvent(task_id="task_full", event_type="node.started"))

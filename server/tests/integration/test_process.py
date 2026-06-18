@@ -100,10 +100,8 @@ def test_result_completed_with_artifacts(client):
 
     # 写入产物 + 标记完成
     store = client.app.state.services.artifacts
-    store.write_artifact(
-        task_id, NodeName.ORGANIZE.value, "markdown_file", "# 笔记".encode("utf-8")
-    )
-    store.write_artifact(task_id, NodeName.MINDMAP.value, "mindmap_file", "mindmap".encode("utf-8"))
+    store.write_artifact(task_id, NodeName.ORGANIZE.value, "markdown_file", "# 笔记".encode())
+    store.write_artifact(task_id, NodeName.MINDMAP.value, "mindmap_file", b"mindmap")
     repo = client.app.state.services.tasks
     repo.update(task_id, status=TaskStatus.COMPLETED, progress=100)
 

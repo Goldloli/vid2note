@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import pytest
-
 from vid2note_core.asr.local.model_manager import ModelManager
 from vid2note_core.paths import RuntimePaths
 from vid2note_core.storage.artifact_store import ArtifactStore

@@ -1,12 +1,9 @@
 """测试全局异常处理与 CORS/health 修复。"""
 
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from vid2note_core.errors import LLMRateLimited, LLMError
+from vid2note_core.errors import LLMError, LLMRateLimited
 from vid2note_core.storage.db import Database
-
 from vid2note_server.main import app
-
 
 client = TestClient(app)
 

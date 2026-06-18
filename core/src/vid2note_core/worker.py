@@ -9,6 +9,7 @@ import os
 import signal
 from datetime import datetime
 
+from vid2note_core.asr.local.model_manager import ModelManager
 from vid2note_core.errors import Vid2NoteError
 from vid2note_core.events.bus import TaskEvent, get_event_bus
 from vid2note_core.pipeline.context import TaskContext
@@ -24,6 +25,7 @@ from vid2note_core.pipeline.real_nodes import (
 )
 from vid2note_core.storage.artifact_store import ArtifactStore
 from vid2note_core.storage.task_repo import TaskRepository
+from vid2note_core.storage.upload_store import UploadStore
 from vid2note_core.types import NodeFailure, NodeName, NodeStatus, TaskId, TaskStatus
 
 logger = logging.getLogger(__name__)
@@ -47,7 +49,7 @@ def _resolve_llm_creds(provider: str) -> tuple[str, str]:
     default_model, env_name = _LLM_PROVIDER_ENV.get(
         provider, ("mock", f"{provider.upper()}_API_KEY")
     )
-    api_key = os.environ.get(env_name, "")
+    api_key = os.environ.get(env_name, "mock_key" if provider == "mock" else "")
     model = os.environ.get(f"{provider.upper()}_MODEL", default_model)
     return api_key, model
 
@@ -72,6 +74,8 @@ class TaskWorker:
         max_retries: int = 3,
         shutdown_timeout: float = 30.0,
         nodes: list[PipelineNode] | None = None,
+        uploads: UploadStore | None = None,
+        models: ModelManager | None = None,
     ):
         self.poll_interval = poll_interval
         self.max_concurrent = max_concurrent
@@ -79,6 +83,8 @@ class TaskWorker:
         self.shutdown_timeout = shutdown_timeout
         self.repository = repository
         self.artifacts = artifacts
+        self.uploads = uploads
+        self.models = models
         self._nodes = nodes  # 可注入（测试用）；None 则用默认真实节点链路
         self._running = False
         self._task: asyncio.Task | None = None
@@ -100,7 +106,7 @@ class TaskWorker:
         logger.info("TaskWorker started")
 
     async def _recover_stale_tasks(self) -> None:
-        """启动时把残留的 RUNNING 任务重置为 PENDING（进程崩溃后未正常关闭）。"""
+        """启动时把进程崩溃遗留的 RUNNING 任务标记为已中断。"""
         repo = self.repository
         try:
             stale = repo.list_all(status=TaskStatus.RUNNING, limit=100)
@@ -116,7 +122,7 @@ class TaskWorker:
         if self._task:
             try:
                 await asyncio.wait_for(self._task, timeout=self.shutdown_timeout)
-            except (asyncio.CancelledError, asyncio.TimeoutError):
+            except (TimeoutError, asyncio.CancelledError):
                 for task in self._active:
                     task.cancel()
                 await asyncio.gather(*self._active, return_exceptions=True)
@@ -186,12 +192,42 @@ class TaskWorker:
                     "video_url": task.video_url,
                     "llm_provider": llm_provider,
                     **llm_config,
-                    "asr_provider": task.asr_provider or "asrtools-b",
+                    "asr_provider": task.asr_provider or "funasr",
                     "language": "zh",
+                    "model_manager": self.models,
                 },
             )
-            dag = self._build_dag()
             from_node = NodeName(task.rerun_from_node) if task.rerun_from_node else None
+            is_srt_task = bool(task.srt_file)
+            if is_srt_task:
+                if not self.artifacts.exists(task_id, NodeName.TRANSCRIBE.value, "srt_file"):
+                    if self.uploads is None:
+                        raise Vid2NoteError(
+                            "Worker 未配置上传存储",
+                            code="UPLOAD_STORE_MISSING",
+                            step="transcribe",
+                        )
+                    uploaded_srt_path = self.uploads.get_path(task.srt_file)
+                    if uploaded_srt_path is None:
+                        raise Vid2NoteError(
+                            f"找不到上传文件: {task.srt_file}",
+                            code="UPLOAD_NOT_FOUND",
+                            step="transcribe",
+                        )
+                    self.artifacts.import_file(
+                        task_id,
+                        NodeName.TRANSCRIBE.value,
+                        "srt_file",
+                        uploaded_srt_path,
+                        move=False,
+                    )
+                if from_node in {
+                    NodeName.DOWNLOAD,
+                    NodeName.EXTRACT_AUDIO,
+                    NodeName.TRANSCRIBE,
+                }:
+                    from_node = None
+            dag = self._build_dag(start_node=NodeName.ORGANIZE if is_srt_task else None)
             results = await dag.run(ctx, from_node=from_node)
 
             # Check if any node failed
@@ -273,7 +309,7 @@ class TaskWorker:
             )
         )
 
-    def _build_dag(self) -> PipelineDAG:
+    def _build_dag(self, start_node: NodeName | None = None) -> PipelineDAG:
         """Build the default pipeline DAG.
 
         默认全部使用真实节点（download/extract_audio/transcribe/organize/mindmap/cleanup）。
@@ -281,25 +317,15 @@ class TaskWorker:
         """
         if self._nodes is not None:
             return PipelineDAG(self._nodes, self.artifacts)
-        return PipelineDAG(
-            [
-                RealDownloadNode(store=self.artifacts, repository=self.repository),
-                RealExtractAudioNode(store=self.artifacts, repository=self.repository),
-                RealTranscribeNode(store=self.artifacts, repository=self.repository),
-                RealOrganizeNode(store=self.artifacts, repository=self.repository),
-                RealMindmapNode(store=self.artifacts, repository=self.repository),
-                RealCleanupNode(store=self.artifacts, repository=self.repository),
-            ],
-            self.artifacts,
-        )
-
-
-# Global singleton
-_worker: TaskWorker | None = None
-
-
-def get_worker(repository: TaskRepository, artifacts: ArtifactStore) -> TaskWorker:
-    global _worker
-    if _worker is None:
-        _worker = TaskWorker(repository, artifacts)
-    return _worker
+        nodes = [
+            RealDownloadNode(store=self.artifacts, repository=self.repository),
+            RealExtractAudioNode(store=self.artifacts, repository=self.repository),
+            RealTranscribeNode(store=self.artifacts, repository=self.repository),
+            RealOrganizeNode(store=self.artifacts, repository=self.repository),
+            RealMindmapNode(store=self.artifacts, repository=self.repository),
+            RealCleanupNode(store=self.artifacts, repository=self.repository),
+        ]
+        if start_node is not None:
+            start_index = next(i for i, node in enumerate(nodes) if node.name is start_node)
+            nodes = nodes[start_index:]
+        return PipelineDAG(nodes, self.artifacts)

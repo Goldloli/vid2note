@@ -109,7 +109,7 @@ class RetentionConfig(BaseModel):
 class ASRConfig(BaseModel):
     """ASR 配置"""
 
-    provider: str = "asrtools-b"
+    provider: str = "funasr"
     local_model: str = "funasr-paraformer-small"
 
 

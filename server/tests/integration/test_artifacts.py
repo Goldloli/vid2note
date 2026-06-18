@@ -3,6 +3,7 @@
 import zipfile
 from io import BytesIO
 
+
 def _make_task(client):
     """创建一个任务并返回 task_id。"""
     r = client.post("/api/v1/tasks", json={"video_url": "https://example.com/v"})
@@ -13,7 +14,7 @@ def test_list_artifacts(client):
     """列出产物应返回文件名、类型、大小。"""
     task_id = _make_task(client)
     store = client.app.state.services.artifacts
-    payload = "# 笔记\n正文".encode("utf-8")
+    payload = "# 笔记\n正文".encode()
     store.write_artifact(task_id, "organize", "markdown_file", payload)
 
     resp = client.get(f"/api/v1/tasks/{task_id}/artifacts")
@@ -39,7 +40,7 @@ def test_list_artifacts_invalid_id_404(client):
 def test_download_artifact(client):
     """下载 markdown 产物应返回正确内容和 Content-Type。"""
     task_id = _make_task(client)
-    content = "# 标题\n\n正文内容".encode("utf-8")
+    content = "# 标题\n\n正文内容".encode()
     client.app.state.services.artifacts.write_artifact(
         task_id, "organize", "markdown_file", content
     )

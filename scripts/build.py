@@ -15,10 +15,13 @@ SPEC_FILE = ROOT / "scripts" / "vid2note.spec"
 def build():
     """运行 PyInstaller 打包"""
     cmd = [
-        sys.executable, "-m", "PyInstaller",
+        sys.executable,
+        "-m",
+        "PyInstaller",
         "--clean",
         "--noconfirm",
-        "--distpath", str(DIST_DIR),
+        "--distpath",
+        str(DIST_DIR),
         str(SPEC_FILE),
     ]
     print(f"Running: {' '.join(cmd)}")

@@ -3,6 +3,8 @@ Mock LLM 实现
 用于测试环境，避免真实API调用
 """
 
+import re
+
 from .base import BaseLLM
 
 
@@ -31,13 +33,16 @@ class MockLLM(BaseLLM):
         # 根据消息内容返回不同的模拟响应
         content = str(messages).lower()
 
-        # 分类请求
-        if "分类" in content or "category" in content:
-            return '{"category": "knowledge", "confidence": 0.95, "reason": "这是知识点内容"}'
+        if "思维导图" in content or "mindmap" in content:
+            return "mindmap\n  root((来源笔记))\n    内容要点\n    证据说明"
 
         # 重组/整理请求
         if "重组" in content or "整理" in content or "markdown" in content:
             return self._generate_mock_markdown(messages)
+
+        # 分类请求
+        if "分类" in content or "category" in content:
+            return '{"category": "knowledge", "confidence": 0.95, "reason": "这是知识点内容"}'
 
         # 过滤请求
         if "过滤" in content or "filter" in content:
@@ -47,48 +52,37 @@ class MockLLM(BaseLLM):
         return "## 整理后的内容\n\n这是Mock LLM生成的测试内容。\n\n### 要点1\n- 内容要点A\n- 内容要点B\n\n### 要点2\n- 内容要点C\n- 内容要点D"
 
     def _generate_mock_markdown(self, messages) -> str:
-        """生成模拟的Markdown内容"""
-        return """## 课程笔记整理
+        """把固定 SRT 输入转为可核验、无补充事实的来源笔记。"""
+        user_content = next(
+            (message["content"] for message in messages if message.get("role") == "user"), ""
+        )
+        if "字幕：\n" in user_content:
+            user_content = user_content.split("字幕：\n", 1)[1]
+        if "\n\n转换为" in user_content:
+            user_content = user_content.rsplit("\n\n转换为", 1)[0]
 
-### 第一部分：概述
-
-本节主要介绍了RAG（检索增强生成）、Function Calling和MCP（模型上下文协议）的概念和应用。
-
-**核心要点：**
-- RAG用于解决大模型预训练数据之外的知识问题
-- Function Calling允许大模型调用外部API
-- MCP是一种统一的外部系统调用协议
-
-### 第二部分：RAG详解
-
-RAG（Retrieval-Augmented Generation）通过将用户查询与知识库匹配，增强大模型的回答能力。
-
-**适用场景：**
-1. 企业内部知识问答
-2. 产品文档查询
-3. 规章制度检索
-
-### 第三部分：Function Calling
-
-Function Calling让大模型能够调用外部函数获取实时数据。
-
-**典型应用：**
-- 订单查询
-- 天气查询
-- 数据库操作
-
-### 第四部分：MCP协议
-
-MCP（Model Context Protocol）是Anthropic提出的开放标准，用于统一AI与外部系统的集成。
-
-**优势：**
-- 统一接口标准
-- 降低开发成本
-- 提高可维护性
-
----
-
-*本内容由AI自动生成，仅供参考*"""
+        segments = re.findall(
+            r"\d+\s*\n"
+            r"(\d{2}:\d{2}:\d{2}),\d{3}\s+-->\s+"
+            r"(\d{2}:\d{2}:\d{2}),\d{3}\s*\n"
+            r"(.+?)(?=\n\s*\n\d+\s*\n|\Z)",
+            user_content,
+            flags=re.DOTALL,
+        )
+        lines = ["# 来源笔记", "", "## 内容要点", ""]
+        for start, end, raw_text in segments:
+            text = " ".join(raw_text.split())
+            uncertainty = " **ASR 不确定：**" if "[听不清]" in text else ""
+            lines.append(f"-{uncertainty} {text}（证据：{start}–{end}）")
+        lines.extend(
+            [
+                "",
+                "## 证据说明",
+                "",
+                "以上内容仅重排字幕原文；时间范围来自对应 SRT 片段。",
+            ]
+        )
+        return "\n".join(lines)
 
     def reset(self):
         """重置计数器"""

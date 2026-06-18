@@ -10,10 +10,12 @@ upload SRT → process/start → process/status → process/result
 
 数据隔离：UploadStore 和 ArtifactStore 通过 monkeypatch 指到 tmp_path。
 """
-import io
-from vid2note_core.types import NodeName, TaskStatus
-from vid2note_core.utils.security import validate_file_id
 
+import io
+import time
+
+from vid2note_core.types import TaskStatus
+from vid2note_core.utils.security import validate_file_id
 
 SAMPLE_SRT = """1
 00:00:00,000 --> 00:00:02,000
@@ -45,7 +47,7 @@ def test_full_chain_upload_start_status_result(client):
     # ── Step 2: 启动处理（用上传的 file_id）─────────
     start_resp = client.post(
         "/api/v1/process/start",
-        json={"srt_file": file_id, "llm_provider": "mock", "asr_provider": "asrtools-b"},
+        json={"srt_file": file_id, "llm_provider": "mock", "asr_provider": "funasr"},
     )
     assert start_resp.status_code == 200
     task_id = start_resp.json()["task_id"]
@@ -58,45 +60,35 @@ def test_full_chain_upload_start_status_result(client):
     assert task.status == TaskStatus.PENDING
     assert task.srt_file == file_id
 
-    # ── Step 3: 查询状态（pending）────────────────────
-    status_resp = client.get(f"/api/v1/process/status/{task_id}")
-    assert status_resp.status_code == 200
-    status_data = status_resp.json()
-    assert status_data["task_id"] == task_id
-    assert status_data["status"] == "pending"
-    assert status_data["progress"] == 0
+    # ── Step 3: 等待真实 Worker 完成 ──────────────────
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        task = repo.get_by_id(task_id)
+        if task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED):
+            break
+        time.sleep(0.05)
+    assert task.status is TaskStatus.COMPLETED, task.error_message
 
-    # 模拟任务推进到 running
-    repo.update(task_id, status=TaskStatus.RUNNING, progress=50, current_step="transcribe")
-    status_resp = client.get(f"/api/v1/process/status/{task_id}")
-    assert status_resp.json()["status"] == "running"
-    assert status_resp.json()["progress"] == 50
-    assert status_resp.json()["current_step"] == "transcribe"
-
-    # ── Step 4: 产物查询（未完成时仅状态）────────────
-    result_resp = client.get(f"/api/v1/process/result/{task_id}")
-    assert result_resp.status_code == 200
-    result_data = result_resp.json()
-    assert result_data["status"] == "running"
-    assert "artifacts" not in result_data
-
-    # ── Step 5: 完成后产物查询 ────────────────────────
-    astore = client.app.state.services.artifacts
-    astore.write_artifact(
-        task_id, NodeName.ORGANIZE.value, "markdown_file", "# 全链路测试笔记".encode("utf-8")
-    )
-    astore.write_artifact(
-        task_id, NodeName.MINDMAP.value, "mindmap_file", "mindmap".encode("utf-8")
-    )
-    repo.update(task_id, status=TaskStatus.COMPLETED, progress=100)
-
+    # ── Step 4: 从真实 ArtifactStore 查询产物 ─────────
     result_resp = client.get(f"/api/v1/process/result/{task_id}")
     result_data = result_resp.json()
     assert result_data["status"] == "completed"
     assert result_data["progress"] == 100
     assert "artifacts" in result_data
-    assert result_data["artifacts"]["markdown"] == "# 全链路测试笔记"
-    assert result_data["artifacts"]["mindmap"] == "mindmap"
+    assert "# 来源笔记" in result_data["artifacts"]["markdown"]
+    assert "证据：00:00:00–00:00:02" in result_data["artifacts"]["markdown"]
+    assert "这是第一句字幕" in result_data["artifacts"]["srt"]
+    assert result_data["artifacts"]["mindmap"]
+
+    rerun_resp = client.post(f"/api/v1/tasks/{task_id}/rerun", json={"from_node": "organize"})
+    assert rerun_resp.status_code == 200
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        task = repo.get_by_id(task_id)
+        if task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED):
+            break
+        time.sleep(0.05)
+    assert task.status is TaskStatus.COMPLETED, task.error_message
 
 
 def test_full_chain_invalid_file_id_rejected(client):

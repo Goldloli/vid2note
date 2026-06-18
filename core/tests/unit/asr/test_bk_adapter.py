@@ -4,7 +4,6 @@
 """
 
 import pytest
-
 from vid2note_core.asr.cloud.bk_adapter import BkAsrAdapter
 from vid2note_core.errors import ASRError
 
@@ -47,10 +46,9 @@ def test_unsupported_backend_raises():
         BkAsrAdapter(backend="invalid")
 
 
-def test_default_backend_is_bcut():
-    asr = BkAsrAdapter()
-    assert asr.backend_name == "bcut"
-    assert asr.is_available() is True
+def test_vendored_backend_is_not_bundled():
+    with pytest.raises(ValueError, match="不支持的 bk_asr 后端"):
+        BkAsrAdapter()
 
 
 def test_transcribe_maps_segments(tmp_path, monkeypatch):
@@ -76,7 +74,10 @@ def test_transcribe_maps_segments(tmp_path, monkeypatch):
     assert result.duration_ms == 3000
 
 
-def test_transcribe_missing_file_raises(tmp_path):
+def test_transcribe_missing_file_raises(tmp_path, monkeypatch):
+    import vid2note_core.asr.cloud.bk_adapter as mod
+
+    monkeypatch.setitem(mod._BACKENDS, "bcut", _FakeBackend)
     asr = BkAsrAdapter(backend="bcut")
     with pytest.raises(ASRError, match="音频文件不存在"):
         asr.transcribe(tmp_path / "nope.wav", {"language": "zh"})

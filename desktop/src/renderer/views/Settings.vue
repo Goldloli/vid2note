@@ -12,7 +12,7 @@
       <div>
         <!-- ASR -->
         <div v-show="tab === 'asr'" class="card card-pad reveal">
-          <div class="section-title"><h2>语音识别引擎 (ASR)</h2><span class="tag">默认 asrtools-b</span></div>
+          <div class="section-title"><h2>语音识别引擎 (ASR)</h2><span class="tag">默认 funasr</span></div>
           <div class="opt-grid">
             <div v-for="p in asrProviders" :key="p.name" class="opt-card" :class="{sel: form.asr_provider === p.name}" @click="selectAsr(p.name)">
               <span class="opt-radio"></span>
@@ -21,9 +21,9 @@
           </div>
           <div class="divider-h"></div>
           <div class="form-row">
-            <div><div class="fr-label">ASR 密钥</div><div class="fr-desc">当前 ASR（asrtools-b）为免费云端接口（B站必剪/剪映/快手），无需 API 密钥。</div></div>
+            <div><div class="fr-label">本地模型</div><div class="fr-desc">FunASR 在本机运行，音频不会发送到第三方识别接口。</div></div>
             <div class="fr-control">
-              <span class="mono-sm muted">— 免接口密钥 —</span>
+              <span class="mono-sm muted">— 无需接口密钥 —</span>
             </div>
           </div>
         </div>
@@ -104,7 +104,6 @@ import { listModels } from '../api/models'
 
 const tab = ref('asr')
 const asrProviders = [
-  { name: 'asrtools-b', meta: '云端 · 高精度 · 中文最佳' },
   { name: 'funasr', meta: '本地 · paraformer-small' },
 ]
 const llmProviders = ref([])
@@ -112,7 +111,7 @@ const verifyMsg = ref('')
 const verifyOk = ref(false)
 
 const form = reactive({
-  asr_provider: 'asrtools-b',
+  asr_provider: 'funasr',
   llm_provider: 'qwen',
   api_key: '',
   llm_keys: {},

@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 from vid2note_core.pipeline.node import PipelineNode
 from vid2note_core.storage.artifact_store import ArtifactStore
-from vid2note_core.types import NodeName, NodeResult
+from vid2note_core.types import NodeName, NodeResult, NodeStatus
 
 if TYPE_CHECKING:
     from vid2note_core.pipeline.context import TaskContext
@@ -60,6 +60,8 @@ class PipelineDAG:
 
             result = await node.run(ctx)
             results.append(result)
+            if result.status is NodeStatus.FAILED:
+                break
 
         return results
 

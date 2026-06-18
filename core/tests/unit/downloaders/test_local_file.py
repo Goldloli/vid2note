@@ -1,8 +1,7 @@
 """测试本地文件下载器"""
 
-from pathlib import Path
-from vid2note_core.downloaders.local_file import LocalFileDownloader
 from vid2note_core.downloaders.base import DownloadOpts
+from vid2note_core.downloaders.local_file import LocalFileDownloader
 
 
 def test_can_handle_existing_file(tmp_path):
