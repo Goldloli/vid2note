@@ -9,8 +9,6 @@ import sys
 from types import ModuleType
 from unittest.mock import MagicMock
 
-import pytest
-
 from vid2note_core.asr.local.device import detect_device
 
 

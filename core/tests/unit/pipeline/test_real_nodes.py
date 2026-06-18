@@ -231,7 +231,7 @@ async def test_mindmap_node_success(store):
         "task_abcdef012345",
         NodeName.ORGANIZE.value,
         "markdown_file",
-        "# 笔记\n\n- 要点".encode("utf-8"),
+        "# 笔记\n\n- 要点".encode(),
     )
     fake_llm = MagicMock()
     fake_llm.chat.return_value = "mindmap\n  root((主题))\n    要点"
@@ -259,7 +259,7 @@ async def test_mindmap_node_strips_code_fence(store):
         "task_abcdef012345",
         NodeName.ORGANIZE.value,
         "markdown_file",
-        "# 笔记".encode("utf-8"),
+        "# 笔记".encode(),
     )
     fake_llm = MagicMock()
     fake_llm.chat.return_value = "```mermaid\nmindmap\n  root((T))\n```"
@@ -280,7 +280,7 @@ async def test_mindmap_node_llm_failure(store):
         "task_abcdef012345",
         NodeName.ORGANIZE.value,
         "markdown_file",
-        "# 笔记".encode("utf-8"),
+        "# 笔记".encode(),
     )
     fake_llm = MagicMock()
     fake_llm.chat.side_effect = RuntimeError("llm down")
@@ -298,7 +298,7 @@ async def test_mindmap_node_outline_format(store):
         "task_abcdef012345",
         NodeName.ORGANIZE.value,
         "markdown_file",
-        "# 笔记".encode("utf-8"),
+        "# 笔记".encode(),
     )
     fake_llm = MagicMock()
     fake_llm.chat.return_value = "课程主题\n  第一章"

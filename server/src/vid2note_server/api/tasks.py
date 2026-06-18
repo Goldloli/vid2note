@@ -16,7 +16,7 @@ class CreateTaskRequest(BaseModel):
     video_url: str | None = None
     video_file: str | None = None
     pdf_file: str | None = None
-    asr_provider: str = "asrtools-b"
+    asr_provider: str = "funasr"
     llm_provider: str = "qwen"
     export_mindmap: bool = False
 

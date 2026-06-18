@@ -1,15 +1,14 @@
 """测试类型定义"""
 
-from pathlib import Path
 from vid2note_core.errors import DownloadError
 from vid2note_core.types import (
-    TaskId,
     ArtifactRef,
     NodeName,
-    NodeStatus,
     NodeResult,
-    TaskStatus,
+    NodeStatus,
     RunMode,
+    TaskId,
+    TaskStatus,
 )
 
 

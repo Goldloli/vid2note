@@ -18,10 +18,20 @@
       <p v-if="store.error" class="muted mono-sm" style="margin-top:8px;color:var(--danger)">{{ store.error }}</p>
 
       <div class="spread" style="margin-top:14px; flex-wrap:wrap; gap:12px">
+        <label class="btn btn-sm">
+          导入 SRT
+          <input
+            data-testid="srt-input"
+            type="file"
+            accept=".srt"
+            hidden
+            :disabled="store.isCreating"
+            @change="importSrt"
+          >
+        </label>
         <div class="row gap-s">
           <span class="kicker">ASR</span>
-          <button type="button" class="chip active">asrtools-b</button>
-          <button type="button" class="chip">FunASR 本地</button>
+          <button type="button" class="chip active">FunASR 本地</button>
         </div>
         <div class="row gap-s">
           <span class="kicker">LLM</span>
@@ -99,7 +109,7 @@ const completedCount = computed(() => store.tasks.filter((t) => t.status === 'co
 const failedCount = computed(() => store.tasks.filter((t) => t.status === 'failed').length)
 
 const taskTitle = (t) => {
-  const src = t.video_url || t.video_file || ''
+  const src = t.video_url || t.video_file || t.source_name || t.srt_file || ''
   const host = src.replace(/^https?:\/\//, '').split('/')[0]
   return host || src || t.id
 }
@@ -124,6 +134,16 @@ async function submit() {
   store.error = ''
   await store.addTask(v)
   url.value = ''
+}
+
+async function importSrt(event) {
+  const file = event.target.files?.[0]
+  if (!file) return
+  try {
+    await store.addSrtTask(file)
+  } finally {
+    event.target.value = ''
+  }
 }
 
 onMounted(() => store.loadTasks())

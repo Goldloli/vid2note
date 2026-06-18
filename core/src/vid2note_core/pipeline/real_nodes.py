@@ -28,7 +28,6 @@ from vid2note_core.events.bus import TaskEvent, get_event_bus
 from vid2note_core.pipeline.context import TaskContext
 from vid2note_core.pipeline.node import PipelineNode
 from vid2note_core.storage.artifact_store import ArtifactStore
-from vid2note_core.storage.task_repo import TaskRepository
 from vid2note_core.types import ArtifactRef, NodeName, NodeResult, NodeStatus
 
 
@@ -180,9 +179,7 @@ class RealExtractAudioNode(PipelineNode, _RealNodeMixin):
     async def run(self, ctx: TaskContext) -> NodeResult:
         task_id = ctx.task_id.value
         task_dir = self.store.ensure_task_dir(task_id)
-        video_path = self.store.artifact_path(
-            task_id, NodeName.DOWNLOAD.value, "video_file"
-        )
+        video_path = self.store.artifact_path(task_id, NodeName.DOWNLOAD.value, "video_file")
 
         self._update_db(task_id, NodeStatus.RUNNING)
         await self._publish(task_id, "node.started", 30, "提取音频中...")
@@ -231,9 +228,7 @@ class RealTranscribeNode(PipelineNode, _RealNodeMixin):
 
     async def run(self, ctx: TaskContext) -> NodeResult:
         task_id = ctx.task_id.value
-        audio_path = self.store.artifact_path(
-            task_id, NodeName.EXTRACT_AUDIO.value, "audio_file"
-        )
+        audio_path = self.store.artifact_path(task_id, NodeName.EXTRACT_AUDIO.value, "audio_file")
 
         self._update_db(task_id, NodeStatus.RUNNING)
         await self._publish(task_id, "node.started", 50, "语音识别中...")
@@ -481,9 +476,12 @@ def _default_asr(config: dict):
     """根据 config 创建 ASR。provider 错误或初始化失败时显式抛 ASRError（不再静默回退 mock）。"""
     from vid2note_core.asr.factory import ASRFactory
 
-    provider = config.get("asr_provider", "asrtools-b")
+    provider = config.get("asr_provider", "funasr")
     try:
-        return ASRFactory.create(provider, {})
+        asr_config = {}
+        if model_manager := config.get("model_manager"):
+            asr_config["model_manager"] = model_manager
+        return ASRFactory.create(provider, asr_config)
     except ValueError as e:
         raise ASRError(
             f"不支持的 ASR 提供商: {provider}（{e}）",

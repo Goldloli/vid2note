@@ -1,10 +1,9 @@
 """测试任务仓库"""
 
 import pytest
-from datetime import datetime
 from vid2note_core.storage.db import Database
-from vid2note_core.storage.task_repo import TaskRepository, TaskRecord
-from vid2note_core.types import TaskStatus, NodeStatus
+from vid2note_core.storage.task_repo import TaskRepository
+from vid2note_core.types import NodeStatus, TaskStatus
 
 
 @pytest.fixture

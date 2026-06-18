@@ -1,6 +1,7 @@
 """测试产物存储"""
 
 from pathlib import Path
+
 from vid2note_core.storage.artifact_store import ArtifactStore
 
 
@@ -55,9 +56,7 @@ def test_import_file_does_not_read_whole_media(tmp_path, monkeypatch):
         lambda self: (_ for _ in ()).throw(AssertionError("whole-file read")),
     )
 
-    stored = store.import_file(
-        "task_abc123456789", "download", "video_file", source
-    )
+    stored = store.import_file("task_abc123456789", "download", "video_file", source)
 
     with stored.open("rb") as handle:
         assert handle.read() == b"video"

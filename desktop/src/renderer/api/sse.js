@@ -14,7 +14,8 @@ export class TaskEventSource {
     } else {
       baseURL = import.meta.env.VITE_API_BASE_URL || ''
     }
-    const url = `${baseURL}/api/v1/tasks/${this.taskId}/events`
+    const apiBase = baseURL.endsWith('/api/v1') ? baseURL : `${baseURL}/api/v1`
+    const url = `${apiBase}/tasks/${this.taskId}/events`
     this.es = new EventSource(url)
 
     this.es.onmessage = (event) => {

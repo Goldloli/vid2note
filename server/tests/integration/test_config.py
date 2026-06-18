@@ -4,9 +4,8 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from vid2note_server.main import app
 from vid2note_core.storage.db import Database
-
+from vid2note_server.main import app
 
 client = TestClient(app)
 
@@ -81,6 +80,7 @@ def test_get_config_masks_api_keys():
     """GET /config 不应返回明文密钥。"""
     resp = client.get("/api/v1/config")
     assert resp.status_code == 200
+
     # 遍历返回值，确认没有明文 api_key
     def _has_plaintext_key(obj):
         if isinstance(obj, dict):
@@ -92,4 +92,5 @@ def test_get_config_masks_api_keys():
         elif isinstance(obj, list):
             return any(_has_plaintext_key(x) for x in obj)
         return False
+
     assert not _has_plaintext_key(resp.json())

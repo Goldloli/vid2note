@@ -8,7 +8,7 @@
           <div class="muted mono-sm" style="margin-top:4px">{{ id }} · {{ task?.video_url || task?.video_file || '—' }}</div>
         </div>
       </div>
-      <div class="row gap-s"><span class="tag">asrtools-b</span><span class="tag">qwen-turbo</span></div>
+      <div class="row gap-s"><span class="tag">{{ task?.asr_provider || 'funasr' }}</span><span class="tag">{{ task?.llm_provider || 'qwen' }}</span></div>
     </div>
     <div class="td-grid">
       <div>
@@ -36,7 +36,7 @@
           <div v-show="tab === 'srt'" style="padding:16px 18px"><pre v-if="artifacts?.srt" class="srt-pre">{{ artifacts.srt }}</pre><div v-else class="muted">暂无转录稿</div></div>
           <div v-show="tab === 'note'" style="padding:18px"><pre v-if="artifacts?.markdown" class="srt-pre note-pre">{{ artifacts.markdown }}</pre><div v-else class="muted">暂无笔记</div></div>
           <div v-show="tab === 'mindmap'" style="padding:18px"><pre v-if="artifacts?.mindmap" class="srt-pre">{{ artifacts.mindmap }}</pre><div v-else class="muted">暂无思维导图</div></div>
-          <div v-show="tab === 'meta'" style="padding:18px"><dl class="kv" v-if="task"><dt>任务 ID</dt><dd>{{ task.id }}</dd><dt>来源</dt><dd>{{ task.video_url || task.video_file || '—' }}</dd><dt>状态</dt><dd>{{ task.status }}</dd><dt>ASR</dt><dd>{{ task.asr_provider || 'asrtools-b' }}</dd><dt>LLM</dt><dd>{{ task.llm_provider || 'qwen' }}</dd></dl></div>
+          <div v-show="tab === 'meta'" style="padding:18px"><dl class="kv" v-if="task"><dt>任务 ID</dt><dd>{{ task.id }}</dd><dt>来源</dt><dd>{{ task.video_url || task.video_file || '—' }}</dd><dt>状态</dt><dd>{{ task.status }}</dd><dt>ASR</dt><dd>{{ task.asr_provider || 'funasr' }}</dd><dt>LLM</dt><dd>{{ task.llm_provider || 'qwen' }}</dd></dl></div>
         </div>
       </div>
       <div class="td-side">

@@ -3,8 +3,8 @@ TaskWorker 端到端测试：注入真实节点（mock 掉下载器/ffmpeg/ASR/L
 验证完整链路 download → extract_audio → transcribe → organize 的 artifact 流转。
 """
 
-from unittest.mock import MagicMock
 import asyncio
+from unittest.mock import MagicMock
 
 import pytest
 from vid2note_core.asr.base import ASRResult, ASRSegment
@@ -76,7 +76,9 @@ async def test_worker_runs_full_pipeline(env):
     task_id = TaskId.generate()
     repo.create(task_id=task_id, video_url="https://example.com/v", status=TaskStatus.PENDING)
 
-    worker = TaskWorker(repo, store, poll_interval=0.05, max_concurrent=1, nodes=_build_nodes(store))
+    worker = TaskWorker(
+        repo, store, poll_interval=0.05, max_concurrent=1, nodes=_build_nodes(store)
+    )
     try:
         await worker.start()
         # 轮询并处理一个任务

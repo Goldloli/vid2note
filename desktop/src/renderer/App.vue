@@ -56,7 +56,7 @@
 
         <div class="sidebar-foot">
           <div class="engine-card">
-            <div class="row"><span class="lbl">ASR</span><span class="val">asrtools-b · 云端</span></div>
+            <div class="row"><span class="lbl">ASR</span><span class="val">funasr · 本地</span></div>
             <div class="row"><span class="lbl">LLM</span><span class="val">qwen-turbo</span></div>
             <div class="row"><span class="lbl">引擎</span>
               <span class="row gap-xs"><span class="dot-live" style="width:6px;height:6px"></span><span class="val" style="color:var(--success)">Python 运行中</span></span>

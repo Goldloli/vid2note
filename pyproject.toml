@@ -24,9 +24,6 @@ testpaths = ["core/tests", "server/tests"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-# bk_asr/ 是 vendored 第三方代码（github.com/WEIFENG2333/AsrTools），
-# 不纳入我们的代码质量门禁，避免上游更新时产生维护负担。
-extend-exclude = ["core/src/vid2note_core/asr/bk_asr"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM"]
@@ -37,13 +34,6 @@ ignore = ["E501"]
 "core/src/vid2note_core/errors.py" = ["N818"]
 # types.py 的枚举有意继承 (str, Enum) 以保证 JSON 序列化兼容
 "core/src/vid2note_core/types.py" = ["UP042"]
-# vendored bk_asr：全部豁免（已在 extend-exclude，这里是双保险）
-"core/src/vid2note_core/asr/bk_asr/*" = ["ALL"]
-
-[tool.ruff.format]
-# 同样排除 vendored 目录的格式化检查
-exclude = ["core/src/vid2note_core/asr/bk_asr"]
-
 [tool.mypy]
 python_version = "3.11"
 # 渐进式类型检查：不强制 strict（既有代码大量未注解），
@@ -53,9 +43,6 @@ check_untyped_defs = false
 disallow_untyped_defs = false
 warn_return_any = false
 warn_unused_ignores = true
-# vendored bk_asr 不参与类型检查
-exclude = ["core/src/vid2note_core/asr/bk_asr/"]
-
 [[tool.mypy.overrides]]
 module = ["funasr.*", "torch.*", "modelscope.*", "respx.*", "yaml.*"]
 ignore_missing_imports = true

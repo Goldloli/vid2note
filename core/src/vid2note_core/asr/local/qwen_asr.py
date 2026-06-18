@@ -41,7 +41,9 @@ class Qwen3ASRAdapter(IASR):
         model_factory: Any = None,
     ):
         self.model_id = model_id
-        self.manager = model_manager or ModelManager()
+        if model_manager is None:
+            raise TypeError("model_manager is required")
+        self.manager = model_manager
         self.device = device or detect_device()
         # 可注入的工厂（测试用）；None 时延迟导入 transformers
         self._processor_factory = processor_factory

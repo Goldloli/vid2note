@@ -4,12 +4,12 @@
 """
 
 import os
-import sys
 import platform
+import stat
+import sys
+import tarfile
 import urllib.request
 import zipfile
-import tarfile
-import stat
 from pathlib import Path
 
 BIN_DIR = Path(__file__).parent / "bin"
@@ -62,7 +62,7 @@ def fetch_ffmpeg():
                     break
         tmp.unlink()
     else:
-        print(f"Windows not yet supported in this script, please install ffmpeg manually")
+        print("Windows not yet supported in this script, please install ffmpeg manually")
         sys.exit(1)
 
     make_executable(dest)
@@ -82,7 +82,7 @@ def fetch_ytdlp():
     elif OS == "linux":
         url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp"
     else:
-        print(f"Windows not yet supported in this script")
+        print("Windows not yet supported in this script")
         sys.exit(1)
 
     download(url, dest)

@@ -43,12 +43,25 @@
       {
         "from": "../core",
         "to": "core-src",
-        "filter": ["src/**/*", "pyproject.toml", "README.md"]
+        "filter": [
+          "src/**/*",
+          "pyproject.toml",
+          "README.md",
+          "!src/**/__pycache__/**",
+          "!src/**/*.pyc",
+          "!src/vid2note_core/asr/bk_asr/**"
+        ]
       },
       {
         "from": "../server",
         "to": "server-src",
-        "filter": ["src/**/*", "pyproject.toml", "README.md"]
+        "filter": [
+          "src/**/*",
+          "pyproject.toml",
+          "README.md",
+          "!src/**/__pycache__/**",
+          "!src/**/*.pyc"
+        ]
       }
     ],
     "mac": {

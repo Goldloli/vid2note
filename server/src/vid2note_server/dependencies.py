@@ -33,7 +33,7 @@ def build_services(paths: RuntimePaths) -> Services:
     uploads = UploadStore(paths.uploads)
     models = ModelManager(paths.models)
     config = ConfigManager(paths.config)
-    worker = TaskWorker(tasks, artifacts)
+    worker = TaskWorker(tasks, artifacts, uploads=uploads, models=models)
     return Services(paths, database, tasks, artifacts, uploads, models, config, worker)
 
 

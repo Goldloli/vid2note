@@ -36,7 +36,9 @@ class FunASRAdapter(IASR):
         auto_model_factory: Any = None,
     ):
         self.model_id = model_id
-        self.manager = model_manager or ModelManager()
+        if model_manager is None:
+            raise TypeError("model_manager is required")
+        self.manager = model_manager
         self.device = device or detect_device()
         # 允许注入 AutoModel 工厂（测试用）；默认延迟导入 funasr
         self._auto_model_factory = auto_model_factory

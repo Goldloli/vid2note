@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { createTask, listTasks } from '../api/task'
+import { startProcess, uploadSrt } from '../api/process'
 import { TaskEventSource } from '../api/sse'
 
 export const useTaskStore = defineStore('task', () => {
@@ -32,6 +33,36 @@ export const useTaskStore = defineStore('task', () => {
         progress: 0,
         current_step: '等待处理',
         video_url: url,
+        created_at: new Date().toISOString(),
+      }
+      tasks.value = [newTask, ...tasks.value]
+      _subscribeToEvents(res.task_id)
+      return res.task_id
+    } catch (e) {
+      error.value = e.message
+      throw e
+    } finally {
+      isCreating.value = false
+    }
+  }
+
+  async function addSrtTask(file) {
+    isCreating.value = true
+    error.value = ''
+    try {
+      const uploaded = await uploadSrt(file)
+      const res = await startProcess({
+        srt_file: uploaded.file_id,
+        llm_provider: 'mock',
+        asr_provider: 'funasr',
+      })
+      const newTask = {
+        id: res.task_id,
+        status: 'pending',
+        progress: 0,
+        current_step: '等待处理',
+        srt_file: uploaded.file_id,
+        source_name: uploaded.filename,
         created_at: new Date().toISOString(),
       }
       tasks.value = [newTask, ...tasks.value]
@@ -105,6 +136,7 @@ export const useTaskStore = defineStore('task', () => {
     completedTasks,
     loadTasks,
     addTask,
+    addSrtTask,
     cleanup,
   }
 })
