@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from vid2note_core.worker import get_worker
 
-from vid2note_server.api import config, events, logs, models, process, tasks, upload
+from vid2note_server.api import artifacts, config, events, logs, models, process, tasks, upload
 
 
 @asynccontextmanager
@@ -34,6 +34,7 @@ app.include_router(config.router, prefix="/api/v1")
 app.include_router(models.router, prefix="/api/v1")
 app.include_router(events.router, prefix="/api/v1")
 app.include_router(logs.router, prefix="/api/v1")
+app.include_router(artifacts.router, prefix="/api/v1")
 
 
 @app.get("/health")
