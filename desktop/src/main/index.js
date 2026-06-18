@@ -3,10 +3,12 @@ const path = require('path')
 const { spawn, execSync } = require('child_process')
 const net = require('net')
 const fs = require('fs')
+const { PythonService } = require('./python-service')
 
 let mainWindow = null
 let pythonProcess = null
 let backendPort = null
+const pythonService = new PythonService({ graceMs: 30_000 })
 
 const isDev = process.env.NODE_ENV === 'development'
 const SERVER_SRC_DIR = path.join(process.resourcesPath, 'server-src')
@@ -141,6 +143,7 @@ async function startPythonBackend() {
     cwd,
     stdio: isDev ? 'inherit' : 'pipe',
   })
+  pythonService.attach(pythonProcess)
 
   if (!isDev && pythonProcess.stderr) {
     pythonProcess.stderr.on('data', (d) => {
@@ -228,16 +231,10 @@ app.whenReady().then(async () => {
 })
 
 app.on('window-all-closed', () => {
-  if (pythonProcess) {
-    pythonProcess.kill()
-    pythonProcess = null
-  }
+  pythonService.stop()
   if (process.platform !== 'darwin') app.quit()
 })
 
 app.on('before-quit', () => {
-  if (pythonProcess) {
-    pythonProcess.kill()
-    pythonProcess = null
-  }
+  pythonService.stop()
 })

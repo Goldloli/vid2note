@@ -173,14 +173,15 @@ async def test_rerun_passes_from_node_to_pipeline(env):
 class BlockingNode(PipelineNode):
     name = NodeName.DOWNLOAD
 
-    def __init__(self, entered, release):
+    def __init__(self, entered, release, required_count=2):
         self.entered = entered
         self.release = release
+        self.required_count = required_count
         self.count = 0
 
     async def run(self, ctx):
         self.count += 1
-        if self.count >= 2:
+        if self.count >= self.required_count:
             self.entered.set()
         await self.release.wait()
         return NodeResult.success(self.name)
@@ -208,3 +209,28 @@ async def test_worker_runs_up_to_configured_concurrency(env):
     finally:
         release.set()
         await worker.stop()
+
+
+@pytest.mark.asyncio
+async def test_worker_marks_unfinished_tasks_interrupted_on_shutdown(env):
+    root, repo = env
+    store = ArtifactStore(root)
+    task_id = TaskId.generate()
+    repo.create(task_id=task_id, video_url="https://example.com/v", status=TaskStatus.PENDING)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    node = BlockingNode(entered, release, required_count=1)
+    worker = TaskWorker(
+        repo,
+        store,
+        poll_interval=0.01,
+        max_concurrent=1,
+        shutdown_timeout=0.01,
+        nodes=[node],
+    )
+
+    await worker.start()
+    await asyncio.wait_for(entered.wait(), timeout=0.5)
+    await worker.stop()
+
+    assert repo.get_by_id(task_id).status is TaskStatus.INTERRUPTED

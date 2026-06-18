@@ -34,7 +34,7 @@ _LLM_PROVIDER_ENV = {
     "glm": ("glm-4-flash", "ZHIPU_API_KEY"),
     "deepseek": ("deepseek-chat", "DEEPSEEK_API_KEY"),
     "moonshot": ("moonshot-v1-8k", "MOONSHOT_API_KEY"),
-    "baidu": ("ernie-bot-4", "BAICHUAN_API_KEY"),
+    "baidu": ("ernie-bot-4", "BAIDU_API_KEY"),
     "doubao": ("doubao-pro-4k", "VOLCANO_API_KEY"),
 }
 
@@ -52,6 +52,14 @@ def _resolve_llm_creds(provider: str) -> tuple[str, str]:
     return api_key, model
 
 
+def _resolve_llm_config(provider: str) -> dict[str, str]:
+    api_key, model = _resolve_llm_creds(provider)
+    config = {"api_key": api_key, "llm_model": model}
+    if provider == "baidu":
+        config["secret_key"] = os.environ.get("BAIDU_SECRET_KEY", "")
+    return config
+
+
 class TaskWorker:
     """Background worker that polls pending tasks and runs the pipeline."""
 
@@ -62,11 +70,13 @@ class TaskWorker:
         poll_interval: float = 2.0,
         max_concurrent: int = 3,
         max_retries: int = 3,
+        shutdown_timeout: float = 30.0,
         nodes: list[PipelineNode] | None = None,
     ):
         self.poll_interval = poll_interval
         self.max_concurrent = max_concurrent
         self.max_retries = max_retries
+        self.shutdown_timeout = shutdown_timeout
         self.repository = repository
         self.artifacts = artifacts
         self._nodes = nodes  # 可注入（测试用）；None 则用默认真实节点链路
@@ -96,7 +106,7 @@ class TaskWorker:
             stale = repo.list_all(status=TaskStatus.RUNNING, limit=100)
             for task in stale:
                 logger.warning("恢复残留 RUNNING 任务: %s", task.id)
-                repo.update(task.id, status=TaskStatus.PENDING)
+                repo.update(task.id, status=TaskStatus.INTERRUPTED)
         except Exception as e:
             logger.warning("恢复残留任务失败（可忽略）: %s", e)
 
@@ -104,8 +114,15 @@ class TaskWorker:
         """Stop the worker loop. 等待 in-flight 任务最多 30s。"""
         self._running = False
         if self._task:
-            with contextlib.suppress(asyncio.CancelledError, asyncio.TimeoutError):
-                await asyncio.wait_for(self._task, timeout=30)
+            try:
+                await asyncio.wait_for(self._task, timeout=self.shutdown_timeout)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                for task in self._active:
+                    task.cancel()
+                await asyncio.gather(*self._active, return_exceptions=True)
+                for record in self.repository.list_all(status=TaskStatus.RUNNING, limit=100):
+                    self.repository.update(record.id, status=TaskStatus.INTERRUPTED)
+            self._task = None
         logger.info("TaskWorker stopped")
 
     async def _loop(self) -> None:
@@ -161,15 +178,14 @@ class TaskWorker:
             # 优先用 url，其次用本地 video_file 路径
             source = task.video_url or task.video_file
             llm_provider = task.llm_provider or "qwen"
-            api_key, llm_model = _resolve_llm_creds(llm_provider)
+            llm_config = _resolve_llm_config(llm_provider)
             ctx = TaskContext(
                 task_id=TaskId(task_id),
                 config={
                     "url": source,
                     "video_url": task.video_url,
                     "llm_provider": llm_provider,
-                    "llm_model": llm_model,
-                    "api_key": api_key,
+                    **llm_config,
                     "asr_provider": task.asr_provider or "asrtools-b",
                     "language": "zh",
                 },
