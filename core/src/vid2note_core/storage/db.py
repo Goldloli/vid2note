@@ -146,6 +146,7 @@ class Database:
                 "video_url": "TEXT",
                 "video_file": "TEXT",
                 "audio_file": "TEXT",
+                "retry_count": "INTEGER DEFAULT 0",
             }
             for col, dtype in new_cols.items():
                 if col not in columns:
