@@ -1,25 +1,38 @@
 import axios from 'axios'
 
-let baseURL = ''
+// 后端地址：异步解析（通过 preload IPC 从主进程获取）
+let _baseURL = ''
+let _baseURLPromise = null
 
-if (typeof window !== 'undefined' && window.electronAPI) {
-  window.electronAPI.getBackendUrl().then((url) => {
-    baseURL = url + '/api/v1'
-  })
-} else {
-  baseURL = import.meta.env.VITE_API_BASE_URL || '/api/v1'
+function resolveBaseURL() {
+  if (_baseURLPromise) return _baseURLPromise
+  _baseURLPromise = (async () => {
+    if (typeof window !== 'undefined' && window.electronAPI) {
+      try {
+        const url = await window.electronAPI.getBackendUrl()
+        _baseURL = url + '/api/v1'
+      } catch (e) {
+        _baseURL = '/api/v1'
+      }
+    } else {
+      _baseURL = import.meta.env.VITE_API_BASE_URL || '/api/v1'
+    }
+    return _baseURL
+  })()
+  return _baseURLPromise
 }
+
+resolveBaseURL()
 
 const request = axios.create({
   timeout: 30000,
-  headers: {
-    'Content-Type': 'application/json',
-  },
+  headers: { 'Content-Type': 'application/json' },
 })
 
-request.interceptors.request.use((config) => {
-  if (!config.baseURL && baseURL) {
-    config.baseURL = baseURL
+request.interceptors.request.use(async (config) => {
+  if (!config.baseURL) {
+    await resolveBaseURL()
+    config.baseURL = _baseURL
   }
   return config
 })
@@ -31,5 +44,11 @@ request.interceptors.response.use(
     return Promise.reject(new Error(msg))
   }
 )
+
+/** 返回已解析的 baseURL（含 /api/v1），用于构造下载链接等非 axios 场景。 */
+export async function getBaseURL() {
+  await resolveBaseURL()
+  return _baseURL
+}
 
 export default request
