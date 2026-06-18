@@ -77,6 +77,7 @@ class ProcessingConfig(BaseModel):
     image_quality: Literal["low", "medium", "high"] = "medium"
     output_format: Literal["markdown"] = "markdown"
     language: Literal["zh", "en"] = "zh"
+    mindmap_format: Literal["mermaid", "outline"] = "mermaid"
 
 
 class AdvancedConfig(BaseModel):
@@ -100,6 +101,8 @@ class RetentionConfig(BaseModel):
     keep_video: bool = False
     keep_audio: bool = False
     keep_srt: bool = True
+    keep_markdown: bool = True
+    keep_mindmap: bool = True
     auto_cleanup_after_days: int = 7
 
 

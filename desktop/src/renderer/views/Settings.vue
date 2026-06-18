@@ -21,10 +21,9 @@
           </div>
           <div class="divider-h"></div>
           <div class="form-row">
-            <div><div class="fr-label">云端 API Key</div><div class="fr-desc">asrtools-b 云端识别密钥（存钥匙串）。</div></div>
+            <div><div class="fr-label">ASR 密钥</div><div class="fr-desc">当前 ASR（asrtools-b）为免费云端接口（B站必剪/剪映/快手），无需 API 密钥。</div></div>
             <div class="fr-control">
-              <div class="input-affix"><input class="input" type="password" v-model="form.api_key" placeholder="sk-asr-…"><span class="append"><button class="btn btn-sm" @click="verifyKey">测试</button></span></div>
-              <span v-if="verifyMsg" class="mono-sm" :style="{color: verifyOk ? 'var(--success)' : 'var(--danger)'}">{{ verifyMsg }}</span>
+              <span class="mono-sm muted">— 免接口密钥 —</span>
             </div>
           </div>
         </div>
