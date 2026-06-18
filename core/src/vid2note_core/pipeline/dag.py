@@ -29,8 +29,9 @@ class PipelineDAG:
     不存在循环）。因此本类不做按 NodeName 的循环检测。
     """
 
-    def __init__(self, nodes: list[PipelineNode]):
+    def __init__(self, nodes: list[PipelineNode], artifacts: ArtifactStore):
         self.nodes = {n.name: n for n in nodes}
+        self.artifacts = artifacts
         self._validate_known_nodes()
 
     def _validate_known_nodes(self) -> None:
@@ -42,7 +43,7 @@ class PipelineDAG:
     async def run(self, ctx: "TaskContext", from_node: NodeName | None = None) -> list[NodeResult]:
         """运行 pipeline，可选从指定节点开始（断点续传）"""
         results = []
-        store = ArtifactStore()
+        store = self.artifacts
         skip_until = from_node is not None
 
         for node in self._ordered_nodes():

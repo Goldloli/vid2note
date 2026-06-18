@@ -63,3 +63,20 @@ def test_count_by_status(repo):
     repo.create("task_def123456789", status=TaskStatus.COMPLETED)
     assert repo.count_by_status(TaskStatus.PENDING) == 1
     assert repo.count_by_status(TaskStatus.COMPLETED) == 1
+
+
+def test_reads_retry_and_structured_error_fields(repo):
+    task_id = "task_abcdef012345"
+    repo.create(task_id, status=TaskStatus.PENDING)
+    repo.update(
+        task_id,
+        retry_count=2,
+        error_code="DOWNLOAD_TIMEOUT",
+        error_retryable=True,
+    )
+
+    task = repo.get_by_id(task_id)
+
+    assert task.retry_count == 2
+    assert task.error_code == "DOWNLOAD_TIMEOUT"
+    assert task.error_retryable is True

@@ -8,6 +8,8 @@ from unittest.mock import MagicMock
 import pytest
 from vid2note_core.asr.base import ASRResult, ASRSegment
 from vid2note_core.downloaders.base import DownloadResult
+from vid2note_core.errors import DownloadError
+from vid2note_core.pipeline.node import PipelineNode
 from vid2note_core.pipeline.real_nodes import (
     RealDownloadNode,
     RealExtractAudioNode,
@@ -17,7 +19,7 @@ from vid2note_core.pipeline.real_nodes import (
 from vid2note_core.storage.artifact_store import ArtifactStore
 from vid2note_core.storage.db import Database
 from vid2note_core.storage.task_repo import TaskRepository
-from vid2note_core.types import NodeName, TaskId, TaskStatus
+from vid2note_core.types import NodeName, NodeResult, TaskId, TaskStatus
 from vid2note_core.worker import TaskWorker
 
 
@@ -25,8 +27,8 @@ from vid2note_core.worker import TaskWorker
 def env(tmp_path):
     """隔离 DB 到 tmp_path。节点显式传入 store=ArtifactStore(base_dir=tmp_path)。"""
     Database.reset_instance()
-    Database(str(tmp_path / "tasks.db"))
-    yield tmp_path
+    db = Database(str(tmp_path / "tasks.db"))
+    yield tmp_path, TaskRepository(db)
     Database.reset_instance()
 
 
@@ -67,13 +69,13 @@ def _build_nodes(store: ArtifactStore):
 
 @pytest.mark.asyncio
 async def test_worker_runs_full_pipeline(env):
-    store = ArtifactStore(base_dir=env)
+    root, repo = env
+    store = ArtifactStore(base_dir=root)
 
-    repo = TaskRepository()
     task_id = TaskId.generate()
     repo.create(task_id=task_id, video_url="https://example.com/v", status=TaskStatus.PENDING)
 
-    worker = TaskWorker(poll_interval=0.05, max_concurrent=1, nodes=_build_nodes(store))
+    worker = TaskWorker(repo, store, poll_interval=0.05, max_concurrent=1, nodes=_build_nodes(store))
     try:
         await worker.start()
         # 轮询并处理一个任务
@@ -105,3 +107,31 @@ async def test_worker_runs_full_pipeline(env):
     assert not store.exists(task_id, NodeName.DOWNLOAD.value, "video_file")
     assert not store.exists(task_id, NodeName.EXTRACT_AUDIO.value, "audio_file")
     assert store.exists(task_id, NodeName.CLEANUP.value, "cleanup_manifest")
+
+
+class RetryableFailureNode(PipelineNode):
+    name = NodeName.DOWNLOAD
+
+    async def run(self, ctx):
+        return NodeResult.failure(
+            self.name,
+            DownloadError("timeout", code="DOWNLOAD_TIMEOUT", retryable=True),
+        )
+
+
+@pytest.mark.asyncio
+async def test_worker_preserves_retryable_node_failure(env):
+    root, repo = env
+    store = ArtifactStore(root)
+    task_id = TaskId.generate()
+    repo.create(task_id=task_id, video_url="https://example.com/v", status=TaskStatus.PENDING)
+    task = repo.reserve_pending_task()
+    worker = TaskWorker(repo, store, nodes=[RetryableFailureNode()])
+
+    await worker._process(task)
+
+    record = repo.get_by_id(task_id)
+    assert record.retry_count == 1
+    assert record.status is TaskStatus.PENDING
+    assert record.error_code == "DOWNLOAD_TIMEOUT"
+    assert record.error_retryable is True
