@@ -4,6 +4,7 @@ import hashlib
 import os
 import shutil
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -33,6 +34,7 @@ class SourceRegistrar:
     def __init__(self, layout: VaultLayout):
         self.layout = layout
         self.identities = SourceIdentityRepository(layout.root)
+        self.internal_edit_observer: Callable[[str, str, str], None] | None = None
 
     def register(self, registration: SourceRegistration) -> SourceRecord:
         self._validate_inputs(registration)
@@ -100,6 +102,18 @@ class SourceRegistrar:
             os.replace(staged_raw, raw_destination)
             raw_committed = True
             os.replace(staged_note, note_destination)
+            if self.internal_edit_observer is not None:
+                operation_id = f"source-registration:{registration.task_id}"
+                self.internal_edit_observer(
+                    (raw_destination / "transcript.md").relative_to(self.layout.root).as_posix(),
+                    self._sha256_file(raw_destination / "transcript.md"),
+                    operation_id,
+                )
+                self.internal_edit_observer(
+                    note_destination.relative_to(self.layout.root).as_posix(),
+                    self._sha256_file(note_destination),
+                    operation_id,
+                )
         except Exception:
             if raw_committed:
                 shutil.rmtree(raw_destination, ignore_errors=True)
