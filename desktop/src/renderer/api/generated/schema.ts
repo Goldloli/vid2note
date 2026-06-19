@@ -1314,7 +1314,7 @@ export interface operations {
     list_changesets_api_v1_changesets_get: {
         parameters: {
             query?: {
-                status?: "pending" | "applied" | "rejected";
+                status?: "pending" | "applied" | "rejected" | "reverted";
             };
             header?: never;
             path?: never;
