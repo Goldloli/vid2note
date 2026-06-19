@@ -38,8 +38,14 @@ class ChangeSetValidator:
 
     def validate(self, changeset: ChangeSet) -> ValidationResult:
         issues: list[ValidationIssue] = []
+        seen_paths: set[str] = set()
         proposed_paths = {operation.path for operation in changeset.operations}
         for index, operation in enumerate(changeset.operations):
+            if operation.path in seen_paths:
+                issues.append(
+                    self._issue("DUPLICATE_OPERATION_PATH", "error", index, operation.path)
+                )
+            seen_paths.add(operation.path)
             path = self._safe_wiki_path(operation.path)
             if path is None:
                 issues.append(self._issue("PATH_INVALID", "error", index, operation.path))

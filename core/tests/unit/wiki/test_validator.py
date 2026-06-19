@@ -147,3 +147,15 @@ def test_all_validator_issues_have_code_message_and_severity(validator_setup):
 
     assert all(issue.code and issue.message for issue in issues)
     assert all(issue.severity in {"error", "warning"} for issue in issues)
+
+
+def test_validator_rejects_duplicate_operation_paths(validator_setup):
+    validator, changeset, _, _ = validator_setup
+
+    result = validator.validate(
+        changeset.model_copy(
+            update={"operations": [changeset.operations[0], changeset.operations[0]]}
+        )
+    )
+
+    assert "DUPLICATE_OPERATION_PATH" in {issue.code for issue in result.issues}
