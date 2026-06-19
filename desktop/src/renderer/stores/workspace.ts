@@ -13,17 +13,19 @@ const clamp = (value: number, min: number, max: number): number =>
   Math.min(max, Math.max(min, value))
 
 export const useWorkspaceStore = defineStore('workspace', () => {
-  const treeOpen = ref(true)
+  const initialViewportWidth = typeof window === 'undefined' ? 1440 : window.innerWidth
+  const treeOpen = ref(initialViewportWidth >= 1100)
   const agentOpen = ref(true)
   const treeWidth = ref(readWidth('v2n-tree-width', 272))
   const agentWidth = ref(readWidth('v2n-agent-width', 380))
   const autonomyMode = ref<AutonomyMode>('approval')
-  const viewportWidth = ref(typeof window === 'undefined' ? 1440 : window.innerWidth)
+  const viewportWidth = ref(initialViewportWidth)
 
-  const treeVisible = computed(() => treeOpen.value && viewportWidth.value >= 1100)
+  const treeVisible = computed(() => treeOpen.value)
   const agentDrawer = computed(() => viewportWidth.value < 850)
 
   function setViewportWidth(width: number): void {
+    if (viewportWidth.value >= 1100 && width < 1100) treeOpen.value = false
     viewportWidth.value = width
   }
 

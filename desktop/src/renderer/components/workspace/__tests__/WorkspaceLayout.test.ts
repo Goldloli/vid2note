@@ -24,5 +24,9 @@ describe('WorkspaceLayout', () => {
     expect(wrapper.get('[data-testid="workspace-tree"]').attributes('aria-hidden')).toBe('true')
     expect(wrapper.get('[data-testid="agent-panel"]').classes()).toContain('is-drawer')
     expect(wrapper.text()).toContain('A · 审批')
+
+    useWorkspaceStore(pinia).toggleTree()
+    await nextTick()
+    expect(wrapper.get('[data-testid="workspace-tree"]').attributes('aria-hidden')).toBe('false')
   })
 })
