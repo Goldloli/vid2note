@@ -3,9 +3,10 @@ from pathlib import Path
 
 from vid2note_core.agents.adapters.codex import CodexAdapter
 from vid2note_core.agents.models import AgentRunInput
-from vid2note_core.agents.subprocess import ProcessResult
+from vid2note_core.agents.subprocess import ManagedProcessRunner, ProcessResult
 
 FIXTURE = Path(__file__).parents[2] / "fixtures" / "agents" / "codex" / "success.jsonl"
+FAKE_CLI = Path(__file__).parents[2] / "fake_cli" / "fake_codex.py"
 
 
 class FakeRunner:
@@ -68,3 +69,31 @@ def test_codex_adapter_uses_fixed_safe_argv_and_normalized_events(tmp_path):
     assert events[-1].type == "run.completed"
     assert [event.type for event in events].count("changeset.proposed") == 1
     assert workspace.cleaned
+
+
+def test_codex_adapter_runs_fake_cli_without_network(tmp_path):
+    workspace = StubWorkspace(tmp_path)
+    workspace.collect_diff = lambda: []
+    adapter = CodexAdapter(
+        ManagedProcessRunner(PassthroughSandbox()),
+        lambda _: workspace,
+        executable=str(FAKE_CLI),
+    )
+    value = AgentRunInput(
+        run_id="run_abcdefabcdef",
+        session_id="session_abcdefabcdef",
+        message="Question",
+        context_paths=[],
+    )
+
+    events = asyncio.run(_events(adapter, value))
+
+    assert any(event.payload.get("text") == "Compounding rewards patience." for event in events)
+
+
+class PassthroughSandbox:
+    available = True
+    unavailable_reason = None
+
+    def wrap(self, executable, args):
+        return executable, args
