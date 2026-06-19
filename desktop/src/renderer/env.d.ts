@@ -10,6 +10,8 @@ declare module '*.vue' {
 interface Window {
   electronAPI?: {
     getBackendUrl(): Promise<string>
+    chooseLocalVideo(): Promise<string | null>
+    openExternal(url: string): Promise<void>
   }
   mermaid?: {
     render(id: string, source: string): Promise<{ svg: string }>

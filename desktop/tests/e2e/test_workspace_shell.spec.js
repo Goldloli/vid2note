@@ -31,7 +31,7 @@ test('keyboard can reach the rail and panel controls', async ({ page }) => {
   await page.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur())
 
   const labels = []
-  for (let index = 0; index < 12; index += 1) {
+  for (let index = 0; index < 20; index += 1) {
     await page.keyboard.press('Tab')
     labels.push(await page.evaluate(() => document.activeElement?.getAttribute('aria-label')))
   }

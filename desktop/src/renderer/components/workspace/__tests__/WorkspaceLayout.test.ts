@@ -9,6 +9,9 @@ import { useWorkspaceStore } from '../../../stores/workspace'
 
 const { getConfig } = vi.hoisted(() => ({ getConfig: vi.fn() }))
 vi.mock('../../../api/config', () => ({ getConfig }))
+vi.mock('../../../api/agents', () => ({ listRuntimes: vi.fn().mockResolvedValue([]) }))
+vi.mock('../../../api/vault', () => ({ listVaultTree: vi.fn().mockResolvedValue([]) }))
+vi.mock('../../../api/changesets', () => ({ listChangeSets: vi.fn().mockResolvedValue([]) }))
 
 describe('WorkspaceLayout', () => {
   beforeEach(() => {

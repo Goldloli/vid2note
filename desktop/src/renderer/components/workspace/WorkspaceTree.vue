@@ -11,19 +11,10 @@
       <strong>个人知识库</strong>
       <button type="button" aria-label="收起文件树" @click="$emit('close')"><Fold /></button>
     </div>
-    <label class="tree-search">
-      <Search />
-      <span class="sr-only">搜索知识库</span>
-      <input type="search" placeholder="搜索页面和来源" disabled>
-    </label>
+    <WikiSearch :results="vault.searchResults" @search="vault.search" @open="open" />
     <nav aria-label="知识目录" class="tree-content">
-      <div class="tree-item is-active"><Document />index.md</div>
-      <div class="tree-item"><Folder />wiki</div>
-      <div class="tree-item"><Folder />sources</div>
-      <div class="tree-item is-muted"><Folder />raw</div>
-      <div class="tree-item"><Document />log.md</div>
+      <WikiTree :tree="vault.tree" :pending-count="changesets.pendingCount" :active-path="vault.currentPage?.path" @open="open" @review="router.push('/workspace/changesets')" />
     </nav>
-    <div class="tree-status"><span>待审批</span><b>0</b></div>
     <ResizablePane
       :model-value="width"
       :min="220"
@@ -36,10 +27,21 @@
 </template>
 
 <script setup lang="ts">
-import { Document, Fold, Folder, Search } from '@element-plus/icons-vue'
+import { Fold } from '@element-plus/icons-vue'
+import { onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 
+import WikiSearch from '../wiki/WikiSearch.vue'
+import WikiTree from '../wiki/WikiTree.vue'
 import ResizablePane from './ResizablePane.vue'
+import { useChangeSetStore } from '../../stores/changesets'
+import { useVaultStore } from '../../stores/vault'
 
 defineProps<{ visible: boolean; width: number }>()
 defineEmits<{ close: []; resize: [width: number] }>()
+const router = useRouter()
+const vault = useVaultStore()
+const changesets = useChangeSetStore()
+function open(path: string): void { void router.push({ path: '/workspace/wiki', query: { path } }) }
+onMounted(() => { void vault.refreshTree(); void changesets.refresh() })
 </script>

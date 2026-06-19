@@ -1,0 +1,10 @@
+<template><section class="focus-workspace"><header class="focus-header"><div><small>Markdown Vault</small><h1>Wiki 健康检查</h1></div><button type="button" @click="run">重新检查</button></header><p v-if="loading">正在扫描索引和引用…</p><p v-if="error" role="alert">健康检查暂不可用。</p><div class="health-grid"><article v-for="item in checks" :key="item.code"><strong>{{ count(item.code) }}</strong><span>{{ item.label }}</span></article></div><ul><li v-for="issue in issues" :key="`${issue.code}-${issue.path}`"><b>{{ issue.code }}</b> · {{ issue.path ?? 'Vault' }} · {{ issue.message }}</li></ul><p>修复建议只生成 ChangeSet，不会直接修改正式 Wiki。</p><button type="button" :disabled="proposing" @click="propose">{{ proposing ? '正在生成…' : '生成修复建议' }}</button><p v-if="proposalError" role="status">{{ proposalError }}</p></section></template>
+<script setup lang="ts">
+import { onMounted, ref } from 'vue'; import { useRouter } from 'vue-router'; import { apiClient } from '../api/client'
+type Issue = { code: string; path?: string | null; message: string }
+const router = useRouter(); const loading = ref(false); const error = ref(false); const proposing = ref(false); const proposalError = ref(''); const issues = ref<Issue[]>([]); const checks = [{ code: 'ORPHAN_PAGE', label: '孤儿页' }, { code: 'BROKEN_WIKILINK', label: '断开的链接' }, { code: 'MISSING_CITATION', label: '缺少引用' }, { code: 'CONTRADICTION', label: '矛盾' }, { code: 'INDEX_DRIFT', label: '索引漂移' }]
+const count = (code: string): number => issues.value.filter((issue) => issue.code === code).length
+async function run(): Promise<void> { loading.value = true; error.value = false; try { issues.value = (await apiClient.get<{ issues: Issue[] }>('/wiki/lint')).issues } catch { error.value = true } finally { loading.value = false } }
+async function propose(): Promise<void> { proposing.value = true; proposalError.value = ''; try { const changeset = await apiClient.post<{ id: string }>('/wiki/lint/propose'); await router.push(`/workspace/changesets/${changeset.id}`) } catch { proposalError.value = '当前没有可安全自动修复的索引问题；其余问题需人工或 Agent 提供证据后生成 ChangeSet。' } finally { proposing.value = false } }
+onMounted(run)
+</script>

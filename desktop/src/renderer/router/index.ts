@@ -7,6 +7,29 @@ const router = createRouter({
   routes: [
     { path: '/', redirect: '/workspace/import' },
     {
+      path: '/workspace/wiki',
+      name: 'Wiki',
+      component: () => import('../views/WikiWorkspace.vue'),
+      meta: { title: '知识库' },
+    },
+    {
+      path: '/workspace/sources/:sourceId',
+      name: 'Source',
+      component: () => import('../views/SourceWorkspace.vue'),
+      props: true,
+      meta: { title: '来源证据' },
+    },
+    {
+      path: '/workspace/changesets/:id?',
+      name: 'ChangeSets',
+      component: () => import('../views/ChangeSetWorkspace.vue'),
+      props: true,
+      meta: { title: '变更审批' },
+    },
+    { path: '/workspace/agent', name: 'Agent', component: () => import('../views/AgentWorkspace.vue'), meta: { title: 'Agent 会话' } },
+    { path: '/workspace/media', name: 'Media', component: () => import('../views/MediaToolsWorkspace.vue'), meta: { title: '媒体工具' } },
+    { path: '/workspace/health', name: 'Health', component: () => import('../views/HealthWorkspace.vue'), meta: { title: 'Wiki 健康' } },
+    {
       path: '/workspace/import',
       name: 'Import',
       component: ImportWorkspace,

@@ -11,7 +11,7 @@
     "electron:build": "vite build && electron-builder",
     "test:e2e": "playwright test",
     "test:main": "node --test tests/unit/*.test.js",
-    "contracts:export": "uv run python ../scripts/export_openapi.py openapi.json",
+    "contracts:export": "PYTHONPATH=../core/src:../server/src ../.venv/bin/python ../scripts/export_openapi.py openapi.json",
     "contracts:generate": "openapi-typescript openapi.json -o src/renderer/api/generated/schema.ts",
     "contracts:check": "npm run contracts:export && npm run contracts:generate && git diff --exit-code -- openapi.json src/renderer/api/generated/schema.ts",
     "test:unit": "vitest run",

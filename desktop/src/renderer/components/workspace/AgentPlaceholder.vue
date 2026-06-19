@@ -20,26 +20,15 @@
       <div><span class="agent-kicker">Agent</span><strong>知识助手</strong></div>
       <button type="button" aria-label="关闭 Agent 面板" @click="$emit('close')"><Close /></button>
     </header>
-    <div class="agent-runtime">
-      <span>Built-in Runtime</span>
-      <b>{{ autonomyLabel }}</b>
-    </div>
-    <div class="agent-empty">
-      <ChatDotRound />
-      <strong>面板已就绪</strong>
-      <p>Agent 会话将在运行时接入后显示；所有 Wiki 写回都须经过 ChangeSet。</p>
-    </div>
-    <form class="agent-composer" @submit.prevent>
-      <label class="sr-only" for="agent-draft">询问知识库</label>
-      <textarea id="agent-draft" rows="3" placeholder="询问当前知识库…" disabled />
-      <button type="submit" disabled>发送</button>
-    </form>
+    <div class="agent-runtime"><span>知识运行时</span><b>{{ autonomyLabel }}</b></div>
+    <AgentPanel />
   </aside>
 </template>
 
 <script setup lang="ts">
-import { ChatDotRound, Close } from '@element-plus/icons-vue'
+import { Close } from '@element-plus/icons-vue'
 
+import AgentPanel from '../agent/AgentPanel.vue'
 import ResizablePane from './ResizablePane.vue'
 
 defineProps<{ open: boolean; width: number; drawer: boolean; autonomyLabel: string }>()
