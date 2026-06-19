@@ -9,6 +9,9 @@ def test_initialize_creates_human_readable_vault(tmp_path):
     assert layout.log.read_text().startswith("# Log")
     assert layout.wiki.joinpath("concepts").is_dir()
     assert layout.private.joinpath("cache", "clips").is_dir()
+    schema = layout.agents.read_text()
+    assert "`id`" in schema
+    assert "`concept`, `entity`, `topic`, and `comparison`" in schema
 
 
 def test_initialize_does_not_overwrite_existing_templates(tmp_path):

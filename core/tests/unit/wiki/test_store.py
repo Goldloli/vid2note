@@ -64,3 +64,15 @@ def test_rejection_preserves_reason_without_mutating_original_file(tmp_path, cha
     assert rejected.rejection_reason == "not relevant"
     assert not (store.pending / f"{changeset.id}.json").exists()
     assert pending_bytes != (store.rejected / f"{changeset.id}.json").read_bytes()
+
+
+def test_reverted_changeset_is_not_listed_as_applied(tmp_path, changeset):
+    store = ChangeSetStore(tmp_path)
+    store.save_pending(changeset)
+    store.mark_applied(changeset.id)
+
+    reverted = store.mark_reverted(changeset.id)
+
+    assert reverted.status == "reverted"
+    assert store.list("applied") == []
+    assert store.list("reverted") == [reverted]

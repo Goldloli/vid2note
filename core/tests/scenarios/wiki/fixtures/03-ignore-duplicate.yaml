@@ -1,0 +1,7 @@
+name: ignore-duplicate
+classification: duplicate
+action: null
+before_claim: Initial evidence-backed claim.
+after_claim: Initial evidence-backed claim.
+expected_valid: true
+expected_source_count: 1

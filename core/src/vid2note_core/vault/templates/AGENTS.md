@@ -10,8 +10,8 @@ This Vault is a human-readable, Obsidian-compatible knowledge workspace.
 
 ## Page contract
 
-Wiki frontmatter includes `title`, `page_type`, `status`, `sources`, `created_at`, and `updated_at`.
-Allowed page types are `concept`, `person`, `project`, and `topic`.
+Wiki frontmatter includes `id`, `title`, `page_type`, `status`, `sources`, `created_at`, and `updated_at`.
+Allowed page types are `concept`, `entity`, `topic`, and `comparison`.
 Time evidence uses `vid2note://source/<source_id>?start=<milliseconds>&end=<milliseconds>`.
 
 ## Write policy

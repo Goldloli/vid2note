@@ -19,7 +19,8 @@ class ChangeSetStore:
         self.pending = self.root / "pending"
         self.applied = self.root / "applied"
         self.rejected = self.root / "rejected"
-        for directory in (self.pending, self.applied, self.rejected):
+        self.reverted = self.root / "reverted"
+        for directory in (self.pending, self.applied, self.rejected, self.reverted):
             directory.mkdir(parents=True, exist_ok=True)
 
     def save_pending(self, changeset: ChangeSet) -> None:
@@ -29,7 +30,7 @@ class ChangeSetStore:
 
     def get(self, changeset_id: str) -> ChangeSet | None:
         self._validate_id(changeset_id)
-        for directory in (self.applied, self.rejected, self.pending):
+        for directory in (self.reverted, self.applied, self.rejected, self.pending):
             path = directory / f"{changeset_id}.json"
             if path.is_file():
                 return ChangeSet.model_validate_json(path.read_text(encoding="utf-8"))
@@ -54,11 +55,10 @@ class ChangeSetStore:
             raise InvalidChangeSetTransition(
                 f"cannot revert ChangeSet in {getattr(changeset, 'status', None)}"
             )
-        source = self.applied / f"{changeset_id}.json"
         reverted = changeset.model_copy(update={"status": "reverted"})
-        temporary = self.applied / f".{changeset_id}.reverted"
-        self._write_new(temporary, reverted)
-        os.replace(temporary, source)
+        destination = self.reverted / f"{changeset_id}.json"
+        self._write_new(destination, reverted)
+        (self.applied / f"{changeset_id}.json").unlink()
         self._fsync_directory(self.applied)
         return reverted
 
@@ -81,7 +81,9 @@ class ChangeSetStore:
         payload = (changeset.model_dump_json(indent=2) + "\n").encode()
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         try:
-            os.write(descriptor, payload)
+            written = 0
+            while written < len(payload):
+                written += os.write(descriptor, payload[written:])
             os.fsync(descriptor)
         finally:
             os.close(descriptor)
@@ -92,6 +94,7 @@ class ChangeSetStore:
             "pending": self.pending,
             "applied": self.applied,
             "rejected": self.rejected,
+            "reverted": self.reverted,
         }
         try:
             return directories[status]
