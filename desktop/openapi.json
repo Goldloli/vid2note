@@ -327,6 +327,76 @@
         "title": "LogsResponse",
         "type": "object"
       },
+      "MediaReference": {
+        "properties": {
+          "asset_path": {
+            "title": "Asset Path",
+            "type": "string"
+          },
+          "cached": {
+            "title": "Cached",
+            "type": "boolean"
+          },
+          "end_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Ms"
+          },
+          "kind": {
+            "enum": [
+              "frame",
+              "clip",
+              "audio"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "playable": {
+            "title": "Playable",
+            "type": "boolean"
+          },
+          "rendered_end_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rendered End Ms"
+          },
+          "rendered_start_ms": {
+            "title": "Rendered Start Ms",
+            "type": "integer"
+          },
+          "source_id": {
+            "title": "Source Id",
+            "type": "string"
+          },
+          "start_ms": {
+            "title": "Start Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "source_id",
+          "kind",
+          "start_ms",
+          "rendered_start_ms",
+          "asset_path",
+          "cached",
+          "playable"
+        ],
+        "title": "MediaReference",
+        "type": "object"
+      },
       "MessageResponse": {
         "properties": {
           "message": {
@@ -1780,6 +1850,212 @@
         "summary": "Send Logs",
         "tags": [
           "logs"
+        ]
+      }
+    },
+    "/api/v1/media/clip": {
+      "get": {
+        "operationId": "media_clip_api_v1_media_clip_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_ms",
+            "required": true,
+            "schema": {
+              "minimum": 0,
+              "title": "Start Ms",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end_ms",
+            "required": true,
+            "schema": {
+              "exclusiveMinimum": 0,
+              "title": "End Ms",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "buffer_ms",
+            "required": false,
+            "schema": {
+              "default": 1500,
+              "maximum": 30000,
+              "minimum": 0,
+              "title": "Buffer Ms",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaReference"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Media Clip",
+        "tags": [
+          "media"
+        ]
+      }
+    },
+    "/api/v1/media/frame": {
+      "get": {
+        "operationId": "media_frame_api_v1_media_frame_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "timestamp_ms",
+            "required": true,
+            "schema": {
+              "minimum": 0,
+              "title": "Timestamp Ms",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaReference"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Media Frame",
+        "tags": [
+          "media"
         ]
       }
     },
