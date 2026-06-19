@@ -1040,6 +1040,10 @@
           "language": {
             "anyOf": [
               {
+                "enum": [
+                  "zh",
+                  "en"
+                ],
                 "type": "string"
               },
               {
@@ -1051,6 +1055,16 @@
           "llm_provider": {
             "anyOf": [
               {
+                "enum": [
+                  "qwen",
+                  "glm",
+                  "deepseek",
+                  "moonshot",
+                  "baidu",
+                  "doubao",
+                  "minimax",
+                  "ollama"
+                ],
                 "type": "string"
               },
               {
@@ -1062,6 +1076,10 @@
           "mindmap_format": {
             "anyOf": [
               {
+                "enum": [
+                  "mermaid",
+                  "outline"
+                ],
                 "type": "string"
               },
               {

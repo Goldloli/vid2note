@@ -782,11 +782,11 @@ export interface components {
             /** Keep Video */
             keep_video?: boolean | null;
             /** Language */
-            language?: string | null;
+            language?: ("zh" | "en") | null;
             /** Llm Provider */
-            llm_provider?: string | null;
+            llm_provider?: ("qwen" | "glm" | "deepseek" | "moonshot" | "baidu" | "doubao" | "minimax" | "ollama") | null;
             /** Mindmap Format */
-            mindmap_format?: string | null;
+            mindmap_format?: ("mermaid" | "outline") | null;
         };
         /** UploadResponse */
         UploadResponse: {
