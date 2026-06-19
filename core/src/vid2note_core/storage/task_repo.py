@@ -205,6 +205,7 @@ class TaskRepository:
             "transcribe",
             "organize",
             "register_source",
+            "propose_wiki_changes",
             "mindmap",
             "cleanup",
         ]

@@ -31,6 +31,10 @@ from vid2note_core.pipeline.node import PipelineNode
 from vid2note_core.source.registrar import SourceRegistrar, SourceRegistration
 from vid2note_core.storage.artifact_store import ArtifactStore
 from vid2note_core.types import ArtifactRef, NodeName, NodeResult, NodeStatus
+from vid2note_core.vault.repository import VaultRepository
+from vid2note_core.wiki.compiler import CompileInput, WikiCompiler
+from vid2note_core.wiki.retrieval import WikiRetriever
+from vid2note_core.wiki.store import ChangeSetStore
 
 
 def _build_default_router() -> DownloaderRouter:
@@ -386,6 +390,112 @@ class RealRegisterSourceNode(PipelineNode, _RealNodeMixin):
         return NodeResult.success(
             node=self.name,
             artifacts=[ArtifactRef(node=self.name, name="source_record")],
+            metadata=metadata,
+        )
+
+
+class RealProposeWikiChangesNode(PipelineNode, _RealNodeMixin):
+    """Compile a registered source into a pending ChangeSet without editing the Wiki."""
+
+    name = NodeName.PROPOSE_WIKI_CHANGES
+    requires: list[str] = ["source_record"]
+    produces: list[str] = ["changeset_id"]
+
+    def __init__(
+        self,
+        *,
+        store: ArtifactStore,
+        vault: VaultRepository,
+        changesets: ChangeSetStore,
+        llm=None,
+        repository=None,
+    ):
+        self.store = store
+        self.vault = vault
+        self.changesets = changesets
+        self.llm = llm
+        self.repository = repository
+
+    async def run(self, ctx: TaskContext) -> NodeResult:
+        from vid2note_core.source.models import SourceRecord
+
+        task_id = ctx.task_id.value
+        self._update_db(task_id, NodeStatus.RUNNING)
+        await self._publish(task_id, "node.started", 97, "分析 Wiki 变更提案...")
+        try:
+            source = SourceRecord.model_validate_json(
+                self.store.read_artifact(
+                    task_id,
+                    NodeName.REGISTER_SOURCE.value,
+                    "source_record",
+                )
+            )
+            note_paths = sorted(self.vault.layout.sources.glob(f"{source.source_id}--*.md"))
+            if len(note_paths) != 1:
+                raise FileNotFoundError(f"source note for {source.source_id}")
+            source_note = self.vault.read_page(
+                note_paths[0].relative_to(self.vault.root).as_posix()
+            )
+            context = WikiRetriever(self.vault).find_context(source.title)
+            related_pages = [
+                self.vault.read_page(page.path)
+                for page in context.pages
+                if page.knowledge_layer == "wiki"
+            ]
+            compiler = WikiCompiler(self.llm or _default_llm(ctx.config))
+            result = await asyncio.to_thread(
+                compiler.propose,
+                CompileInput(
+                    source=source,
+                    source_note=source_note,
+                    schema_text=context.schema_text,
+                    index_text=context.index_text,
+                    related_pages=related_pages,
+                ),
+            )
+            changeset_id = result.changeset.id if result.changeset is not None else None
+            if result.changeset is not None:
+                existing = self.changesets.get(result.changeset.id)
+                if existing is None:
+                    self.changesets.save_pending(result.changeset)
+                elif existing != result.changeset:
+                    raise FileExistsError(result.changeset.id)
+            self.store.write_artifact(
+                task_id,
+                self.name.value,
+                "changeset_id",
+                (changeset_id or "").encode(),
+            )
+        except Vid2NoteError as exc:
+            self._update_db(
+                task_id, NodeStatus.FAILED, error={"code": exc.code, "message": str(exc)}
+            )
+            return NodeResult.failure(self.name, exc)
+        except Exception as exc:  # noqa: BLE001 - normalize proposal failures
+            self._update_db(
+                task_id,
+                NodeStatus.FAILED,
+                error={"code": "WIKI_PROPOSAL_FAILED", "message": str(exc)},
+            )
+            return NodeResult.failure(self.name, "WIKI_PROPOSAL_FAILED", str(exc))
+
+        metadata = {
+            "classification": result.classification,
+            "changeset_id": changeset_id,
+        }
+        self._update_db(
+            task_id, NodeStatus.COMPLETED, artifacts=["changeset_id"], metadata=metadata
+        )
+        await self._publish(
+            task_id,
+            "node.completed",
+            98,
+            "Wiki 变更提案已生成" if changeset_id else "来源未产生新的 Wiki 变更",
+            artifact="changeset_id",
+        )
+        return NodeResult.success(
+            node=self.name,
+            artifacts=[ArtifactRef(node=self.name, name="changeset_id")],
             metadata=metadata,
         )
 

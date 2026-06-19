@@ -16,6 +16,7 @@ from vid2note_core.storage.upload_store import UploadStore
 from vid2note_core.vault.layout import VaultLayout
 from vid2note_core.vault.repository import VaultRepository
 from vid2note_core.vault.watcher import VaultWatcher
+from vid2note_core.wiki.store import ChangeSetStore
 from vid2note_core.worker import TaskWorker
 
 
@@ -33,6 +34,7 @@ class Services:
     source_registrar: SourceRegistrar
     media: MediaService
     watcher: VaultWatcher
+    changesets: ChangeSetStore
     worker: TaskWorker
 
 
@@ -48,6 +50,7 @@ def build_services(paths: RuntimePaths) -> Services:
     source_registrar = SourceRegistrar(vault_layout)
     media = MediaService(vault_layout)
     watcher = VaultWatcher(vault_layout)
+    changesets = ChangeSetStore(vault_layout.root)
     vault.internal_edit_observer = watcher.ignore
     source_registrar.internal_edit_observer = watcher.ignore
     worker = TaskWorker(
@@ -56,6 +59,8 @@ def build_services(paths: RuntimePaths) -> Services:
         uploads=uploads,
         models=models,
         source_registrar=source_registrar,
+        vault=vault,
+        changesets=changesets,
     )
     return Services(
         paths,
@@ -70,6 +75,7 @@ def build_services(paths: RuntimePaths) -> Services:
         source_registrar,
         media,
         watcher,
+        changesets,
         worker,
     )
 
