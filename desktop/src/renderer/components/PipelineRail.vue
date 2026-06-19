@@ -13,7 +13,7 @@
       </div>
       <div class="col" style="align-items:flex-end; gap:4px">
         <span class="mono" style="font-size:16px; font-weight:600" :style="{color: progressColor}">{{ progress }}%</span>
-        <router-link v-if="taskId" :to="`/tasks/${taskId}`" class="btn btn-ghost btn-sm" style="padding:0 4px">查看详情 →</router-link>
+        <router-link v-if="taskId" :to="`/workspace/tasks/${taskId}`" class="btn btn-ghost btn-sm" style="padding:0 4px">查看详情 →</router-link>
       </div>
     </div>
     <div class="pipeline-rail">

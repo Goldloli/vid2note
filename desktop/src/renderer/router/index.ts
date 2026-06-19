@@ -1,12 +1,17 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 
-import Home from '../views/Home.vue'
+import ImportWorkspace from '../views/ImportWorkspace.vue'
 
 const router = createRouter({
   history: createWebHashHistory(),
   routes: [
     { path: '/', redirect: '/workspace/import' },
-    { path: '/workspace/import', name: 'Import', component: Home, meta: { title: '导入视频' } },
+    {
+      path: '/workspace/import',
+      name: 'Import',
+      component: ImportWorkspace,
+      meta: { title: '导入视频' },
+    },
     {
       path: '/workspace/history',
       name: 'History',

@@ -1,5 +1,10 @@
 <template>
   <div class="page">
+    <header class="page-head">
+      <div class="eyebrow">媒体入口</div>
+      <h1>导入与处理</h1>
+      <p class="sub">将视频链接或本地字幕转为可追溯的来源笔记。</p>
+    </header>
     <!-- 输入 composer -->
     <section class="card card-pad reveal" style="margin-bottom:22px">
       <div class="eyebrow" style="margin-bottom:10px">新建任务</div>
@@ -83,7 +88,7 @@
               <td class="mono-sm muted">{{ task.progress || 100 }}%</td>
               <td>
                 <div class="row gap-xs" style="justify-content:flex-end">
-                  <router-link :to="`/tasks/${task.id}`" class="btn btn-sm">详情</router-link>
+                  <router-link :to="`/workspace/tasks/${task.id}`" class="btn btn-sm">详情</router-link>
                 </div>
               </td>
             </tr>

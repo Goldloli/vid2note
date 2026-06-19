@@ -5,7 +5,7 @@
       <div class="row gap-s">
         <button class="btn btn-sm" @click="copy">复制源码</button>
         <button class="btn btn-sm" @click="exportMmd">导出 .mmd</button>
-        <router-link v-if="id" :to="`/tasks/${id}`" class="btn btn-sm">任务详情</router-link>
+        <router-link v-if="id" :to="`/workspace/tasks/${id}`" class="btn btn-sm">任务详情</router-link>
       </div>
     </div>
 
