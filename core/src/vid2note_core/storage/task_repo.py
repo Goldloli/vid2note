@@ -204,6 +204,7 @@ class TaskRepository:
             "extract_audio",
             "transcribe",
             "organize",
+            "register_source",
             "mindmap",
             "cleanup",
         ]

@@ -11,6 +11,7 @@ from unittest.mock import MagicMock
 import pytest
 from vid2note_core.asr.base import ASRResult, ASRSegment
 from vid2note_core.downloaders.base import DownloadResult
+from vid2note_core.events.bus import get_event_bus
 from vid2note_core.pipeline.context import TaskContext
 from vid2note_core.pipeline.real_nodes import (
     RealCleanupNode,
@@ -18,14 +19,18 @@ from vid2note_core.pipeline.real_nodes import (
     RealExtractAudioNode,
     RealMindmapNode,
     RealOrganizeNode,
+    RealRegisterSourceNode,
     RealTranscribeNode,
     _asr_result_to_srt,
     _clean_mindmap_output,
     _format_timestamp,
 )
+from vid2note_core.source.registrar import SourceRegistrar
 from vid2note_core.storage.artifact_store import ArtifactStore
 from vid2note_core.storage.db import Database
-from vid2note_core.types import NodeName, NodeStatus, TaskId
+from vid2note_core.storage.task_repo import TaskRecord
+from vid2note_core.types import NodeName, NodeStatus, TaskId, TaskStatus
+from vid2note_core.vault.layout import VaultLayout
 
 
 @pytest.fixture
@@ -122,6 +127,70 @@ async def test_extract_audio_node_ffmpeg_failure(store):
     result = await node.run(ctx)
     assert result.status == NodeStatus.FAILED
     assert result.error["code"] == "AUDIO_EXTRACT_FAILED"
+
+
+@pytest.mark.asyncio
+async def test_register_source_node_writes_vault_source(store, tmp_path):
+    task_id = "task_abcdef012345"
+    store.write_artifact(
+        task_id,
+        NodeName.TRANSCRIBE.value,
+        "srt_file",
+        b"1\n00:00:01,000 --> 00:00:03,000\nEvidence.\n",
+    )
+    store.write_artifact(
+        task_id,
+        NodeName.ORGANIZE.value,
+        "markdown_file",
+        b"# Summary\n",
+    )
+    repository = MagicMock()
+    repository.get_by_id.return_value = TaskRecord(
+        id=task_id,
+        status=TaskStatus.RUNNING,
+        video_url="https://example.com/watch?v=1",
+    )
+    registrar = SourceRegistrar(VaultLayout.initialize(tmp_path / "vault"))
+    node = RealRegisterSourceNode(registrar=registrar, store=store, repository=repository)
+
+    result = await node.run(TaskContext(task_id=TaskId(task_id)))
+
+    assert result.status == NodeStatus.COMPLETED
+    assert list(registrar.layout.raw.glob("*/source.yaml"))
+    assert store.exists(task_id, NodeName.REGISTER_SOURCE.value, "source_record")
+
+
+@pytest.mark.asyncio
+async def test_register_then_mindmap_progress_never_moves_backwards(store, tmp_path):
+    task_id = "task_abcdef012345"
+    store.write_artifact(
+        task_id,
+        NodeName.TRANSCRIBE.value,
+        "srt_file",
+        b"1\n00:00:00,000 --> 00:00:01,000\nEvidence.\n",
+    )
+    store.write_artifact(task_id, NodeName.ORGANIZE.value, "markdown_file", b"# Summary\n")
+    repository = MagicMock()
+    repository.get_by_id.return_value = TaskRecord(
+        id=task_id,
+        status=TaskStatus.RUNNING,
+        video_url="https://example.com/watch?v=1",
+    )
+    registrar = SourceRegistrar(VaultLayout.initialize(tmp_path / "vault"))
+    register = RealRegisterSourceNode(registrar=registrar, store=store, repository=repository)
+    llm = MagicMock()
+    llm.chat.return_value = "mindmap\n  root((Summary))"
+    mindmap = RealMindmapNode(llm=llm, store=store)
+    queue = get_event_bus().subscribe(task_id)
+
+    try:
+        await register.run(TaskContext(task_id=TaskId(task_id)))
+        await mindmap.run(TaskContext(task_id=TaskId(task_id)))
+        progress = [queue.get_nowait().progress for _ in range(queue.qsize())]
+    finally:
+        get_event_bus().unsubscribe(task_id, queue)
+
+    assert progress == sorted(progress)
 
 
 # ── TranscribeNode ──────────────────────────────────────────

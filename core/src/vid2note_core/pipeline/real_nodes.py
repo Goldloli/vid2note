@@ -12,7 +12,8 @@ Real pipeline nodes for vid2note.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+import json
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,7 @@ from vid2note_core.errors import ASRError, LLMError, Vid2NoteError
 from vid2note_core.events.bus import TaskEvent, get_event_bus
 from vid2note_core.pipeline.context import TaskContext
 from vid2note_core.pipeline.node import PipelineNode
+from vid2note_core.source.registrar import SourceRegistrar, SourceRegistration
 from vid2note_core.storage.artifact_store import ArtifactStore
 from vid2note_core.types import ArtifactRef, NodeName, NodeResult, NodeStatus
 
@@ -309,6 +311,85 @@ class RealOrganizeNode(PipelineNode, _RealNodeMixin):
         )
 
 
+class RealRegisterSourceNode(PipelineNode, _RealNodeMixin):
+    """Register immutable transcript evidence and a regenerable source note in the Vault."""
+
+    name = NodeName.REGISTER_SOURCE
+    requires: list[str] = ["srt_file", "markdown_file"]
+    produces: list[str] = ["source_record"]
+
+    def __init__(
+        self,
+        registrar: SourceRegistrar,
+        store: ArtifactStore,
+        repository=None,
+    ):
+        self.registrar = registrar
+        self.store = store
+        self.repository = repository
+
+    async def run(self, ctx: TaskContext) -> NodeResult:
+        task_id = ctx.task_id.value
+        task = self.repository.get_by_id(task_id) if self.repository is not None else None
+        if task is None:
+            return NodeResult.failure(self.name, "SOURCE_TASK_NOT_FOUND", "找不到待注册任务")
+
+        self._update_db(task_id, NodeStatus.RUNNING)
+        await self._publish(task_id, "node.started", 96, "注册来源证据...")
+        original_path = self.store.artifact_path(task_id, NodeName.DOWNLOAD.value, "video_file")
+        imported_at = task.created_at or datetime.now(UTC)
+        if imported_at.tzinfo is None:
+            imported_at = imported_at.replace(tzinfo=UTC)
+        try:
+            record = await asyncio.to_thread(
+                self.registrar.register,
+                SourceRegistration(
+                    task_id=task_id,
+                    canonical_url=task.video_url,
+                    title=task.video_url or task.srt_file or task_id,
+                    imported_at=imported_at,
+                    srt_path=self.store.artifact_path(
+                        task_id, NodeName.TRANSCRIBE.value, "srt_file"
+                    ),
+                    note_path=self.store.artifact_path(
+                        task_id, NodeName.ORGANIZE.value, "markdown_file"
+                    ),
+                    original_path=original_path if original_path.is_file() else None,
+                ),
+            )
+        except Vid2NoteError as exc:
+            self._update_db(
+                task_id, NodeStatus.FAILED, error={"code": exc.code, "message": str(exc)}
+            )
+            return NodeResult.failure(self.name, exc)
+        except Exception as exc:  # noqa: BLE001 - convert registration failures to node failure
+            self._update_db(
+                task_id,
+                NodeStatus.FAILED,
+                error={"code": "SOURCE_REGISTRATION_FAILED", "message": str(exc)},
+            )
+            return NodeResult.failure(self.name, "SOURCE_REGISTRATION_FAILED", str(exc))
+
+        payload = json.dumps(record.model_dump(mode="json"), ensure_ascii=False).encode()
+        self.store.write_artifact(task_id, self.name.value, "source_record", payload)
+        metadata = {"source_id": record.source_id}
+        self._update_db(
+            task_id, NodeStatus.COMPLETED, artifacts=["source_record"], metadata=metadata
+        )
+        await self._publish(
+            task_id,
+            "node.completed",
+            97,
+            "来源证据已注册",
+            artifact="source_record",
+        )
+        return NodeResult.success(
+            node=self.name,
+            artifacts=[ArtifactRef(node=self.name, name="source_record")],
+            metadata=metadata,
+        )
+
+
 class RealMindmapNode(PipelineNode, _RealNodeMixin):
     """生成思维导图：markdown_file → mindmap_file（Mermaid）。
 
@@ -350,7 +431,7 @@ class RealMindmapNode(PipelineNode, _RealNodeMixin):
         markdown = md_bytes.decode("utf-8")
 
         self._update_db(task_id, NodeStatus.RUNNING)
-        await self._publish(task_id, "node.started", 96, "生成思维导图...")
+        await self._publish(task_id, "node.started", 98, "生成思维导图...")
 
         llm = self.llm or _default_llm(ctx.config)
         prompt = self._build_prompt(markdown)
@@ -377,7 +458,7 @@ class RealMindmapNode(PipelineNode, _RealNodeMixin):
             task_id, NodeStatus.COMPLETED, artifacts=["mindmap_file"], metadata=metadata
         )
         await self._publish(
-            task_id, "node.completed", 98, "思维导图生成完成", artifact="mindmap_file"
+            task_id, "node.completed", 99, "思维导图生成完成", artifact="mindmap_file"
         )
         return NodeResult.success(
             node=self.name,
