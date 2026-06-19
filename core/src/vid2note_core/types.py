@@ -55,6 +55,7 @@ class NodeName(str, Enum):
     TRANSCRIBE = "transcribe"
     ORGANIZE = "organize"
     REGISTER_SOURCE = "register_source"
+    PROPOSE_WIKI_CHANGES = "propose_wiki_changes"
     MINDMAP = "mindmap"
     CLEANUP = "cleanup"
 

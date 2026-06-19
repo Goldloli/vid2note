@@ -21,6 +21,7 @@ from vid2note_core.pipeline.real_nodes import (
     RealExtractAudioNode,
     RealMindmapNode,
     RealOrganizeNode,
+    RealProposeWikiChangesNode,
     RealRegisterSourceNode,
     RealTranscribeNode,
 )
@@ -29,6 +30,8 @@ from vid2note_core.storage.artifact_store import ArtifactStore
 from vid2note_core.storage.task_repo import TaskRepository
 from vid2note_core.storage.upload_store import UploadStore
 from vid2note_core.types import NodeFailure, NodeName, NodeStatus, TaskId, TaskStatus
+from vid2note_core.vault.repository import VaultRepository
+from vid2note_core.wiki.store import ChangeSetStore
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +82,8 @@ class TaskWorker:
         uploads: UploadStore | None = None,
         models: ModelManager | None = None,
         source_registrar: SourceRegistrar | None = None,
+        vault: VaultRepository | None = None,
+        changesets: ChangeSetStore | None = None,
     ):
         self.poll_interval = poll_interval
         self.max_concurrent = max_concurrent
@@ -89,6 +94,8 @@ class TaskWorker:
         self.uploads = uploads
         self.models = models
         self.source_registrar = source_registrar
+        self.vault = vault
+        self.changesets = changesets
         self._nodes = nodes  # 可注入（测试用）；None 则用默认真实节点链路
         self._running = False
         self._task: asyncio.Task | None = None
@@ -332,6 +339,15 @@ class TaskWorker:
                 RealRegisterSourceNode(
                     registrar=self.source_registrar,
                     store=self.artifacts,
+                    repository=self.repository,
+                )
+            )
+        if self.vault is not None and self.changesets is not None:
+            nodes.append(
+                RealProposeWikiChangesNode(
+                    store=self.artifacts,
+                    vault=self.vault,
+                    changesets=self.changesets,
                     repository=self.repository,
                 )
             )

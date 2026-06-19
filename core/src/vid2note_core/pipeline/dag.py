@@ -16,6 +16,7 @@ _NODE_ORDER = [
     NodeName.TRANSCRIBE,
     NodeName.ORGANIZE,
     NodeName.REGISTER_SOURCE,
+    NodeName.PROPOSE_WIKI_CHANGES,
     NodeName.MINDMAP,
     NodeName.CLEANUP,
 ]

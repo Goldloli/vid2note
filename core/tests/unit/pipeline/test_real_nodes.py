@@ -19,6 +19,7 @@ from vid2note_core.pipeline.real_nodes import (
     RealExtractAudioNode,
     RealMindmapNode,
     RealOrganizeNode,
+    RealProposeWikiChangesNode,
     RealRegisterSourceNode,
     RealTranscribeNode,
     _asr_result_to_srt,
@@ -31,6 +32,8 @@ from vid2note_core.storage.db import Database
 from vid2note_core.storage.task_repo import TaskRecord
 from vid2note_core.types import NodeName, NodeStatus, TaskId, TaskStatus
 from vid2note_core.vault.layout import VaultLayout
+from vid2note_core.vault.repository import VaultRepository
+from vid2note_core.wiki.store import ChangeSetStore
 
 
 @pytest.fixture
@@ -191,6 +194,76 @@ async def test_register_then_mindmap_progress_never_moves_backwards(store, tmp_p
         get_event_bus().unsubscribe(task_id, queue)
 
     assert progress == sorted(progress)
+
+
+@pytest.mark.asyncio
+async def test_propose_wiki_changes_node_saves_pending_changeset(store, tmp_path):
+    import json
+    from datetime import UTC, datetime
+
+    from vid2note_core.source.registrar import SourceRegistration
+
+    task_id = "task_abcdef012345"
+    layout = VaultLayout.initialize(tmp_path / "vault")
+    srt = tmp_path / "source.srt"
+    srt.write_text("1\n00:00:01,000 --> 00:00:03,000\nEvidence.\n", encoding="utf-8")
+    note = tmp_path / "note.md"
+    note.write_text("# Evidence\n", encoding="utf-8")
+    record = SourceRegistrar(layout).register(
+        SourceRegistration(
+            task_id=task_id,
+            canonical_url="https://example.com/wiki",
+            title="Wiki evidence",
+            imported_at=datetime(2026, 6, 19, tzinfo=UTC),
+            srt_path=srt,
+            note_path=note,
+        )
+    )
+    store.write_artifact(
+        task_id,
+        NodeName.REGISTER_SOURCE.value,
+        "source_record",
+        record.model_dump_json().encode(),
+    )
+    response = {
+        "classification": "new",
+        "changeset": {
+            "id": "chg_abcdef012345",
+            "created_at": "2026-06-19T00:00:00Z",
+            "source_ids": [record.source_id],
+            "base_revision": "initial",
+            "agent_runtime": "built-in",
+            "summary": "Create Wiki evidence",
+            "operations": [
+                {
+                    "page_id": "concept_wiki_evidence",
+                    "path": "wiki/concepts/wiki-evidence.md",
+                    "action": "create",
+                    "after": "# Wiki evidence\n",
+                    "rationale": "New source",
+                    "citations": [
+                        {"source_id": record.source_id, "start_ms": 1000, "end_ms": 3000}
+                    ],
+                }
+            ],
+            "contradictions": [],
+        },
+    }
+    llm = MagicMock()
+    llm.chat.return_value = json.dumps(response)
+    changesets = ChangeSetStore(layout.root)
+    node = RealProposeWikiChangesNode(
+        llm=llm,
+        store=store,
+        vault=VaultRepository(layout),
+        changesets=changesets,
+    )
+
+    result = await node.run(TaskContext(task_id=TaskId(task_id)))
+
+    assert result.status == NodeStatus.COMPLETED
+    assert changesets.get("chg_abcdef012345") is not None
+    assert result.metadata["changeset_id"] == "chg_abcdef012345"
 
 
 # ── TranscribeNode ──────────────────────────────────────────
