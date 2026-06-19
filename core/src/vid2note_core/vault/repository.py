@@ -11,7 +11,13 @@ from pydantic.types import JsonValue
 
 from vid2note_core.vault.layout import VaultLayout
 from vid2note_core.vault.log import VaultLog
-from vid2note_core.vault.models import VaultConflict, VaultPage, VaultPathError
+from vid2note_core.vault.models import (
+    VaultConflict,
+    VaultPage,
+    VaultPathError,
+    VaultSearchResult,
+    VaultTreeEntry,
+)
 
 
 def content_hash(content: str) -> str:
@@ -61,6 +67,41 @@ class VaultRepository:
             frontmatter=self._parse_frontmatter(content),
         )
 
+    def tree(self) -> list[VaultTreeEntry]:
+        return [
+            VaultTreeEntry(path=path, name=PurePath(path).name) for path in self._markdown_paths()
+        ]
+
+    def search(
+        self,
+        query: str,
+        *,
+        limit: int = 50,
+        max_file_bytes: int = 512 * 1024,
+    ) -> list[VaultSearchResult]:
+        needle = query.strip().casefold()
+        if not needle:
+            return []
+        results: list[VaultSearchResult] = []
+        for relative_path in self._markdown_paths():
+            path, _ = self._resolve(relative_path)
+            if path.stat().st_size > max_file_bytes:
+                continue
+            content = path.read_text(encoding="utf-8")
+            frontmatter = self._parse_frontmatter(content) or {}
+            title_value = frontmatter.get("title")
+            title = title_value if isinstance(title_value, str) else path.stem
+            searchable = f"{relative_path}\n{title}\n{content}"
+            position = searchable.casefold().find(needle)
+            if position < 0:
+                continue
+            start = max(0, position - 60)
+            snippet = searchable[start : position + len(query) + 120].replace("\n", " ").strip()
+            results.append(VaultSearchResult(path=relative_path, title=title, snippet=snippet))
+            if len(results) >= limit:
+                break
+        return results
+
     def update_human(self, relative_path: str, content: str, *, base_hash: str) -> VaultPage:
         path, normalized = self._resolve(relative_path)
         current = self.read_page(normalized)
@@ -95,6 +136,18 @@ class VaultRepository:
             after_hash=updated.content_hash,
         )
         return updated
+
+    def _markdown_paths(self) -> list[str]:
+        paths: list[str] = []
+        for candidate in self.root.rglob("*.md"):
+            try:
+                relative = candidate.relative_to(self.root).as_posix()
+                resolved, normalized = self._resolve(relative)
+            except (OSError, VaultPathError):
+                continue
+            if resolved.is_file():
+                paths.append(normalized)
+        return sorted(paths)
 
     @staticmethod
     def _parse_frontmatter(content: str) -> dict[str, JsonValue] | None:

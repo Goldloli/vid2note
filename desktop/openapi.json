@@ -292,6 +292,24 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "HumanPageUpdate": {
+        "properties": {
+          "base_hash": {
+            "title": "Base Hash",
+            "type": "string"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          }
+        },
+        "required": [
+          "content",
+          "base_hash"
+        ],
+        "title": "HumanPageUpdate",
+        "type": "object"
+      },
       "JsonValue": {},
       "LogsResponse": {
         "properties": {
@@ -448,6 +466,122 @@
           "progress"
         ],
         "title": "ResultResponse",
+        "type": "object"
+      },
+      "SourceIngestRequest": {
+        "properties": {
+          "canonical_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canonical Url"
+          },
+          "imported_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Imported At"
+          },
+          "note_content": {
+            "maxLength": 20000000,
+            "minLength": 1,
+            "title": "Note Content",
+            "type": "string"
+          },
+          "srt_content": {
+            "maxLength": 20000000,
+            "minLength": 1,
+            "title": "Srt Content",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "srt_content",
+          "note_content"
+        ],
+        "title": "SourceIngestRequest",
+        "type": "object"
+      },
+      "SourceRecord": {
+        "properties": {
+          "canonical_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canonical Url"
+          },
+          "content_sha256": {
+            "title": "Content Sha256",
+            "type": "string"
+          },
+          "duration_ms": {
+            "minimum": 0.0,
+            "title": "Duration Ms",
+            "type": "integer"
+          },
+          "imported_at": {
+            "format": "date-time",
+            "title": "Imported At",
+            "type": "string"
+          },
+          "original_available": {
+            "title": "Original Available",
+            "type": "boolean"
+          },
+          "original_relative_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Relative Path"
+          },
+          "source_id": {
+            "title": "Source Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_id",
+          "canonical_url",
+          "content_sha256",
+          "title",
+          "duration_ms",
+          "imported_at",
+          "original_available",
+          "original_relative_path"
+        ],
+        "title": "SourceRecord",
         "type": "object"
       },
       "StartRequest": {
@@ -1113,6 +1247,96 @@
           "size"
         ],
         "title": "UploadResponse",
+        "type": "object"
+      },
+      "VaultPage": {
+        "properties": {
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "content_hash": {
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "frontmatter": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/JsonValue"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Frontmatter"
+          },
+          "modified_at": {
+            "format": "date-time",
+            "title": "Modified At",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "content",
+          "content_hash",
+          "modified_at"
+        ],
+        "title": "VaultPage",
+        "type": "object"
+      },
+      "VaultSearchResult": {
+        "properties": {
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "snippet": {
+            "title": "Snippet",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "title",
+          "snippet"
+        ],
+        "title": "VaultSearchResult",
+        "type": "object"
+      },
+      "VaultTreeEntry": {
+        "properties": {
+          "kind": {
+            "const": "file",
+            "default": "file",
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "name"
+        ],
+        "title": "VaultTreeEntry",
         "type": "object"
       },
       "VerifyKeyRequest": {
@@ -2095,6 +2319,169 @@
         ]
       }
     },
+    "/api/v1/sources/ingest": {
+      "post": {
+        "operationId": "ingest_source_api_v1_sources_ingest_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SourceIngestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceRecord"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Ingest Source",
+        "tags": [
+          "sources"
+        ]
+      }
+    },
+    "/api/v1/sources/{source_id}": {
+      "get": {
+        "operationId": "get_source_api_v1_sources__source_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceRecord"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Get Source",
+        "tags": [
+          "sources"
+        ]
+      }
+    },
     "/api/v1/tasks": {
       "get": {
         "operationId": "list_tasks_api_v1_tasks_get",
@@ -3021,6 +3408,353 @@
         "summary": "Upload Txt",
         "tags": [
           "upload"
+        ]
+      }
+    },
+    "/api/v1/vault/page": {
+      "get": {
+        "operationId": "read_vault_page_api_v1_vault_page_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VaultPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Read Vault Page",
+        "tags": [
+          "vault"
+        ]
+      },
+      "put": {
+        "operationId": "update_vault_page_api_v1_vault_page_put",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HumanPageUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VaultPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Update Vault Page",
+        "tags": [
+          "vault"
+        ]
+      }
+    },
+    "/api/v1/vault/search": {
+      "get": {
+        "operationId": "search_vault_api_v1_vault_search_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/VaultSearchResult"
+                  },
+                  "title": "Response Search Vault Api V1 Vault Search Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Search Vault",
+        "tags": [
+          "vault"
+        ]
+      }
+    },
+    "/api/v1/vault/tree": {
+      "get": {
+        "operationId": "vault_tree_api_v1_vault_tree_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/VaultTreeEntry"
+                  },
+                  "title": "Response Vault Tree Api V1 Vault Tree Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Vault Tree",
+        "tags": [
+          "vault"
         ]
       }
     },

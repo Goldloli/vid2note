@@ -15,8 +15,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from vid2note_core.errors import Vid2NoteError
 from vid2note_core.paths import RuntimePaths
+from vid2note_core.vault.models import VaultConflict
 
-from vid2note_server.api import artifacts, config, events, logs, models, process, tasks, upload
+from vid2note_server.api import (
+    artifacts,
+    config,
+    events,
+    logs,
+    models,
+    process,
+    sources,
+    tasks,
+    upload,
+    vault,
+)
 from vid2note_server.dependencies import ServicesDependency, build_services
 from vid2note_server.schemas.common import ErrorEnvelope, ErrorResponse, HealthResponse
 
@@ -63,6 +75,20 @@ def create_app(data_root: str | Path | None = None) -> FastAPI:
         return JSONResponse(
             status_code=status_code,
             content=ErrorResponse(error=envelope).model_dump(mode="json", exclude_none=True),
+        )
+
+    @application.exception_handler(VaultConflict)
+    async def vault_conflict_handler(request: Request, exc: VaultConflict):
+        return error_response(
+            409,
+            ErrorEnvelope(
+                code=exc.code,
+                message=str(exc),
+                user_message=exc.user_message or str(exc),
+                retryable=False,
+                component="vault",
+                operation=request.url.path,
+            ),
         )
 
     @application.exception_handler(Vid2NoteError)
@@ -149,6 +175,8 @@ def create_app(data_root: str | Path | None = None) -> FastAPI:
     application.include_router(events.router, prefix="/api/v1")
     application.include_router(logs.router, prefix="/api/v1")
     application.include_router(artifacts.router, prefix="/api/v1")
+    application.include_router(vault.router, prefix="/api/v1")
+    application.include_router(sources.router, prefix="/api/v1")
 
     @application.get("/health", response_model=HealthResponse)
     @application.get("/api/v1/health", response_model=HealthResponse)
