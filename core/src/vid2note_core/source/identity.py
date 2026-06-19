@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import re
 import tempfile
 from datetime import UTC, date, datetime, time
 from pathlib import Path
@@ -17,6 +18,7 @@ from vid2note_core.vault.layout import VaultLayout
 logger = logging.getLogger(__name__)
 
 _TRACKING_KEYS = {"fbclid", "gclid", "mc_cid", "mc_eid", "ref", "si"}
+_SOURCE_ID = re.compile(r"^src_\d{8}_[0-9a-f]{8}$")
 
 
 def normalize_url(url: str | None) -> str | None:
@@ -104,6 +106,8 @@ class SourceIdentityRepository:
         return None
 
     def get(self, source_id: str) -> SourceRecord | None:
+        if not _SOURCE_ID.fullmatch(source_id):
+            return None
         metadata = self.layout.raw / source_id / "source.yaml"
         if not metadata.is_file():
             return None
