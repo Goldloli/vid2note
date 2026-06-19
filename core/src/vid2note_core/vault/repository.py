@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import os
 import tempfile
+from collections.abc import Callable
 from datetime import UTC, date, datetime
 from pathlib import Path, PurePath
 
@@ -41,6 +42,7 @@ class VaultRepository:
         self.layout = layout
         self.root = layout.root.resolve()
         self.log = VaultLog(layout.log)
+        self.internal_edit_observer: Callable[[str, str, str], None] | None = None
 
     def _resolve(self, relative_path: str) -> tuple[Path, str]:
         supplied = Path(relative_path)
@@ -135,6 +137,10 @@ class VaultRepository:
             before_hash=current.content_hash,
             after_hash=updated.content_hash,
         )
+        if self.internal_edit_observer is not None:
+            from uuid import uuid4
+
+            self.internal_edit_observer(normalized, updated.content_hash, uuid4().hex)
         return updated
 
     def _markdown_paths(self) -> list[str]:

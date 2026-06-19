@@ -50,10 +50,12 @@ def create_app(data_root: str | Path | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI):
         application.state.services = services
+        await services.watcher.start()
         await services.worker.start()
         try:
             yield
         finally:
+            await services.watcher.stop()
             await services.worker.stop()
             services.database.close_all_connections()
 
