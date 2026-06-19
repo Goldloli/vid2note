@@ -1,0 +1,7 @@
+name: enhance-existing
+classification: enhancement
+action: update
+before_claim: Initial evidence-backed claim.
+after_claim: Initial evidence-backed claim. Enhanced by a second source.
+expected_valid: true
+expected_source_count: 2
