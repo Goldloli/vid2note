@@ -50,6 +50,12 @@ class AgentWorkspace:
         selected = ["AGENTS.md", "index.md", *context_paths]
         baseline: dict[str, str] = {}
         for relative in selected:
+            if relative not in {"AGENTS.md", "index.md"} and not (
+                relative.startswith("wiki/")
+                or relative.startswith("sources/")
+                or (relative.startswith("raw/") and relative.endswith("/transcript.md"))
+            ):
+                raise AgentWorkspaceViolation(f"out-of-scope context: {relative}")
             page = repository.read_page(relative)
             destination = root / relative
             destination.parent.mkdir(parents=True, exist_ok=True)

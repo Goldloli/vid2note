@@ -19,6 +19,7 @@ from vid2note_core.paths import RuntimePaths
 from vid2note_core.vault.models import VaultConflict
 
 from vid2note_server.api import (
+    agents,
     artifacts,
     changesets,
     config,
@@ -59,6 +60,7 @@ def create_app(data_root: str | Path | None = None) -> FastAPI:
         try:
             yield
         finally:
+            await services.agent_sessions.shutdown()
             await services.watcher.stop()
             await services.worker.stop()
             services.database.close_all_connections()
@@ -188,6 +190,7 @@ def create_app(data_root: str | Path | None = None) -> FastAPI:
     application.include_router(media.router, prefix="/api/v1")
     application.include_router(changesets.router, prefix="/api/v1")
     application.include_router(wiki.router, prefix="/api/v1")
+    application.include_router(agents.router, prefix="/api/v1")
 
     @application.get("/health", response_model=HealthResponse)
     @application.get("/api/v1/health", response_model=HealthResponse)

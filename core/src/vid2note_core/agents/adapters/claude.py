@@ -76,6 +76,9 @@ class ClaudeAdapter:
         result = await self.runner.run(
             input.run_id, self.executable, args, envelope + "\n", workspace.root
         )
+        if result.cancelled:
+            yield emitter.emit("run.cancelled", {})
+            return
         parser = ClaudeStreamParser()
         terminal_native = None
         for line in result.stdout_lines:

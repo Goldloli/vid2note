@@ -62,3 +62,14 @@ def test_manifest_has_hashes_but_no_live_absolute_path(tmp_path):
     assert manifest["run_id"] == "run_0123456789ab"
     assert len(manifest["files"]["wiki/concepts/poc-trap.md"]) == 64
     assert str(layout.root) not in json.dumps(manifest)
+
+
+def test_workspace_rejects_non_context_vault_files(tmp_path):
+    layout = VaultLayout.initialize(tmp_path / "vault")
+    with pytest.raises(AgentWorkspaceViolation):
+        AgentWorkspace.create(
+            layout,
+            VaultRepository(layout),
+            "run_0123456789ab",
+            ["log.md"],
+        )
