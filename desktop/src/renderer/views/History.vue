@@ -28,8 +28,8 @@
               <td class="mono-sm muted">{{ task.progress || 0 }}%</td>
               <td class="mono-sm muted">{{ fmtTime(task.created_at) }}</td>
               <td><div class="row gap-xs" style="justify-content:flex-end">
-                <router-link :to="`/tasks/${task.id}`" class="btn btn-sm">详情</router-link>
-                <router-link v-if="task.status === 'completed'" :to="`/note/${task.id}`" class="btn btn-sm">笔记</router-link>
+                <router-link :to="`/workspace/tasks/${task.id}`" class="btn btn-sm">详情</router-link>
+                <router-link v-if="task.status === 'completed'" :to="`/workspace/note/${task.id}`" class="btn btn-sm">笔记</router-link>
               </div></td>
             </tr>
             <tr v-if="!paged.length"><td colspan="5" class="muted" style="text-align:center;padding:24px">暂无任务</td></tr>
