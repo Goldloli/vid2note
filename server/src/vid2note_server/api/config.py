@@ -5,11 +5,18 @@
 """
 
 from fastapi import APIRouter
-from pydantic import BaseModel
 
 from vid2note_server.dependencies import ServicesDependency
+from vid2note_server.schemas.common import ERROR_RESPONSES
+from vid2note_server.schemas.config import (
+    ConfigResponse,
+    ConfigUpdateResponse,
+    UpdateConfigRequest,
+    VerifyKeyRequest,
+    VerifyKeyResponse,
+)
 
-router = APIRouter(tags=["config"])
+router = APIRouter(tags=["config"], responses=ERROR_RESPONSES)
 
 
 def _safe_config_dump(config) -> dict:
@@ -23,7 +30,7 @@ def _safe_config_dump(config) -> dict:
     return data
 
 
-@router.get("/config")
+@router.get("/config", response_model=ConfigResponse)
 async def get_config(services: ServicesDependency):
     """返回当前配置（脱敏，不含密钥）"""
     manager = services.config
@@ -31,30 +38,14 @@ async def get_config(services: ServicesDependency):
     return _safe_config_dump(config)
 
 
-class UpdateConfigRequest(BaseModel):
-    """配置更新请求（部分字段）"""
-
-    llm_provider: str | None = None
-    asr_provider: str | None = None
-    # 保留策略（Settings.vue "保留策略" tab）
-    keep_video: bool | None = None
-    keep_audio: bool | None = None
-    keep_srt: bool | None = None
-    keep_markdown: bool | None = None
-    keep_mindmap: bool | None = None
-    # 处理选项
-    language: str | None = None
-    mindmap_format: str | None = None
-
-
-@router.put("/config")
+@router.put("/config", response_model=ConfigUpdateResponse)
 async def update_config(req: UpdateConfigRequest, services: ServicesDependency):
     """更新配置（部分字段），持久化到 yaml"""
     manager = services.config
     config = manager.load()
     changed = []
     if req.llm_provider is not None:
-        config.llm_provider = req.llm_provider  # type: ignore[assignment]
+        config.llm_provider = req.llm_provider
         changed.append("llm_provider")
     if req.asr_provider is not None and config.asr is not None:
         config.asr.provider = req.asr_provider
@@ -77,22 +68,17 @@ async def update_config(req: UpdateConfigRequest, services: ServicesDependency):
         changed.append("retention.keep_mindmap")
     # 处理选项
     if req.language is not None:
-        config.processing.language = req.language  # type: ignore[assignment]
+        config.processing.language = req.language
         changed.append("processing.language")
     if req.mindmap_format is not None:
-        config.processing.mindmap_format = req.mindmap_format  # type: ignore[assignment]
+        config.processing.mindmap_format = req.mindmap_format
         changed.append("processing.mindmap_format")
     if changed:
         manager.save(config)
     return {"message": "配置已更新", "changed": changed}
 
 
-class VerifyKeyRequest(BaseModel):
-    provider: str
-    api_key: str
-
-
-@router.post("/config/verify")
+@router.post("/config/verify", response_model=VerifyKeyResponse)
 async def verify_api_key(req: VerifyKeyRequest):
     """校验 API Key 是否可用（对 LLM provider 做一次最小调用）"""
     from vid2note_core.llm.factory import LLMFactory

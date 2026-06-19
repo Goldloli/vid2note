@@ -3,25 +3,23 @@
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
 from vid2note_core.events.bus import TaskEvent, get_event_bus
 from vid2note_core.types import TaskId, TaskStatus
 
 from vid2note_server.dependencies import ServicesDependency
+from vid2note_server.schemas.common import ERROR_RESPONSES
+from vid2note_server.schemas.tasks import (
+    CreateTaskRequest,
+    RerunRequest,
+    TaskAcceptedResponse,
+    TaskListResponse,
+    TaskResponse,
+)
 
-router = APIRouter(tags=["tasks"])
+router = APIRouter(tags=["tasks"], responses=ERROR_RESPONSES)
 
 
-class CreateTaskRequest(BaseModel):
-    video_url: str | None = None
-    video_file: str | None = None
-    pdf_file: str | None = None
-    asr_provider: str = "funasr"
-    llm_provider: str = "qwen"
-    export_mindmap: bool = False
-
-
-@router.post("/tasks")
+@router.post("/tasks", response_model=TaskAcceptedResponse)
 async def create_task(req: CreateTaskRequest, services: ServicesDependency):
     repo = services.tasks
     task_id = TaskId.generate()
@@ -47,14 +45,14 @@ async def create_task(req: CreateTaskRequest, services: ServicesDependency):
     return {"task_id": task_id, "status": "pending"}
 
 
-@router.get("/tasks")
+@router.get("/tasks", response_model=TaskListResponse)
 async def list_tasks(services: ServicesDependency, status: str | None = None, limit: int = 100):
     repo = services.tasks
     tasks = repo.list_all(status=TaskStatus(status) if status else None, limit=limit)
     return {"tasks": tasks, "total": len(tasks)}
 
 
-@router.get("/tasks/{task_id}")
+@router.get("/tasks/{task_id}", response_model=TaskResponse)
 async def get_task(task_id: str, services: ServicesDependency):
     repo = services.tasks
     task = repo.get_by_id(task_id)
@@ -63,11 +61,7 @@ async def get_task(task_id: str, services: ServicesDependency):
     return task
 
 
-class RerunRequest(BaseModel):
-    from_node: str | None = None
-
-
-@router.post("/tasks/{task_id}/rerun")
+@router.post("/tasks/{task_id}/rerun", response_model=TaskAcceptedResponse)
 async def rerun_task(task_id: str, services: ServicesDependency, req: RerunRequest | None = None):
     """重跑任务：删除 from_node 下游产物 + 重置节点状态 + 重新入队。
 
