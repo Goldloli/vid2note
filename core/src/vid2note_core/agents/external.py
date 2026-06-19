@@ -19,7 +19,7 @@ from vid2note_core.agents.sandbox import SandboxPolicy
 from vid2note_core.agents.subprocess import ManagedProcessRunner
 from vid2note_core.agents.workspace import AgentWorkspace, WorkspaceDiff
 from vid2note_core.vault.layout import VaultLayout
-from vid2note_core.vault.repository import VaultRepository
+from vid2note_core.vault.repository import VaultRepository, content_hash
 from vid2note_core.wiki.models import ChangeOperation, ChangeSet
 from vid2note_core.wiki.store import ChangeSetStore
 
@@ -111,9 +111,8 @@ class ExternalCliRuntime:
             source_ids.update(item for item in sources if isinstance(item, str))
             current_hash = None
             if diff.action != "create":
-                current_path = diff.old_path if diff.action == "rename" else diff.path
-                assert current_path is not None
-                current_hash = self.repository.read_page(current_path).content_hash
+                assert diff.before is not None
+                current_hash = content_hash(diff.before)
             operations.append(
                 ChangeOperation(
                     page_id=page_id,
