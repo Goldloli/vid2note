@@ -58,8 +58,29 @@ class SourceIdentityRepository:
         if existing is not None:
             return existing
 
+        record = self.build_record(
+            digest,
+            url,
+            imported_on,
+            title=title,
+            duration_ms=duration_ms,
+            original_relative_path=original_relative_path,
+        )
+        self._write_record(record)
+        return record
+
+    def build_record(
+        self,
+        digest: str,
+        url: str | None,
+        imported_on: date,
+        *,
+        title: str = "",
+        duration_ms: int = 0,
+        original_relative_path: str | None = None,
+    ) -> SourceRecord:
         source_id = f"src_{imported_on:%Y%m%d}_{digest[:8]}"
-        record = SourceRecord(
+        return SourceRecord(
             source_id=source_id,
             canonical_url=normalize_url(url),
             content_sha256=digest,
@@ -69,8 +90,6 @@ class SourceIdentityRepository:
             original_available=original_relative_path is not None,
             original_relative_path=original_relative_path,
         )
-        self._write_record(record)
-        return record
 
     def find_by_hash(self, digest: str) -> SourceRecord | None:
         for metadata in sorted(self.layout.raw.glob("*/source.yaml")):

@@ -13,6 +13,7 @@ _NODE_ORDER = [
     NodeName.EXTRACT_AUDIO,
     NodeName.TRANSCRIBE,
     NodeName.ORGANIZE,
+    NodeName.REGISTER_SOURCE,
     NodeName.MINDMAP,
     NodeName.CLEANUP,
 ]

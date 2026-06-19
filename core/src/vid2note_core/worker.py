@@ -21,8 +21,10 @@ from vid2note_core.pipeline.real_nodes import (
     RealExtractAudioNode,
     RealMindmapNode,
     RealOrganizeNode,
+    RealRegisterSourceNode,
     RealTranscribeNode,
 )
+from vid2note_core.source.registrar import SourceRegistrar
 from vid2note_core.storage.artifact_store import ArtifactStore
 from vid2note_core.storage.task_repo import TaskRepository
 from vid2note_core.storage.upload_store import UploadStore
@@ -76,6 +78,7 @@ class TaskWorker:
         nodes: list[PipelineNode] | None = None,
         uploads: UploadStore | None = None,
         models: ModelManager | None = None,
+        source_registrar: SourceRegistrar | None = None,
     ):
         self.poll_interval = poll_interval
         self.max_concurrent = max_concurrent
@@ -85,6 +88,7 @@ class TaskWorker:
         self.artifacts = artifacts
         self.uploads = uploads
         self.models = models
+        self.source_registrar = source_registrar
         self._nodes = nodes  # 可注入（测试用）；None 则用默认真实节点链路
         self._running = False
         self._task: asyncio.Task | None = None
@@ -322,9 +326,21 @@ class TaskWorker:
             RealExtractAudioNode(store=self.artifacts, repository=self.repository),
             RealTranscribeNode(store=self.artifacts, repository=self.repository),
             RealOrganizeNode(store=self.artifacts, repository=self.repository),
-            RealMindmapNode(store=self.artifacts, repository=self.repository),
-            RealCleanupNode(store=self.artifacts, repository=self.repository),
         ]
+        if self.source_registrar is not None:
+            nodes.append(
+                RealRegisterSourceNode(
+                    registrar=self.source_registrar,
+                    store=self.artifacts,
+                    repository=self.repository,
+                )
+            )
+        nodes.extend(
+            [
+                RealMindmapNode(store=self.artifacts, repository=self.repository),
+                RealCleanupNode(store=self.artifacts, repository=self.repository),
+            ]
+        )
         if start_node is not None:
             start_index = next(i for i, node in enumerate(nodes) if node.name is start_node)
             nodes = nodes[start_index:]

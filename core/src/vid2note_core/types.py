@@ -54,6 +54,7 @@ class NodeName(str, Enum):
     EXTRACT_AUDIO = "extract_audio"
     TRANSCRIBE = "transcribe"
     ORGANIZE = "organize"
+    REGISTER_SOURCE = "register_source"
     MINDMAP = "mindmap"
     CLEANUP = "cleanup"
 
