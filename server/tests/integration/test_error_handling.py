@@ -53,7 +53,7 @@ def test_vid2note_error_non_retryable_returns_400():
     assert resp.status_code == 400
     data = resp.json()
     assert data["error"]["retryable"] is False
-    assert data["message"] == "请配置 API Key"
+    assert data["error"]["user_message"] == "请配置 API Key"
 
 
 def test_value_error_returns_422():

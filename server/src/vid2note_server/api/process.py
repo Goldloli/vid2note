@@ -78,7 +78,11 @@ async def get_status(task_id: str, services: ServicesDependency):
     )
 
 
-@router.get("/process/result/{task_id}", response_model=ResultResponse)
+@router.get(
+    "/process/result/{task_id}",
+    response_model=ResultResponse,
+    response_model_exclude_none=True,
+)
 async def get_result(task_id: str, services: ServicesDependency):
     """查询任务产物。任务未完成时返回已有状态；完成时附带产物文本。"""
     if not TaskId.is_valid(task_id):
