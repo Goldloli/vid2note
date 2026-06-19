@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
 from pydantic.types import JsonValue
@@ -43,3 +44,15 @@ class VaultPage(BaseModel):
 class HumanPageUpdate(BaseModel):
     content: str
     base_hash: str
+
+
+class VaultTreeEntry(BaseModel):
+    path: str
+    name: str
+    kind: Literal["file"] = "file"
+
+
+class VaultSearchResult(BaseModel):
+    path: str
+    title: str
+    snippet: str
