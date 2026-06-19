@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Literal
 
+import yaml
+
 from vid2note_core.vault.layout import VaultLayout
 from vid2note_core.vault.repository import VaultRepository
 
@@ -28,10 +30,17 @@ class WorkspaceDiff:
 
 
 class AgentWorkspace:
-    def __init__(self, root: Path, layout: VaultLayout, baseline: dict[str, str]):
+    def __init__(
+        self,
+        root: Path,
+        layout: VaultLayout,
+        baseline: dict[str, str],
+        baseline_content: dict[str, str],
+    ):
         self.root = root
         self.layout = layout
         self.baseline = baseline
+        self.baseline_content = baseline_content
 
     @classmethod
     def create(
@@ -49,6 +58,7 @@ class AgentWorkspace:
         root.mkdir(parents=True)
         selected = ["AGENTS.md", "index.md", *context_paths]
         baseline: dict[str, str] = {}
+        baseline_content: dict[str, str] = {}
         for relative in selected:
             if relative not in {"AGENTS.md", "index.md"} and not (
                 relative.startswith("wiki/")
@@ -61,12 +71,13 @@ class AgentWorkspace:
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_text(page.content, encoding="utf-8")
             baseline[relative] = _sha256(page.content.encode())
+            baseline_content[relative] = page.content
         manifest = {"run_id": run_id, "files": baseline}
         (root / "run-manifest.json").write_text(
             json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
             encoding="utf-8",
         )
-        return cls(root, layout, baseline)
+        return cls(root, layout, baseline, baseline_content)
 
     def relative_files(self) -> set[str]:
         return {
@@ -111,7 +122,16 @@ class AgentWorkspace:
         diffs: list[WorkspaceDiff] = []
         for old_path in sorted(deleted):
             old_hash = self.baseline[old_path]
-            renamed = next((path for path in sorted(created) if current[path][0] == old_hash), None)
+            old_page_id = _page_id(self.baseline_content[old_path])
+            renamed = next(
+                (
+                    path
+                    for path in sorted(created)
+                    if current[path][0] == old_hash
+                    or (old_page_id is not None and _page_id(current[path][1]) == old_page_id)
+                ),
+                None,
+            )
             if (
                 renamed is None
                 or not old_path.startswith("wiki/")
@@ -124,7 +144,7 @@ class AgentWorkspace:
                     action="rename",
                     path=renamed,
                     old_path=old_path,
-                    before=(self.layout.root / old_path).read_text(encoding="utf-8"),
+                    before=self.baseline_content[old_path],
                     after=current[renamed][1],
                 )
             )
@@ -137,7 +157,7 @@ class AgentWorkspace:
                 continue
             if not relative_path.startswith("wiki/"):
                 raise AgentWorkspaceViolation(f"read-only context changed: {relative_path}")
-            before = (self.layout.root / relative_path).read_text(encoding="utf-8")
+            before = self.baseline_content[relative_path]
             diffs.append(WorkspaceDiff("update", relative_path, before, current[relative_path][1]))
         return diffs
 
@@ -156,3 +176,14 @@ class AgentWorkspace:
 
 def _sha256(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
+
+
+def _page_id(content: str) -> str | None:
+    payload, separator, _ = content.removeprefix("---\n").partition("\n---\n")
+    if not separator:
+        return None
+    parsed = yaml.safe_load(payload)
+    if not isinstance(parsed, dict):
+        return None
+    value = parsed.get("id")
+    return value if isinstance(value, str) else None

@@ -73,3 +73,37 @@ def test_workspace_rejects_non_context_vault_files(tmp_path):
             "run_0123456789ab",
             ["log.md"],
         )
+
+
+def test_diff_uses_run_baseline_when_live_vault_changes_concurrently(tmp_path):
+    layout, workspace = _workspace(tmp_path)
+    original = "# POC Trap\n"
+    (layout.wiki / "concepts" / "poc-trap.md").write_text(
+        "# POC Trap\n\nHuman edit.\n", encoding="utf-8"
+    )
+    workspace.write_text("wiki/concepts/poc-trap.md", "# POC Trap\n\nAgent edit.\n")
+
+    diff = workspace.collect_diff()[0]
+
+    assert diff.before == original
+    assert "Human edit" not in diff.before
+
+
+def test_rename_can_also_edit_content_when_page_id_is_stable(tmp_path):
+    layout = VaultLayout.initialize(tmp_path / "vault")
+    old = layout.wiki / "concepts" / "old.md"
+    old.write_text("---\nid: stable_page\n---\n\nOld\n", encoding="utf-8")
+    workspace = AgentWorkspace.create(
+        layout,
+        VaultRepository(layout),
+        "run_0123456789ab",
+        ["wiki/concepts/old.md"],
+    )
+    (workspace.root / "wiki" / "concepts" / "old.md").unlink()
+    workspace.write_text("wiki/concepts/new.md", "---\nid: stable_page\n---\n\nNew\n")
+
+    diff = workspace.collect_diff()[0]
+
+    assert diff.action == "rename"
+    assert diff.old_path == "wiki/concepts/old.md"
+    assert diff.path == "wiki/concepts/new.md"
