@@ -5,27 +5,46 @@ import Home from '../views/Home.vue'
 const router = createRouter({
   history: createWebHashHistory(),
   routes: [
-    { path: '/', name: 'Home', component: Home },
-    { path: '/history', name: 'History', component: () => import('../views/History.vue') },
+    { path: '/', redirect: '/workspace/import' },
+    { path: '/workspace/import', name: 'Import', component: Home, meta: { title: '导入视频' } },
     {
-      path: '/tasks/:id',
+      path: '/workspace/history',
+      name: 'History',
+      component: () => import('../views/History.vue'),
+      meta: { title: '知识与历史' },
+    },
+    {
+      path: '/workspace/tasks/:id',
       name: 'TaskDetail',
       component: () => import('../views/TaskDetail.vue'),
       props: true,
+      meta: { title: '任务详情' },
     },
     {
-      path: '/note/:id',
+      path: '/workspace/note/:id',
       name: 'Note',
       component: () => import('../views/Note.vue'),
       props: true,
+      meta: { title: '笔记' },
     },
     {
-      path: '/mindmap/:id',
+      path: '/workspace/mindmap/:id',
       name: 'Mindmap',
       component: () => import('../views/Mindmap.vue'),
       props: true,
+      meta: { title: '思维导图' },
     },
-    { path: '/settings', name: 'Settings', component: () => import('../views/Settings.vue') },
+    {
+      path: '/workspace/settings',
+      name: 'Settings',
+      component: () => import('../views/Settings.vue'),
+      meta: { title: '设置' },
+    },
+    { path: '/history', redirect: '/workspace/history' },
+    { path: '/settings', redirect: '/workspace/settings' },
+    { path: '/tasks/:id', redirect: (to) => `/workspace/tasks/${String(to.params.id)}` },
+    { path: '/note/:id', redirect: (to) => `/workspace/note/${String(to.params.id)}` },
+    { path: '/mindmap/:id', redirect: (to) => `/workspace/mindmap/${String(to.params.id)}` },
   ],
 })
 
