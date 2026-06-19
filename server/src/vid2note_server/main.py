@@ -22,6 +22,7 @@ from vid2note_server.api import (
     config,
     events,
     logs,
+    media,
     models,
     process,
     sources,
@@ -103,6 +104,7 @@ def create_app(data_root: str | Path | None = None) -> FastAPI:
                 retryable=exc.retryable,
                 component=exc.step or "core",
                 operation=request.url.path,
+                details=getattr(exc, "details", None),
             ),
         )
 
@@ -177,6 +179,7 @@ def create_app(data_root: str | Path | None = None) -> FastAPI:
     application.include_router(artifacts.router, prefix="/api/v1")
     application.include_router(vault.router, prefix="/api/v1")
     application.include_router(sources.router, prefix="/api/v1")
+    application.include_router(media.router, prefix="/api/v1")
 
     @application.get("/health", response_model=HealthResponse)
     @application.get("/api/v1/health", response_model=HealthResponse)

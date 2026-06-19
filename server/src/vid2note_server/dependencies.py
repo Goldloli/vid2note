@@ -6,6 +6,7 @@ from typing import Annotated, cast
 from fastapi import Depends, Request
 from vid2note_core.asr.local.model_manager import ModelManager
 from vid2note_core.config.manager import ConfigManager
+from vid2note_core.media.service import MediaService
 from vid2note_core.paths import RuntimePaths
 from vid2note_core.source.registrar import SourceRegistrar
 from vid2note_core.storage.artifact_store import ArtifactStore
@@ -29,6 +30,7 @@ class Services:
     vault_layout: VaultLayout
     vault: VaultRepository
     source_registrar: SourceRegistrar
+    media: MediaService
     worker: TaskWorker
 
 
@@ -42,6 +44,7 @@ def build_services(paths: RuntimePaths) -> Services:
     vault_layout = VaultLayout.initialize(paths.vault)
     vault = VaultRepository(vault_layout)
     source_registrar = SourceRegistrar(vault_layout)
+    media = MediaService(vault_layout)
     worker = TaskWorker(
         tasks,
         artifacts,
@@ -60,6 +63,7 @@ def build_services(paths: RuntimePaths) -> Services:
         vault_layout,
         vault,
         source_registrar,
+        media,
         worker,
     )
 
