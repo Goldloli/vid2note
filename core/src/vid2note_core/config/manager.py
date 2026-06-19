@@ -29,7 +29,9 @@ class ConfigManager:
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
         import yaml
 
-        self.config_path.write_text(yaml.safe_dump(config.model_dump(), allow_unicode=True))
+        self.config_path.write_text(
+            yaml.safe_dump(config.model_dump(mode="json"), allow_unicode=True)
+        )
         self._config = config
 
     def get_api_key(self, provider: str) -> str | None:

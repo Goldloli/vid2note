@@ -7,6 +7,7 @@ import contextlib
 import logging
 import os
 import signal
+from collections.abc import Callable
 from datetime import datetime
 
 from vid2note_core.asr.local.model_manager import ModelManager
@@ -31,6 +32,8 @@ from vid2note_core.storage.task_repo import TaskRepository
 from vid2note_core.storage.upload_store import UploadStore
 from vid2note_core.types import NodeFailure, NodeName, NodeStatus, TaskId, TaskStatus
 from vid2note_core.vault.repository import VaultRepository
+from vid2note_core.wiki.applier import ChangeSetApplier
+from vid2note_core.wiki.policy import AutonomyMode
 from vid2note_core.wiki.store import ChangeSetStore
 
 logger = logging.getLogger(__name__)
@@ -84,6 +87,8 @@ class TaskWorker:
         source_registrar: SourceRegistrar | None = None,
         vault: VaultRepository | None = None,
         changesets: ChangeSetStore | None = None,
+        applier: ChangeSetApplier | None = None,
+        autonomy_mode_provider: Callable[[], AutonomyMode] | None = None,
     ):
         self.poll_interval = poll_interval
         self.max_concurrent = max_concurrent
@@ -96,6 +101,8 @@ class TaskWorker:
         self.source_registrar = source_registrar
         self.vault = vault
         self.changesets = changesets
+        self.applier = applier
+        self.autonomy_mode_provider = autonomy_mode_provider
         self._nodes = nodes  # 可注入（测试用）；None 则用默认真实节点链路
         self._running = False
         self._task: asyncio.Task | None = None
@@ -348,6 +355,8 @@ class TaskWorker:
                     store=self.artifacts,
                     vault=self.vault,
                     changesets=self.changesets,
+                    applier=self.applier,
+                    autonomy_mode_provider=self.autonomy_mode_provider,
                     repository=self.repository,
                 )
             )

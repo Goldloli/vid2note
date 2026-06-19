@@ -33,6 +33,7 @@ from vid2note_core.storage.task_repo import TaskRecord
 from vid2note_core.types import NodeName, NodeStatus, TaskId, TaskStatus
 from vid2note_core.vault.layout import VaultLayout
 from vid2note_core.vault.repository import VaultRepository
+from vid2note_core.wiki.policy import AutonomyMode
 from vid2note_core.wiki.store import ChangeSetStore
 
 
@@ -264,6 +265,18 @@ async def test_propose_wiki_changes_node_saves_pending_changeset(store, tmp_path
     assert result.status == NodeStatus.COMPLETED
     assert changesets.get("chg_abcdef012345") is not None
     assert result.metadata["changeset_id"] == "chg_abcdef012345"
+
+    applier = MagicMock()
+    auto_node = RealProposeWikiChangesNode(
+        llm=llm,
+        store=store,
+        vault=VaultRepository(layout),
+        changesets=changesets,
+        applier=applier,
+        autonomy_mode_provider=lambda: AutonomyMode.AUTO_REVERTIBLE,
+    )
+    await auto_node.run(TaskContext(task_id=TaskId(task_id)))
+    applier.apply.assert_called_once()
 
 
 # ── TranscribeNode ──────────────────────────────────────────

@@ -16,7 +16,9 @@ from vid2note_core.storage.upload_store import UploadStore
 from vid2note_core.vault.layout import VaultLayout
 from vid2note_core.vault.repository import VaultRepository
 from vid2note_core.vault.watcher import VaultWatcher
+from vid2note_core.wiki.applier import ChangeSetApplier
 from vid2note_core.wiki.store import ChangeSetStore
+from vid2note_core.wiki.validator import ChangeSetValidator
 from vid2note_core.worker import TaskWorker
 
 
@@ -35,6 +37,8 @@ class Services:
     media: MediaService
     watcher: VaultWatcher
     changesets: ChangeSetStore
+    validator: ChangeSetValidator
+    applier: ChangeSetApplier
     worker: TaskWorker
 
 
@@ -51,8 +55,11 @@ def build_services(paths: RuntimePaths) -> Services:
     media = MediaService(vault_layout)
     watcher = VaultWatcher(vault_layout)
     changesets = ChangeSetStore(vault_layout.root)
+    validator = ChangeSetValidator(vault_layout, vault)
+    applier = ChangeSetApplier(vault_layout, vault, changesets, validator)
     vault.internal_edit_observer = watcher.ignore
     source_registrar.internal_edit_observer = watcher.ignore
+    applier.internal_edit_observer = watcher.ignore
     worker = TaskWorker(
         tasks,
         artifacts,
@@ -61,6 +68,8 @@ def build_services(paths: RuntimePaths) -> Services:
         source_registrar=source_registrar,
         vault=vault,
         changesets=changesets,
+        applier=applier,
+        autonomy_mode_provider=lambda: config.load().autonomy_mode,
     )
     return Services(
         paths,
@@ -76,6 +85,8 @@ def build_services(paths: RuntimePaths) -> Services:
         media,
         watcher,
         changesets,
+        validator,
+        applier,
         worker,
     )
 

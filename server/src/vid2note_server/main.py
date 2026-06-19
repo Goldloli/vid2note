@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -19,6 +20,7 @@ from vid2note_core.vault.models import VaultConflict
 
 from vid2note_server.api import (
     artifacts,
+    changesets,
     config,
     events,
     logs,
@@ -29,6 +31,7 @@ from vid2note_server.api import (
     tasks,
     upload,
     vault,
+    wiki,
 )
 from vid2note_server.dependencies import ServicesDependency, build_services
 from vid2note_server.schemas.common import ErrorEnvelope, ErrorResponse, HealthResponse
@@ -50,6 +53,7 @@ def create_app(data_root: str | Path | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI):
         application.state.services = services
+        await asyncio.to_thread(services.applier.recover_incomplete)
         await services.watcher.start()
         await services.worker.start()
         try:
@@ -182,6 +186,8 @@ def create_app(data_root: str | Path | None = None) -> FastAPI:
     application.include_router(vault.router, prefix="/api/v1")
     application.include_router(sources.router, prefix="/api/v1")
     application.include_router(media.router, prefix="/api/v1")
+    application.include_router(changesets.router, prefix="/api/v1")
+    application.include_router(wiki.router, prefix="/api/v1")
 
     @application.get("/health", response_model=HealthResponse)
     @application.get("/api/v1/health", response_model=HealthResponse)

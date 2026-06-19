@@ -32,7 +32,9 @@ from vid2note_core.source.registrar import SourceRegistrar, SourceRegistration
 from vid2note_core.storage.artifact_store import ArtifactStore
 from vid2note_core.types import ArtifactRef, NodeName, NodeResult, NodeStatus
 from vid2note_core.vault.repository import VaultRepository
+from vid2note_core.wiki.applier import ChangeSetApplier
 from vid2note_core.wiki.compiler import CompileInput, WikiCompiler
+from vid2note_core.wiki.policy import AutonomyMode, AutonomyPolicy
 from vid2note_core.wiki.retrieval import WikiRetriever
 from vid2note_core.wiki.store import ChangeSetStore
 
@@ -407,12 +409,16 @@ class RealProposeWikiChangesNode(PipelineNode, _RealNodeMixin):
         store: ArtifactStore,
         vault: VaultRepository,
         changesets: ChangeSetStore,
+        applier: ChangeSetApplier | None = None,
+        autonomy_mode_provider=None,
         llm=None,
         repository=None,
     ):
         self.store = store
         self.vault = vault
         self.changesets = changesets
+        self.applier = applier
+        self.autonomy_mode_provider = autonomy_mode_provider
         self.llm = llm
         self.repository = repository
 
@@ -460,6 +466,19 @@ class RealProposeWikiChangesNode(PipelineNode, _RealNodeMixin):
                     self.changesets.save_pending(result.changeset)
                 elif existing != result.changeset:
                     raise FileExistsError(result.changeset.id)
+                mode = (
+                    self.autonomy_mode_provider()
+                    if self.autonomy_mode_provider is not None
+                    else AutonomyMode.APPROVAL
+                )
+                stored = self.changesets.get(result.changeset.id)
+                if (
+                    AutonomyPolicy(mode).decide(result.classification) == "auto_apply"
+                    and self.applier is not None
+                    and stored is not None
+                    and stored.status == "pending"
+                ):
+                    self.applier.apply(result.changeset)
             self.store.write_artifact(
                 task_id,
                 self.name.value,
