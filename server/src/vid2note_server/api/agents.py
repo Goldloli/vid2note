@@ -22,12 +22,13 @@ router = APIRouter(tags=["agents"], responses=ERROR_RESPONSES)
 async def list_agents(services: ServicesDependency):
     results = []
     for runtime_id, descriptor in services.agent_registry.descriptors.items():
+        runtime = services.agent_sessions.runtimes[runtime_id]
         results.append(
             RuntimeResponse(
                 id=runtime_id,
                 label=descriptor.label,
-                detection=await services.agent_registry.detect(runtime_id),
-                capabilities=services.agent_registry.capabilities(runtime_id),
+                detection=await runtime.detect(),
+                capabilities=runtime.capabilities(),
             )
         )
     return results
