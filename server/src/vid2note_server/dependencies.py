@@ -4,6 +4,11 @@ from dataclasses import dataclass
 from typing import Annotated, cast
 
 from fastapi import Depends, Request
+from vid2note_core.agents.builtin import BuiltinRuntime
+from vid2note_core.agents.external import ExternalCliRuntime
+from vid2note_core.agents.registry import RuntimeRegistry
+from vid2note_core.agents.session import AgentSessionService
+from vid2note_core.agents.tools import AgentToolbox
 from vid2note_core.asr.local.model_manager import ModelManager
 from vid2note_core.config.manager import ConfigManager
 from vid2note_core.media.service import MediaService
@@ -39,6 +44,8 @@ class Services:
     changesets: ChangeSetStore
     validator: ChangeSetValidator
     applier: ChangeSetApplier
+    agent_registry: RuntimeRegistry
+    agent_sessions: AgentSessionService
     worker: TaskWorker
 
 
@@ -60,6 +67,15 @@ def build_services(paths: RuntimePaths) -> Services:
     vault.internal_edit_observer = watcher.ignore
     source_registrar.internal_edit_observer = watcher.ignore
     applier.internal_edit_observer = watcher.ignore
+    agent_registry = RuntimeRegistry()
+    agent_sessions = AgentSessionService(
+        database,
+        {
+            "built-in": BuiltinRuntime(AgentToolbox(vault, changesets)),
+            "codex": ExternalCliRuntime("codex", vault_layout, vault, changesets),
+            "claude": ExternalCliRuntime("claude", vault_layout, vault, changesets),
+        },
+    )
     worker = TaskWorker(
         tasks,
         artifacts,
@@ -87,6 +103,8 @@ def build_services(paths: RuntimePaths) -> Services:
         changesets,
         validator,
         applier,
+        agent_registry,
+        agent_sessions,
         worker,
     )
 

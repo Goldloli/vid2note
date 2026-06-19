@@ -50,3 +50,18 @@ def test_runner_timeout_terminates_process(tmp_path):
 
     assert result.timed_out
     assert result.returncode != 0
+
+
+def test_runner_explicit_cancel_is_distinct_from_failure(tmp_path):
+    async def scenario():
+        runner = ManagedProcessRunner(PassthroughSandbox())
+        task = asyncio.create_task(
+            runner.run("run_4", sys.executable, [str(FAKE), "sleep"], "", tmp_path)
+        )
+        await asyncio.sleep(0.05)
+        await runner.cancel("run_4")
+        return await task
+
+    result = asyncio.run(scenario())
+    assert result.cancelled
+    assert not result.timed_out

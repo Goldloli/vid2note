@@ -77,6 +77,9 @@ class CodexAdapter:
         result = await self.runner.run(
             input.run_id, self.executable, args, input.message, workspace.root
         )
+        if result.cancelled:
+            yield emitter.emit("run.cancelled", {})
+            return
         parser = CodexJsonlParser()
         terminal_native = None
         for line in result.stdout_lines:

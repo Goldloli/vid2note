@@ -21,6 +21,7 @@ class ProcessResult:
     stdout_lines: list[str]
     stderr: str
     timed_out: bool = False
+    cancelled: bool = False
 
 
 class ManagedProcessRunner:
@@ -28,6 +29,7 @@ class ManagedProcessRunner:
         self.sandbox = sandbox
         self.auth_env = auth_env or set()
         self._processes: dict[str, asyncio.subprocess.Process] = {}
+        self._cancelled: set[str] = set()
 
     async def run(
         self,
@@ -69,16 +71,20 @@ class ManagedProcessRunner:
         finally:
             self._processes.pop(run_id, None)
         stdout_lines, stderr = await asyncio.gather(stdout_task, stderr_task)
+        cancelled = run_id in self._cancelled
+        self._cancelled.discard(run_id)
         return ProcessResult(
             returncode=process.returncode if process.returncode is not None else -1,
             stdout_lines=stdout_lines,
             stderr=_redact(stderr),
             timed_out=timed_out,
+            cancelled=cancelled,
         )
 
     async def cancel(self, run_id: str) -> None:
         process = self._processes.get(run_id)
         if process is not None:
+            self._cancelled.add(run_id)
             await self._terminate(process)
 
     async def _terminate(self, process: asyncio.subprocess.Process) -> None:

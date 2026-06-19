@@ -66,3 +66,21 @@ class RuntimeDescriptor(FrozenModel):
     version_args: list[str]
     auth_args: list[str] | None
     detection_timeout_ms: int = Field(default=5000, gt=0)
+
+
+class AgentSession(FrozenModel):
+    id: str
+    runtime_id: str
+    model: str | None = None
+    context_paths: list[str]
+    status: Literal["created", "running", "completed", "failed", "cancelled"]
+    created_at: datetime
+    updated_at: datetime
+
+
+class AgentRun(FrozenModel):
+    id: str
+    session_id: str
+    status: Literal["running", "completed", "failed", "cancelled"]
+    created_at: datetime
+    completed_at: datetime | None = None
