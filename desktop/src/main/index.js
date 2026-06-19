@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron')
+const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron')
 const path = require('path')
 const { spawn, execSync } = require('child_process')
 const net = require('net')
@@ -214,6 +214,18 @@ function createWindow() {
 // IPC: 暴露后端地址给 renderer
 ipcMain.handle('get-backend-url', () => {
   return `http://127.0.0.1:${backendPort}`
+})
+ipcMain.handle('choose-local-video', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile'],
+    filters: [{ name: '视频', extensions: ['mp4', 'mov', 'mkv', 'webm', 'm4v'] }],
+  })
+  return result.canceled ? null : result.filePaths[0]
+})
+ipcMain.handle('open-external', async (_event, value) => {
+  const url = new URL(value)
+  if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Unsupported external URL')
+  await shell.openExternal(url.toString())
 })
 
 app.whenReady().then(async () => {

@@ -1,10 +1,23 @@
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import FileResponse
 
 from vid2note_server.dependencies import ServicesDependency
 from vid2note_server.schemas.common import ERROR_RESPONSES
 from vid2note_server.schemas.media import MediaReference
 
 router = APIRouter(prefix="/media", tags=["media"], responses=ERROR_RESPONSES)
+
+
+@router.get("/asset", response_class=FileResponse)
+def media_asset(path: str, services: ServicesDependency):
+    asset = (services.vault_layout.root / path).resolve(strict=False)
+    allowed_roots = (
+        (services.vault_layout.private / "cache").resolve(),
+        services.vault_layout.assets.resolve(),
+    )
+    if not asset.is_file() or not any(asset.is_relative_to(root) for root in allowed_roots):
+        raise HTTPException(404, "媒体资源不存在")
+    return FileResponse(asset)
 
 
 @router.get("/frame", response_model=MediaReference)

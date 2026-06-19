@@ -3,7 +3,7 @@ const path = require('node:path')
 const { test, expect } = require('@playwright/test')
 
 test('本地 SRT 经真实 Worker 生成并导出来源笔记', async ({ page }) => {
-  await page.goto('/')
+  await page.goto('/#/workspace/import')
   await page.getByTestId('srt-input').setInputFiles(
     path.join(__dirname, 'fixtures', 'sample.srt')
   )

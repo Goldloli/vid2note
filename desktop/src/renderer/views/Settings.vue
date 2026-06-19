@@ -1,6 +1,8 @@
 <template>
   <div class="page">
+    <p v-if="settingsError" role="alert" class="muted" style="color:var(--danger)">{{ settingsError }}</p>
     <div class="set-tabs">
+      <button class="tab" :class="{active: tab === 'workspace'}" @click="tab = 'workspace'">知识工作台</button>
       <button class="tab" :class="{active: tab === 'asr'}" @click="tab = 'asr'">ASR 语音识别</button>
       <button class="tab" :class="{active: tab === 'llm'}" @click="tab = 'llm'">LLM 大模型</button>
       <button class="tab" :class="{active: tab === 'proc'}" @click="tab = 'proc'">处理选项</button>
@@ -10,6 +12,14 @@
     </div>
     <div class="set-grid">
       <div>
+        <div v-show="tab === 'workspace'" class="card card-pad reveal">
+          <div class="section-title"><h2>知识工作台</h2><span class="tag">Markdown Vault</span></div>
+          <div class="form-row"><div><div class="fr-label">Vault 路径</div><div class="fr-desc">正文事实源。路径由应用数据根目录统一管理，删除状态数据库不会删除 Markdown。</div></div><div class="mono">data/vault</div></div>
+          <div class="form-row"><div><div class="fr-label">Agent 自治模式</div><div class="fr-desc">默认审批；Agent 和 Wiki Compiler 只能通过 ChangeSet 写回正式 Wiki。</div></div><select v-model="form.autonomy_mode" class="input"><option value="approval">A · 审批模式</option><option value="auto-revertible">B · 可回滚自治</option><option value="high-autonomy">C · 高自治</option></select></div>
+          <div class="form-row"><div><div class="fr-label">默认 Runtime</div><div class="fr-desc">外部 CLI 始终在隔离工作区运行。</div></div><div class="mono">Built-in Runtime</div></div>
+          <div class="form-row"><div><div class="fr-label">证据片段缓冲</div><div class="fr-desc">播放器在引用范围前后各保留缓冲。</div></div><div class="mono">1500 ms</div></div>
+          <div class="form-row"><div><div class="fr-label">云数据说明</div><div class="fr-desc">本地 FunASR 不上传音频；选择云 ASR/LLM 时仅发送完成任务所需内容。</div></div><div>按提供商隐私政策处理</div></div>
+        </div>
         <!-- ASR -->
         <div v-show="tab === 'asr'" class="card card-pad reveal">
           <div class="section-title"><h2>语音识别引擎 (ASR)</h2><span class="tag">默认 funasr</span></div>
@@ -85,6 +95,7 @@
             <dt>语言</dt><dd>{{ form.language === 'zh' ? '中文' : 'English' }}</dd>
             <dt>分块</dt><dd>{{ form.chunk_size }}</dd>
             <dt>温度</dt><dd>{{ form.temperature }}</dd>
+            <dt>自治</dt><dd>{{ form.autonomy_mode === 'approval' ? '审批模式' : form.autonomy_mode }}</dd>
             <dt>保留</dt><dd>{{ form.keep_srt ? 'SRT' : '无' }}</dd>
           </dl>
           <div class="divider-h"></div>
@@ -101,14 +112,17 @@
 import { ref, reactive, onMounted } from 'vue'
 import { getConfig, updateConfig, verifyApiKey } from '../api/config'
 import { listModels } from '../api/models'
+import { useWorkspaceStore } from '../stores/workspace'
 
-const tab = ref('asr')
+const tab = ref('workspace')
+const workspace = useWorkspaceStore()
 const asrProviders = [
   { name: 'funasr', meta: '本地 · paraformer-small' },
 ]
 const llmProviders = ref([])
 const verifyMsg = ref('')
 const verifyOk = ref(false)
+const settingsError = ref('')
 
 const form = reactive({
   asr_provider: 'funasr',
@@ -122,6 +136,7 @@ const form = reactive({
   keep_srt: true,
   chunk_size: 4000,
   temperature: 0.3,
+  autonomy_mode: 'approval',
 })
 
 const defaultModel = (p) => ({ qwen: 'qwen-turbo', deepseek: 'deepseek-chat', glm: 'glm-4-flash', moonshot: 'moonshot-v1-8k', ollama: 'llama3', mock: 'mock' }[p] || p)
@@ -129,7 +144,7 @@ const selectAsr = (name) => { form.asr_provider = name; saveField('asr_provider'
 const selectLlm = (name) => { form.llm_provider = name; saveField('llm_provider', name) }
 
 async function saveField(field, value) {
-  try { await updateConfig({ [field]: value }) } catch (e) {}
+  try { await updateConfig({ [field]: value }); settingsError.value = '' } catch (e) { settingsError.value = `配置保存失败：${e.message || e}` }
 }
 async function save() {
   try {
@@ -139,8 +154,10 @@ async function save() {
       keep_video: form.keep_video,
       keep_audio: form.keep_audio,
       keep_srt: form.keep_srt,
+      autonomy_mode: form.autonomy_mode,
     })
-  } catch (e) {}
+    await workspace.loadAutonomyMode()
+  } catch (e) { settingsError.value = `配置保存失败：${e.message || e}` }
 }
 async function verifyKey() {
   verifyMsg.value = '验证中…'
@@ -158,11 +175,15 @@ onMounted(async () => {
   try {
     const cfg = await getConfig()
     Object.assign(form, cfg)
-  } catch (e) {}
+    if (cfg.asr) form.asr_provider = cfg.asr.provider
+    if (cfg.retention) Object.assign(form, cfg.retention)
+    if (cfg.processing) Object.assign(form, cfg.processing)
+    if (cfg.advanced) Object.assign(form, cfg.advanced)
+  } catch (e) { settingsError.value = `配置读取失败：${e.message || e}` }
   try {
     const data = await listModels()
     llmProviders.value = data.llm_providers || []
-  } catch (e) {}
+  } catch (e) { settingsError.value = `模型列表读取失败：${e.message || e}` }
 })
 </script>
 

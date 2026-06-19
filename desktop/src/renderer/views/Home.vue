@@ -34,6 +34,7 @@
             @change="importSrt"
           >
         </label>
+        <button type="button" class="btn btn-sm" :disabled="store.isCreating || !canChooseLocalVideo" @click="chooseLocalVideo">导入本地视频</button>
         <div class="row gap-s">
           <span class="kicker">ASR</span>
           <button type="button" class="chip active">FunASR 本地</button>
@@ -45,6 +46,7 @@
           <button type="button" class="chip">ollama · llama3</button>
         </div>
       </div>
+      <p class="muted mono-sm" style="margin-top:12px">在线来源由下载器获取；本地视频和 SRT 留在本机。选择云 ASR/LLM 时内容可能发送给对应提供商。请确认你有权处理和保存该来源。</p>
     </section>
 
     <!-- 统计 -->
@@ -106,6 +108,7 @@ import PipelineRail from '../components/PipelineRail.vue'
 
 const store = useTaskStore()
 const url = ref('')
+const canChooseLocalVideo = Boolean(window.electronAPI?.chooseLocalVideo)
 
 const activeTasks = computed(() => store.tasks.filter((t) => t.status === 'running' || t.status === 'pending'))
 const completedTasks = computed(() => store.tasks.filter((t) => t.status === 'completed').slice(0, 6))
@@ -149,6 +152,11 @@ async function importSrt(event) {
   } finally {
     event.target.value = ''
   }
+}
+
+async function chooseLocalVideo() {
+  const path = await window.electronAPI?.chooseLocalVideo()
+  if (path) await store.addLocalVideo(path)
 }
 
 onMounted(() => store.loadTasks())

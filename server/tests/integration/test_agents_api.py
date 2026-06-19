@@ -43,3 +43,33 @@ def test_unknown_runtime_is_rejected(client):
         "/api/v1/agent/sessions", json={"runtime_id": "unknown", "context_paths": []}
     )
     assert response.status_code == 404
+
+
+def test_sessions_can_be_listed_for_workspace_recovery(client):
+    created = client.post(
+        "/api/v1/agent/sessions", json={"runtime_id": "built-in", "context_paths": []}
+    ).json()
+
+    response = client.get("/api/v1/agent/sessions")
+
+    assert response.status_code == 200
+    assert response.json()[0]["id"] == created["id"]
+
+
+def test_agent_event_stream_can_resume_after_previous_run(client):
+    session = client.post(
+        "/api/v1/agent/sessions", json={"runtime_id": "built-in", "context_paths": []}
+    ).json()
+    client.post(f"/api/v1/agent/sessions/{session['id']}/messages", json={"message": "first"})
+    first = _wait_terminal(client, session["id"])
+    client.post(f"/api/v1/agent/sessions/{session['id']}/messages", json={"message": "second"})
+
+    with client.stream(
+        "GET", f"/api/v1/agent/sessions/{session['id']}/events", params={"after": len(first)}
+    ) as response:
+        payload = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    assert "run.started" in payload
+    assert "run.completed" in payload
+    assert first[0].run_id not in payload

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
 
 from vid2note_server.dependencies import ServicesDependency
@@ -50,6 +50,11 @@ async def create_session(request: CreateAgentSessionRequest, services: ServicesD
         raise HTTPException(404, "Agent Runtime 不存在或不可用") from exc
 
 
+@router.get("/agent/sessions", response_model=list[AgentSessionResponse])
+async def list_sessions(services: ServicesDependency):
+    return services.agent_sessions.list_sessions()
+
+
 @router.get("/agent/sessions/{session_id}", response_model=AgentSessionResponse)
 async def get_session(session_id: str, services: ServicesDependency):
     session = services.agent_sessions.get_session(session_id)
@@ -74,11 +79,12 @@ async def send_message(
         raise HTTPException(404, "Agent Session 不存在") from exc
 
 
-async def _session_events(session_id: str, services):
+async def _session_events(session_id: str, services, after: int):
     history = services.agent_sessions.list_events(session_id)
-    for event in history:
+    for event in history[after:]:
         yield f"data: {event.model_dump_json()}\n\n"
-    if history and history[-1].type in {"run.completed", "run.failed", "run.cancelled"}:
+    session = services.agent_sessions.get_session(session_id)
+    if session is not None and session.status in {"completed", "failed", "cancelled"}:
         return
     queue = services.agent_sessions.subscribe(session_id)
     try:
@@ -96,11 +102,15 @@ async def _session_events(session_id: str, services):
 
 
 @router.get("/agent/sessions/{session_id}/events")
-async def session_events(session_id: str, services: ServicesDependency):
+async def session_events(
+    session_id: str,
+    services: ServicesDependency,
+    after: int = Query(default=0, ge=0),
+):
     if services.agent_sessions.get_session(session_id) is None:
         raise HTTPException(404, "Agent Session 不存在")
     return StreamingResponse(
-        _session_events(session_id, services),
+        _session_events(session_id, services, after),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

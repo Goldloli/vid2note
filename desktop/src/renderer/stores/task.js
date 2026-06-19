@@ -76,6 +76,22 @@ export const useTaskStore = defineStore('task', () => {
     }
   }
 
+  async function addLocalVideo(path) {
+    isCreating.value = true
+    error.value = ''
+    try {
+      const res = await startProcess({ video_file: path, asr_provider: 'funasr' })
+      tasks.value = [{ id: res.task_id, status: 'pending', progress: 0, current_step: '等待处理', video_file: path, created_at: new Date().toISOString() }, ...tasks.value]
+      _subscribeToEvents(res.task_id)
+      return res.task_id
+    } catch (e) {
+      error.value = e.message
+      throw e
+    } finally {
+      isCreating.value = false
+    }
+  }
+
   function _subscribeToEvents(taskId) {
     if (eventSources.value.has(taskId)) {
       eventSources.value.get(taskId).close()
@@ -137,6 +153,7 @@ export const useTaskStore = defineStore('task', () => {
     loadTasks,
     addTask,
     addSrtTask,
+    addLocalVideo,
     cleanup,
   }
 })

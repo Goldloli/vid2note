@@ -63,6 +63,20 @@ def test_missing_vault_page_returns_typed_not_found(client):
     assert response.json()["error"]["code"] == "HTTP_404"
 
 
+def test_vault_backlinks_returns_pages_that_link_to_target(client):
+    _write_wiki_page(client)
+    linking = client.app.state.services.vault_layout.wiki / "linking.md"
+    linking.write_text(
+        "---\ntitle: Linking page\n---\n\nSee [[wiki/concepts/poc-trap.md|the trap]].\n",
+        encoding="utf-8",
+    )
+
+    response = client.get("/api/v1/vault/backlinks", params={"path": "wiki/concepts/poc-trap.md"})
+
+    assert response.status_code == 200
+    assert response.json() == [{"path": "wiki/linking.md", "title": "Linking page"}]
+
+
 def test_markdown_sources_survive_state_database_deletion(tmp_path):
     data_root = tmp_path / "data"
     with TestClient(create_app(data_root)) as first:

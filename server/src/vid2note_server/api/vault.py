@@ -1,4 +1,7 @@
+import re
+
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
 
 from vid2note_server.dependencies import ServicesDependency
 from vid2note_server.schemas.common import ERROR_RESPONSES
@@ -12,9 +15,38 @@ from vid2note_server.schemas.vault import (
 router = APIRouter(prefix="/vault", tags=["vault"], responses=ERROR_RESPONSES)
 
 
+class VaultBacklink(BaseModel):
+    path: str
+    title: str
+
+
 @router.get("/tree", response_model=list[VaultTreeEntry])
 async def vault_tree(services: ServicesDependency):
     return services.vault.tree()
+
+
+@router.get("/backlinks", response_model=list[VaultBacklink])
+async def vault_backlinks(path: str, services: ServicesDependency):
+    try:
+        services.vault.read_page(path)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, "页面不存在") from exc
+    pattern = re.compile(r"\[\[" + re.escape(path) + r"(?:\|[^\]]+)?\]\]")
+    backlinks: list[VaultBacklink] = []
+    for entry in services.vault.tree():
+        if entry.path == path:
+            continue
+        page = services.vault.read_page(entry.path)
+        if pattern.search(page.content):
+            frontmatter = page.frontmatter or {}
+            title = frontmatter.get("title")
+            backlinks.append(
+                VaultBacklink(
+                    path=entry.path,
+                    title=title if isinstance(title, str) else entry.name,
+                )
+            )
+    return backlinks
 
 
 @router.get("/page", response_model=VaultPage)

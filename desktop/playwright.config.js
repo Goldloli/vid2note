@@ -6,12 +6,14 @@
 //     通过环境变量注入，避免真实下载/识别
 //   - DB / 上传目录隔离到临时目录
 const path = require('path')
+const fs = require('fs')
 
 const FRONT_PORT = process.env.VID2NOTE_E2E_FRONT_PORT || 5174
 const BACK_PORT = process.env.VID2NOTE_E2E_BACK_PORT || 18765
 // 优先用仓库 venv 的 python（已装好 vid2note 依赖），否则系统 python
 const ROOT = path.resolve(__dirname, '..')
-const PY = process.env.VID2NOTE_E2E_PYTHON || (require('fs').existsSync(path.join(ROOT, '.venv', 'bin', 'python')) ? path.join(ROOT, '.venv', 'bin', 'python') : 'python')
+const PY = process.env.VID2NOTE_E2E_PYTHON || (fs.existsSync(path.join(ROOT, '.venv', 'bin', 'python')) ? path.join(ROOT, '.venv', 'bin', 'python') : 'python')
+const SYSTEM_CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
 
 // defineConfig 是可选的类型辅助；不 import 以避免全局/本地 playwright 版本冲突
 /** @type {import('@playwright/test').PlaywrightTestConfig} */
@@ -27,6 +29,7 @@ const config = {
     baseURL: `http://localhost:${FRONT_PORT}`,
     trace: 'on-first-retry',
     actionTimeout: 10_000,
+    launchOptions: fs.existsSync(SYSTEM_CHROME) ? { executablePath: SYSTEM_CHROME } : undefined,
   },
   webServer: [
     {

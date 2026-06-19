@@ -72,3 +72,18 @@ def test_media_unavailable_returns_typed_details(client):
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "SOURCE_MEDIA_UNAVAILABLE"
     assert response.json()["error"]["details"]["canonical_url"] == source["canonical_url"]
+
+
+def test_generated_media_asset_can_be_streamed_but_paths_cannot_escape(client, tmp_path):
+    source = _source_with_media(client, tmp_path)
+    client.app.state.services.media.runner = FakeRunner()
+    reference = client.get(
+        "/api/v1/media/frame", params={"source_id": source.source_id, "timestamp_ms": 1000}
+    ).json()
+
+    asset = client.get("/api/v1/media/asset", params={"path": reference["asset_path"]})
+    escaped = client.get("/api/v1/media/asset", params={"path": "../config.yaml"})
+
+    assert asset.status_code == 200
+    assert asset.content == b"rendered"
+    assert escaped.status_code == 404

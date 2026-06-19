@@ -60,6 +60,16 @@ class AgentSessionService:
         row = self.database.fetchone("SELECT * FROM agent_sessions WHERE id = ?", (session_id,))
         if row is None:
             return None
+        return self._session_from_row(row)
+
+    def list_sessions(self, *, limit: int = 100) -> list[AgentSession]:
+        rows = self.database.fetchall(
+            "SELECT * FROM agent_sessions ORDER BY updated_at DESC LIMIT ?", (limit,)
+        )
+        return [self._session_from_row(row) for row in rows]
+
+    @staticmethod
+    def _session_from_row(row) -> AgentSession:
         return AgentSession(
             id=row["id"],
             runtime_id=row["runtime_id"],
