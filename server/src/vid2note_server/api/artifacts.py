@@ -14,8 +14,9 @@ from fastapi.responses import Response
 from vid2note_core.types import TaskId
 
 from vid2note_server.dependencies import Services, ServicesDependency
+from vid2note_server.schemas.common import ERROR_RESPONSES, ArtifactListResponse
 
-router = APIRouter(tags=["artifacts"])
+router = APIRouter(tags=["artifacts"], responses=ERROR_RESPONSES)
 
 # artifact 键名 → (下载文件名, Content-Type, 友好类型)
 # 键名来自 ArtifactStore 的 f"{node}_{name}" 命名约定
@@ -37,7 +38,7 @@ def _validate_task(task_id: str, services: Services):
     return repo
 
 
-@router.get("/tasks/{task_id}/artifacts")
+@router.get("/tasks/{task_id}/artifacts", response_model=ArtifactListResponse)
 async def list_artifacts(task_id: str, services: ServicesDependency):
     """列出任务的所有产物文件（名称、类型、大小）。"""
     _validate_task(task_id, services)
@@ -57,7 +58,7 @@ async def list_artifacts(task_id: str, services: ServicesDependency):
     return {"task_id": task_id, "artifacts": items}
 
 
-@router.get("/tasks/{task_id}/artifacts/{key}")
+@router.get("/tasks/{task_id}/artifacts/{key}", response_class=Response)
 async def download_artifact(task_id: str, key: str, services: ServicesDependency):
     """下载单个产物文件（返回原始字节 + 正确 Content-Type + 附件下载头）。"""
     _validate_task(task_id, services)
@@ -78,7 +79,7 @@ async def download_artifact(task_id: str, key: str, services: ServicesDependency
     )
 
 
-@router.get("/tasks/{task_id}/export")
+@router.get("/tasks/{task_id}/export", response_class=Response)
 async def export_all_artifacts(task_id: str, services: ServicesDependency):
     """把任务所有产物打包为 zip 下载。"""
     _validate_task(task_id, services)

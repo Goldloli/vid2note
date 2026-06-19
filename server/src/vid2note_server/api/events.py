@@ -6,7 +6,10 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from vid2note_core.events.bus import get_event_bus
 
-router = APIRouter(tags=["events"])
+from vid2note_server.schemas.common import ERROR_RESPONSES
+from vid2note_server.schemas.events import TaskEvent
+
+router = APIRouter(tags=["events"], responses=ERROR_RESPONSES)
 
 
 async def event_stream(task_id: str):
@@ -23,7 +26,7 @@ async def event_stream(task_id: str):
         bus.unsubscribe(task_id, queue)
 
 
-@router.get("/tasks/{task_id}/events")
+@router.get("/tasks/{task_id}/events", response_model=TaskEvent)
 async def task_events(task_id: str):
     return StreamingResponse(
         event_stream(task_id),

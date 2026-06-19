@@ -7,11 +7,12 @@ file_id 可在创建任务时引用（task_repo 的 srt_file/pdf_file/txt_file �
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, UploadFile
-from pydantic import BaseModel
 
 from vid2note_server.dependencies import Services, ServicesDependency
+from vid2note_server.schemas.common import ERROR_RESPONSES
+from vid2note_server.schemas.upload import UploadResponse
 
-router = APIRouter(tags=["upload"])
+router = APIRouter(tags=["upload"], responses=ERROR_RESPONSES)
 
 # 各类型允许的扩展名与最大字节数
 _ALLOWED = {
@@ -20,12 +21,6 @@ _ALLOWED = {
     "txt": {".txt"},
 }
 MAX_SIZE = 50 * 1024 * 1024  # 50 MB
-
-
-class UploadResponse(BaseModel):
-    file_id: str
-    filename: str
-    size: int
 
 
 def _validate_and_store(upload: UploadFile, kind: str, services: Services) -> UploadResponse:

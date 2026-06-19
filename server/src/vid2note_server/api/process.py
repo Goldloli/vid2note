@@ -13,46 +13,19 @@ from __future__ import annotations
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
 from vid2note_core.events.bus import TaskEvent, get_event_bus
 from vid2note_core.types import NodeName, TaskId, TaskStatus
 
 from vid2note_server.dependencies import ServicesDependency
+from vid2note_server.schemas.common import ERROR_RESPONSES
+from vid2note_server.schemas.process import (
+    ResultResponse,
+    StartRequest,
+    StartResponse,
+    StatusResponse,
+)
 
-router = APIRouter(tags=["process"])
-
-
-class StartRequest(BaseModel):
-    """启动处理请求。
-
-    至少提供 video_url / video_file / srt_file 之一：
-      - video_url: 在线视频链接
-      - video_file: 本地视频路径
-      - srt_file: 已上传的 SRT file_id（跳过下载+ASR，直接整理）
-      - pdf_file: 附带 PDF 课件 file_id
-    """
-
-    video_url: str | None = None
-    video_file: str | None = None
-    srt_file: str | None = None
-    pdf_file: str | None = None
-    asr_provider: str = "funasr"
-    llm_provider: str = "qwen"
-    export_mindmap: bool = False
-
-
-class StartResponse(BaseModel):
-    task_id: str
-    status: str
-
-
-class StatusResponse(BaseModel):
-    task_id: str
-    status: str
-    progress: int
-    current_step: str
-    message: str | None = None
-    error: str | None = None
+router = APIRouter(tags=["process"], responses=ERROR_RESPONSES)
 
 
 @router.post("/process/start", response_model=StartResponse)
@@ -105,7 +78,7 @@ async def get_status(task_id: str, services: ServicesDependency):
     )
 
 
-@router.get("/process/result/{task_id}")
+@router.get("/process/result/{task_id}", response_model=ResultResponse)
 async def get_result(task_id: str, services: ServicesDependency):
     """查询任务产物。任务未完成时返回已有状态；完成时附带产物文本。"""
     if not TaskId.is_valid(task_id):
