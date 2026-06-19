@@ -12,6 +12,7 @@
       :open="store.agentOpen"
       :drawer="store.agentDrawer"
       :width="store.agentWidth"
+      :autonomy-label="store.autonomyLabel"
       :class="{ 'is-drawer': store.agentDrawer }"
       @close="store.agentOpen = false"
       @resize="store.setAgentWidth"

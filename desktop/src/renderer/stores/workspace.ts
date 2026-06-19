@@ -1,6 +1,8 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { defineStore } from 'pinia'
 
+import { getConfig } from '../api/config'
+
 export type AutonomyMode = 'approval' | 'auto-revertible' | 'high-autonomy'
 
 const readWidth = (key: string, fallback: number): number => {
@@ -19,6 +21,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const treeWidth = ref(readWidth('v2n-tree-width', 272))
   const agentWidth = ref(readWidth('v2n-agent-width', 380))
   const autonomyMode = ref<AutonomyMode>('approval')
+  const autonomyLabel = computed(() => ({
+    approval: 'A · 审批',
+    'auto-revertible': 'B · 可回滚自治',
+    'high-autonomy': 'C · 高自治',
+  })[autonomyMode.value])
   const viewportWidth = ref(initialViewportWidth)
 
   const treeVisible = computed(() => treeOpen.value)
@@ -51,7 +58,22 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     setViewportWidth(window.innerWidth)
   }
 
-  onMounted(() => window.addEventListener('resize', updateViewport))
+  async function loadAutonomyMode(): Promise<void> {
+    try {
+      const config = await getConfig()
+      const mode = config.autonomy_mode
+      if (mode === 'approval' || mode === 'auto-revertible' || mode === 'high-autonomy') {
+        autonomyMode.value = mode
+      }
+    } catch {
+      autonomyMode.value = 'approval'
+    }
+  }
+
+  onMounted(() => {
+    window.addEventListener('resize', updateViewport)
+    void loadAutonomyMode()
+  })
   onUnmounted(() => window.removeEventListener('resize', updateViewport))
 
   return {
@@ -60,6 +82,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     treeWidth,
     agentWidth,
     autonomyMode,
+    autonomyLabel,
     viewportWidth,
     treeVisible,
     agentDrawer,
@@ -68,5 +91,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     setAgentWidth,
     toggleTree,
     toggleAgent,
+    loadAutonomyMode,
   }
 })

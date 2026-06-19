@@ -22,7 +22,7 @@
     </header>
     <div class="agent-runtime">
       <span>Built-in Runtime</span>
-      <b>A · 审批</b>
+      <b>{{ autonomyLabel }}</b>
     </div>
     <div class="agent-empty">
       <ChatDotRound />
@@ -42,6 +42,6 @@ import { ChatDotRound, Close } from '@element-plus/icons-vue'
 
 import ResizablePane from './ResizablePane.vue'
 
-defineProps<{ open: boolean; width: number; drawer: boolean }>()
+defineProps<{ open: boolean; width: number; drawer: boolean; autonomyLabel: string }>()
 defineEmits<{ close: []; resize: [width: number] }>()
 </script>
