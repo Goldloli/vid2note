@@ -3,9 +3,11 @@
 from typing import Any, Literal
 
 from pydantic import BaseModel
+from vid2note_core.wiki.policy import AutonomyMode
 
 
 class UpdateConfigRequest(BaseModel):
+    autonomy_mode: AutonomyMode | None = None
     llm_provider: (
         Literal["qwen", "glm", "deepseek", "moonshot", "baidu", "doubao", "minimax", "ollama"]
         | None

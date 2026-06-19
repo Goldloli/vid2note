@@ -4,6 +4,108 @@
  */
 
 export interface paths {
+    "/api/v1/changesets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Changesets */
+        get: operations["list_changesets_api_v1_changesets_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/changesets/{changeset_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Changeset */
+        get: operations["get_changeset_api_v1_changesets__changeset_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/changesets/{changeset_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve Changeset */
+        post: operations["approve_changeset_api_v1_changesets__changeset_id__approve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/changesets/{changeset_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject Changeset */
+        post: operations["reject_changeset_api_v1_changesets__changeset_id__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/changesets/{changeset_id}/revert": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revert Changeset */
+        post: operations["revert_changeset_api_v1_changesets__changeset_id__revert_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/changesets/{changeset_id}/revise": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revise Changeset */
+        post: operations["revise_changeset_api_v1_changesets__changeset_id__revise_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/config": {
         parameters: {
             query?: never;
@@ -545,6 +647,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/wiki/policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Wiki Policy */
+        get: operations["get_wiki_policy_api_v1_wiki_policy_get"];
+        /** Update Wiki Policy */
+        put: operations["update_wiki_policy_api_v1_wiki_policy_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -566,6 +686,11 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** ApproveChangeSetRequest */
+        ApproveChangeSetRequest: {
+            /** Operation Indexes */
+            operation_indexes?: number[] | null;
+        };
         /** ArtifactItem */
         ArtifactItem: {
             /** Content Type */
@@ -586,6 +711,19 @@ export interface components {
             /** Task Id */
             task_id: string;
         };
+        /**
+         * AutonomyMode
+         * @enum {string}
+         */
+        AutonomyMode: "approval" | "auto-revertible" | "high-autonomy";
+        /** AutonomyModeRequest */
+        AutonomyModeRequest: {
+            mode: components["schemas"]["AutonomyMode"];
+        };
+        /** AutonomyModeResponse */
+        AutonomyModeResponse: {
+            mode: components["schemas"]["AutonomyMode"];
+        };
         /** Body_upload_pdf_api_v1_upload_pdf_post */
         Body_upload_pdf_api_v1_upload_pdf_post: {
             /** File */
@@ -601,6 +739,72 @@ export interface components {
             /** File */
             file: string;
         };
+        /** ChangeOperation */
+        ChangeOperation: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "create" | "update" | "rename";
+            /** After */
+            after: string;
+            /** Base Hash */
+            base_hash?: string | null;
+            /** Before */
+            before?: string | null;
+            /** Citations */
+            citations: components["schemas"]["Citation"][];
+            /** Page Id */
+            page_id: string;
+            /** Path */
+            path: string;
+            /** Rationale */
+            rationale: string;
+        };
+        /** ChangeSet */
+        ChangeSet: {
+            /** Agent Runtime */
+            agent_runtime: string;
+            /** Base Revision */
+            base_revision: string;
+            /** Contradictions */
+            contradictions: components["schemas"]["Contradiction"][];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: string;
+            /** Operations */
+            operations: components["schemas"]["ChangeOperation"][];
+            /** Parent Id */
+            parent_id?: string | null;
+            /** Rejection Reason */
+            rejection_reason?: string | null;
+            /** Source Ids */
+            source_ids: string[];
+            /**
+             * Status
+             * @default pending
+             * @enum {string}
+             */
+            status: "pending" | "applied" | "rejected" | "reverted";
+            /** Summary */
+            summary: string;
+            /** Supersedes */
+            supersedes?: string | null;
+            validation_result?: components["schemas"]["ValidationResult"] | null;
+        };
+        /** Citation */
+        Citation: {
+            /** End Ms */
+            end_ms: number;
+            /** Source Id */
+            source_id: string;
+            /** Start Ms */
+            start_ms: number;
+        };
         /** ConfigResponse */
         ConfigResponse: {
             [key: string]: unknown;
@@ -611,6 +815,24 @@ export interface components {
             changed: string[];
             /** Message */
             message: string;
+        };
+        /** Contradiction */
+        Contradiction: {
+            /** Citations A */
+            citations_a: components["schemas"]["Citation"][];
+            /** Citations B */
+            citations_b: components["schemas"]["Citation"][];
+            /** Claim A */
+            claim_a: string;
+            /** Claim B */
+            claim_b: string;
+            /**
+             * Requires Approval
+             * @default true
+             */
+            requires_approval: boolean;
+            /** Topic */
+            topic: string;
         };
         /** CreateTaskRequest */
         CreateTaskRequest: {
@@ -738,6 +960,11 @@ export interface components {
             /** Llm Providers */
             llm_providers: string[];
         };
+        /** RejectChangeSetRequest */
+        RejectChangeSetRequest: {
+            /** Reason */
+            reason: string;
+        };
         /** RerunRequest */
         RerunRequest: {
             /** From Node */
@@ -755,6 +982,20 @@ export interface components {
             status: string;
             /** Task Id */
             task_id: string;
+        };
+        /** ReviseChangeSetRequest */
+        ReviseChangeSetRequest: {
+            /** Agent Runtime */
+            agent_runtime?: string | null;
+            /**
+             * Contradictions
+             * @default []
+             */
+            contradictions: components["schemas"]["Contradiction"][];
+            /** Operations */
+            operations: components["schemas"]["ChangeOperation"][];
+            /** Summary */
+            summary: string;
         };
         /** SourceIngestRequest */
         SourceIngestRequest: {
@@ -957,6 +1198,7 @@ export interface components {
         UpdateConfigRequest: {
             /** Asr Provider */
             asr_provider?: string | null;
+            autonomy_mode?: components["schemas"]["AutonomyMode"] | null;
             /** Keep Audio */
             keep_audio?: boolean | null;
             /** Keep Markdown */
@@ -982,6 +1224,29 @@ export interface components {
             filename: string;
             /** Size */
             size: number;
+        };
+        /** ValidationIssue */
+        ValidationIssue: {
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Operation Index */
+            operation_index?: number | null;
+            /** Path */
+            path?: string | null;
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "error" | "warning";
+        };
+        /** ValidationResult */
+        ValidationResult: {
+            /** Issues */
+            issues: components["schemas"]["ValidationIssue"][];
+            /** Valid */
+            valid: boolean;
         };
         /** VaultPage */
         VaultPage: {
@@ -1046,6 +1311,420 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    list_changesets_api_v1_changesets_get: {
+        parameters: {
+            query?: {
+                status?: "pending" | "applied" | "rejected";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeSet"][];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_changeset_api_v1_changesets__changeset_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                changeset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeSet"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    approve_changeset_api_v1_changesets__changeset_id__approve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                changeset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApproveChangeSetRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeSet"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    reject_changeset_api_v1_changesets__changeset_id__reject_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                changeset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RejectChangeSetRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeSet"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    revert_changeset_api_v1_changesets__changeset_id__revert_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                changeset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeSet"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    revise_changeset_api_v1_changesets__changeset_id__revise_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                changeset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviseChangeSetRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeSet"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     get_config_api_v1_config_get: {
         parameters: {
             query?: never;
@@ -3105,6 +3784,140 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["VaultTreeEntry"][];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_wiki_policy_api_v1_wiki_policy_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutonomyModeResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    update_wiki_policy_api_v1_wiki_policy_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AutonomyModeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutonomyModeResponse"];
                 };
             };
             /** @description Bad Request */

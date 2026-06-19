@@ -44,6 +44,9 @@ async def update_config(req: UpdateConfigRequest, services: ServicesDependency):
     manager = services.config
     config = manager.load()
     changed = []
+    if req.autonomy_mode is not None:
+        config.autonomy_mode = req.autonomy_mode
+        changed.append("autonomy_mode")
     if req.llm_provider is not None:
         config.llm_provider = req.llm_provider
         changed.append("llm_provider")

@@ -3,6 +3,7 @@
 from typing import Literal
 
 from pydantic import BaseModel, Field
+from vid2note_core.wiki.policy import AutonomyMode
 
 
 class QwenConfig(BaseModel):
@@ -126,6 +127,7 @@ class AppConfig(BaseModel):
     """应用主配置"""
 
     version: str = "0.1.0"
+    autonomy_mode: AutonomyMode = AutonomyMode.APPROVAL
     llm_provider: Literal[
         "qwen", "glm", "deepseek", "moonshot", "baidu", "doubao", "minimax", "ollama"
     ] = "qwen"
