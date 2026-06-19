@@ -77,9 +77,16 @@ class ChangeSetApplier:
             existed = live.is_file()
             if existed:
                 self._write_snapshot(before_dir / relative_path, live.read_bytes())
-            self._write_snapshot(after_dir / relative_path, after_payloads[relative_path])
+            payload = after_payloads[relative_path]
+            if payload is not None:
+                self._write_snapshot(after_dir / relative_path, payload)
             manifest["paths"].append(
-                {"path": relative_path, "existed": existed, "committed": False}
+                {
+                    "path": relative_path,
+                    "existed": existed,
+                    "delete": payload is None,
+                    "committed": False,
+                }
             )
         self._write_manifest(transaction, manifest)
 
@@ -88,7 +95,12 @@ class ChangeSetApplier:
         try:
             for item in manifest["paths"]:
                 relative_path = item["path"]
-                self._replace_live(after_dir / relative_path, self.layout.root / relative_path)
+                live = self.layout.root / relative_path
+                if item["delete"]:
+                    live.unlink(missing_ok=True)
+                    _fsync_directory(live.parent)
+                else:
+                    self._replace_live(after_dir / relative_path, live)
                 item["committed"] = True
                 self._write_manifest(transaction, manifest)
         except Exception:
@@ -102,6 +114,12 @@ class ChangeSetApplier:
         try:
             applied = self.store.mark_applied(changeset.id)
         except Exception:
+            persisted = self.store.get(changeset.id)
+            if persisted is not None and persisted.status == "applied":
+                manifest["status"] = "committed"
+                self._write_manifest(transaction, manifest)
+                self._notify_internal(paths, changeset.id)
+                return persisted
             self._restore_before(transaction, manifest)
             manifest["status"] = "rolled_back"
             self._write_manifest(transaction, manifest)
@@ -122,13 +140,29 @@ class ChangeSetApplier:
             relative_path = item["path"]
             live = self.layout.root / relative_path
             after = transaction / "after" / relative_path
-            if not live.is_file() or _sha256(live.read_bytes()) != _sha256(after.read_bytes()):
+            if item.get("delete", False):
+                conflict = live.exists()
+            else:
+                conflict = not live.is_file() or _sha256(live.read_bytes()) != _sha256(
+                    after.read_bytes()
+                )
+            if conflict:
                 conflicts.append(relative_path)
         if conflicts:
             return self._create_revert_proposal(changeset, transaction)
 
         self._restore_before(transaction, manifest)
-        reverted = self.store.mark_reverted(changeset_id)
+        try:
+            reverted = self.store.mark_reverted(changeset_id)
+        except Exception:
+            persisted = self.store.get(changeset_id)
+            if persisted is not None and persisted.status == "reverted":
+                reverted = persisted
+            else:
+                self._restore_after(transaction, manifest)
+                manifest["status"] = "committed"
+                self._write_manifest(transaction, manifest)
+                raise
         manifest["status"] = "reverted"
         self._write_manifest(transaction, manifest)
         self._notify_internal(
@@ -167,14 +201,28 @@ class ChangeSetApplier:
             recovered.append(changeset_id)
         return recovered
 
-    def _build_after_payloads(self, changeset: ChangeSet) -> dict[str, bytes]:
-        payloads = {
+    def _build_after_payloads(self, changeset: ChangeSet) -> dict[str, bytes | None]:
+        payloads: dict[str, bytes | None] = {
             operation.path: operation.after.encode("utf-8") for operation in changeset.operations
         }
         current_index = self.layout.index.read_text(encoding="utf-8")
         entries = parse_index(current_index)
-        by_page_id = {entry.page_id: entry for entry in entries}
+        by_page_id: dict[str, IndexEntry] = {}
+        for entry in entries:
+            try:
+                page = self.repository.read_page(entry.path)
+            except (FileNotFoundError, OSError):
+                continue
+            page_id = (page.frontmatter or {}).get("id", entry.page_id)
+            by_page_id[str(page_id)] = entry
         for operation in changeset.operations:
+            previous = by_page_id.get(operation.page_id)
+            if (
+                operation.action == "rename"
+                and previous is not None
+                and previous.path != operation.path
+            ):
+                payloads[previous.path] = None
             frontmatter = _frontmatter(operation.after)
             page_type = cast(PageType, frontmatter["page_type"])
             sources = frontmatter.get("sources", [])
@@ -252,6 +300,15 @@ class ChangeSetApplier:
                 self._replace_live(before, live, replace=os.replace)
             else:
                 live.unlink(missing_ok=True)
+
+    def _restore_after(self, transaction: Path, manifest: dict) -> None:
+        for item in manifest["paths"]:
+            live = self.layout.root / item["path"]
+            if item.get("delete", False):
+                live.unlink(missing_ok=True)
+                _fsync_directory(live.parent)
+            else:
+                self._replace_live(transaction / "after" / item["path"], live, replace=os.replace)
 
     def _replace_live(
         self,

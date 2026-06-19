@@ -185,3 +185,83 @@ def test_revert_conflict_creates_pending_proposal_without_overwrite(setup_applie
     assert proposal.parent_id == changeset.id
     assert page.read_text(encoding="utf-8") == external
     assert store.get(changeset.id).status == "applied"
+
+
+def test_rename_moves_page_and_revert_restores_original_path(setup_applier):
+    layout, repository, store, applier, changeset = setup_applier
+    page_path = layout.wiki / "concepts" / "topic.md"
+    page_path.write_text(
+        page_path.read_text(encoding="utf-8").replace("id: concept_topic", "id: stable_topic_id"),
+        encoding="utf-8",
+    )
+    current = repository.read_page("wiki/concepts/topic.md")
+    layout.index.write_text(
+        "# Index\n\n## Concepts\n\n- [[wiki/concepts/topic.md|Topic]] — Old；1 个来源。\n",
+        encoding="utf-8",
+    )
+    rename = changeset.model_copy(
+        update={
+            "id": "chg_abcdefabcdef",
+            "summary": "Rename topic",
+            "operations": [
+                changeset.operations[0].model_copy(
+                    update={
+                        "page_id": "stable_topic_id",
+                        "path": "wiki/concepts/renamed-topic.md",
+                        "base_hash": current.content_hash,
+                        "action": "rename",
+                        "before": current.content,
+                        "after": current.content,
+                    }
+                )
+            ],
+        }
+    )
+    store.save_pending(rename)
+
+    applier.apply(rename)
+
+    assert not (layout.wiki / "concepts" / "topic.md").exists()
+    assert repository.read_page("wiki/concepts/renamed-topic.md").content == current.content
+    applier.revert(rename.id)
+    assert repository.read_page("wiki/concepts/topic.md").content == current.content
+    assert not (layout.wiki / "concepts" / "renamed-topic.md").exists()
+
+
+def test_apply_keeps_committed_live_state_when_status_transition_raises_after_write(setup_applier):
+    layout, repository, _, _, changeset = setup_applier
+
+    class RaiseAfterApplied(ChangeSetStore):
+        def mark_applied(self, changeset_id):
+            super().mark_applied(changeset_id)
+            raise OSError("fsync result unavailable")
+
+    store = RaiseAfterApplied(layout.root)
+    applier = ChangeSetApplier(layout, repository, store, ChangeSetValidator(layout, repository))
+
+    applied = applier.apply(changeset)
+
+    assert applied.status == "applied"
+    assert "New claim 42" in repository.read_page("wiki/concepts/topic.md").content
+
+
+def test_revert_status_failure_restores_applied_live_state(setup_applier):
+    layout, repository, store, applier, changeset = setup_applier
+    applier.apply(changeset)
+
+    class RejectReverted(ChangeSetStore):
+        def mark_reverted(self, changeset_id):
+            raise OSError("status storage unavailable")
+
+    failing = ChangeSetApplier(
+        layout,
+        repository,
+        RejectReverted(layout.root),
+        ChangeSetValidator(layout, repository),
+    )
+
+    with pytest.raises(OSError, match="status storage"):
+        failing.revert(changeset.id)
+
+    assert "New claim 42" in repository.read_page("wiki/concepts/topic.md").content
+    assert store.get(changeset.id).status == "applied"

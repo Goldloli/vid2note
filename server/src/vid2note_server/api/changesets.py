@@ -19,7 +19,7 @@ router = APIRouter(prefix="/changesets", tags=["changesets"], responses=ERROR_RE
 @router.get("", response_model=list[ChangeSet])
 async def list_changesets(
     services: ServicesDependency,
-    status: Literal["pending", "applied", "rejected"] = Query(default="pending"),
+    status: Literal["pending", "applied", "rejected", "reverted"] = Query(default="pending"),
 ):
     return services.changesets.list(status)
 

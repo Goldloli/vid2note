@@ -1918,7 +1918,8 @@
               "enum": [
                 "pending",
                 "applied",
-                "rejected"
+                "rejected",
+                "reverted"
               ],
               "title": "Status",
               "type": "string"

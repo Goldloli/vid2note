@@ -146,6 +146,9 @@ def test_changeset_revert_restores_page(client, tmp_path):
 
     assert reverted.status_code == 200
     assert reverted.json()["status"] == "reverted"
+    listed = client.get("/api/v1/changesets", params={"status": "reverted"})
+    assert listed.status_code == 200
+    assert [item["id"] for item in listed.json()] == [changeset.id]
     page = client.get(
         "/api/v1/vault/page", params={"path": "wiki/concepts/approval-topic.md"}
     ).json()

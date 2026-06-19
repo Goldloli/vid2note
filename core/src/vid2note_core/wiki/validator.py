@@ -9,6 +9,7 @@ import yaml
 from vid2note_core.source.identity import SourceIdentityRepository
 from vid2note_core.vault.layout import VaultLayout
 from vid2note_core.vault.repository import VaultRepository
+from vid2note_core.wiki.index import parse_index
 from vid2note_core.wiki.models import (
     ChangeSet,
     Citation,
@@ -55,6 +56,19 @@ class ChangeSetValidator:
             if operation.action == "create":
                 if exists:
                     issues.append(self._issue("CREATE_PATH_EXISTS", "error", index, operation.path))
+            elif operation.action == "rename":
+                source_path = self._rename_source_path(operation.page_id)
+                if source_path is None or not source_path.is_file():
+                    issues.append(
+                        self._issue("RENAME_SOURCE_MISSING", "error", index, operation.path)
+                    )
+                elif exists and source_path != path:
+                    issues.append(self._issue("RENAME_PATH_EXISTS", "error", index, operation.path))
+                else:
+                    current = self.repository.read_page(
+                        source_path.relative_to(self.layout.root).as_posix()
+                    )
+                    self._validate_current(operation, current, issues, index)
             else:
                 if not exists:
                     issues.append(
@@ -62,19 +76,7 @@ class ChangeSetValidator:
                     )
                 else:
                     current = self.repository.read_page(operation.path)
-                    if operation.base_hash != current.content_hash:
-                        issues.append(
-                            self._issue("STALE_BASE_HASH", "error", index, operation.path)
-                        )
-                    if operation.before != current.content:
-                        issues.append(
-                            self._issue("BEFORE_MISMATCH", "error", index, operation.path)
-                        )
-                    current_frontmatter = current.frontmatter or {}
-                    if current_frontmatter.get("id") != operation.page_id:
-                        issues.append(
-                            self._issue("PAGE_ID_CHANGED", "error", index, operation.path)
-                        )
+                    self._validate_current(operation, current, issues, index)
 
             frontmatter = _frontmatter(operation.after)
             missing = sorted(_REQUIRED_FRONTMATTER - set(frontmatter))
@@ -123,6 +125,24 @@ class ChangeSetValidator:
             valid=not any(issue.severity == "error" for issue in issues),
             issues=issues,
         )
+
+    def _rename_source_path(self, page_id: str) -> Path | None:
+        for entry in parse_index(self.layout.index.read_text(encoding="utf-8")):
+            try:
+                indexed_page = self.repository.read_page(entry.path)
+            except (FileNotFoundError, OSError):
+                continue
+            if (indexed_page.frontmatter or {}).get("id") == page_id:
+                return self._safe_wiki_path(entry.path)
+        return None
+
+    def _validate_current(self, operation, current, issues, index: int) -> None:
+        if operation.base_hash != current.content_hash:
+            issues.append(self._issue("STALE_BASE_HASH", "error", index, operation.path))
+        if operation.before != current.content:
+            issues.append(self._issue("BEFORE_MISMATCH", "error", index, operation.path))
+        if (current.frontmatter or {}).get("id") != operation.page_id:
+            issues.append(self._issue("PAGE_ID_CHANGED", "error", index, operation.path))
 
     def _validate_citation(
         self,
