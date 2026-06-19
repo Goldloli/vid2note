@@ -1,83 +1,9 @@
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import './tokens.css';
 
 /* =============================================================
    vid2note 客户端原型 · 设计系统
    Light 为主 / Dark 可切 · 单一 azure 强调色 · 信息密度优先
    ============================================================= */
-
-/* ---------- 设计 tokens ---------- */
-:root {
-  --font-display: 'Space Grotesk', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-  --font-body: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, 'PingFang SC', sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
-
-  --bg: oklch(99% 0.003 240);
-  --surface: oklch(100% 0 0);
-  --surface-2: oklch(97.4% 0.004 240);
-  --surface-3: oklch(94.8% 0.005 240);
-  --fg: oklch(22% 0.014 250);
-  --fg-strong: oklch(14% 0.02 250);
-  --muted: oklch(52% 0.012 250);
-  --muted-2: oklch(62% 0.01 250);
-  --border: oklch(92% 0.006 250);
-  --border-strong: oklch(85% 0.008 250);
-
-  --accent: oklch(55% 0.135 225);
-  --accent-hover: oklch(49% 0.14 225);
-  --accent-fg: oklch(99% 0.01 225);
-  --accent-soft: oklch(95% 0.045 225);
-  --accent-line: oklch(82% 0.06 225);
-
-  --success: oklch(56% 0.12 155);
-  --success-soft: oklch(95% 0.035 155);
-  --warn: oklch(68% 0.14 70);
-  --warn-soft: oklch(95% 0.05 70);
-  --danger: oklch(57% 0.19 25);
-  --danger-soft: oklch(95% 0.035 25);
-
-  --radius: 10px;
-  --radius-sm: 7px;
-  --radius-lg: 16px;
-  --shadow-sm: 0 1px 2px oklch(20% 0.02 250 / 0.05);
-  --shadow: 0 6px 24px -8px oklch(20% 0.04 250 / 0.12), 0 1px 2px oklch(20% 0.02 250 / 0.04);
-  --shadow-lg: 0 24px 60px -20px oklch(20% 0.04 250 / 0.22);
-
-  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --t-fast: 0.14s;
-  --t: 0.24s;
-
-  --titlebar-h: 38px;
-  --sidebar-w: 232px;
-  --topbar-h: 56px;
-}
-
-[data-theme="dark"] {
-  --bg: oklch(16% 0.008 250);
-  --surface: oklch(19.5% 0.01 250);
-  --surface-2: oklch(22.5% 0.012 250);
-  --surface-3: oklch(26.5% 0.014 250);
-  --fg: oklch(92% 0.005 250);
-  --fg-strong: oklch(98% 0.003 250);
-  --muted: oklch(68% 0.012 250);
-  --muted-2: oklch(56% 0.01 250);
-  --border: oklch(100% 0 0 / 0.08);
-  --border-strong: oklch(100% 0 0 / 0.14);
-
-  --accent: oklch(68% 0.13 225);
-  --accent-hover: oklch(74% 0.13 225);
-  --accent-fg: oklch(16% 0.02 250);
-  --accent-soft: oklch(32% 0.06 225);
-  --accent-line: oklch(42% 0.08 225);
-
-  --success-soft: oklch(30% 0.06 155);
-  --warn-soft: oklch(32% 0.07 70);
-  --danger-soft: oklch(30% 0.07 25);
-
-  --shadow-sm: 0 1px 2px oklch(0% 0 0 / 0.3);
-  --shadow: 0 6px 24px -8px oklch(0% 0 0 / 0.5), 0 1px 2px oklch(0% 0 0 / 0.3);
-  --shadow-lg: 0 24px 60px -20px oklch(0% 0 0 / 0.6);
-}
 
 /* ---------- reset ---------- */
 *, *::before, *::after { box-sizing: border-box; }
