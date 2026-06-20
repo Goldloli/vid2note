@@ -233,6 +233,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/config/api-key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Store Api Key
+         * @description Store one provider credential without returning or writing it to YAML.
+         */
+        put: operations["store_api_key_api_v1_config_api_key_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/config/verify": {
         parameters: {
             query?: never;
@@ -857,6 +877,43 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * ASRConfig
+         * @description ASR 配置
+         */
+        ASRConfig: {
+            /**
+             * Local Model
+             * @default funasr-paraformer-small
+             */
+            local_model: string;
+            /**
+             * Provider
+             * @default funasr
+             */
+            provider: string;
+        };
+        /**
+         * AdvancedConfig
+         * @description 高级选项配置
+         */
+        AdvancedConfig: {
+            /**
+             * Chunk Size
+             * @default 4000
+             */
+            chunk_size: number;
+            /**
+             * Max Retries
+             * @default 3
+             */
+            max_retries: number;
+            /**
+             * Temperature
+             * @default 0.3
+             */
+            temperature: number;
+        };
         /** AgentCapabilities */
         AgentCapabilities: {
             /** File Edits */
@@ -1039,9 +1096,26 @@ export interface components {
             /** Start Ms */
             start_ms: number;
         };
-        /** ConfigResponse */
+        /**
+         * ConfigResponse
+         * @description Typed, redacted application configuration returned to the renderer.
+         */
         ConfigResponse: {
-            [key: string]: unknown;
+            advanced: components["schemas"]["AdvancedConfig"];
+            asr: components["schemas"]["ASRConfig"];
+            autonomy_mode: components["schemas"]["AutonomyMode"];
+            /**
+             * Llm Provider
+             * @enum {string}
+             */
+            llm_provider: "qwen" | "glm" | "deepseek" | "moonshot" | "baidu" | "doubao" | "minimax" | "ollama";
+            processing: components["schemas"]["ProcessingConfig"];
+            retention: components["schemas"]["RetentionConfig"];
+            /** Run Mode */
+            run_mode: string;
+            /** Version */
+            version: string;
+            workspace: components["schemas"]["WorkspaceConfig"];
         };
         /** ConfigUpdateResponse */
         ConfigUpdateResponse: {
@@ -1210,6 +1284,41 @@ export interface components {
             /** Running */
             running: boolean;
         };
+        /**
+         * ProcessingConfig
+         * @description 处理选项配置
+         */
+        ProcessingConfig: {
+            /**
+             * Extract Images
+             * @default true
+             */
+            extract_images: boolean;
+            /**
+             * Image Quality
+             * @default medium
+             * @enum {string}
+             */
+            image_quality: "low" | "medium" | "high";
+            /**
+             * Language
+             * @default zh
+             * @enum {string}
+             */
+            language: "zh" | "en";
+            /**
+             * Mindmap Format
+             * @default mermaid
+             * @enum {string}
+             */
+            mindmap_format: "mermaid" | "outline";
+            /**
+             * Output Format
+             * @default markdown
+             * @constant
+             */
+            output_format: "markdown";
+        };
         /** ProviderListResponse */
         ProviderListResponse: {
             /** Asr Providers */
@@ -1239,6 +1348,42 @@ export interface components {
             status: string;
             /** Task Id */
             task_id: string;
+        };
+        /**
+         * RetentionConfig
+         * @description 文件保留策略
+         */
+        RetentionConfig: {
+            /**
+             * Auto Cleanup After Days
+             * @default 7
+             */
+            auto_cleanup_after_days: number;
+            /**
+             * Keep Audio
+             * @default false
+             */
+            keep_audio: boolean;
+            /**
+             * Keep Markdown
+             * @default true
+             */
+            keep_markdown: boolean;
+            /**
+             * Keep Mindmap
+             * @default true
+             */
+            keep_mindmap: boolean;
+            /**
+             * Keep Srt
+             * @default true
+             */
+            keep_srt: boolean;
+            /**
+             * Keep Video
+             * @default false
+             */
+            keep_video: boolean;
         };
         /** ReviseChangeSetRequest */
         ReviseChangeSetRequest: {
@@ -1346,6 +1491,13 @@ export interface components {
             /** Task Id */
             task_id: string;
         };
+        /** StoreApiKeyRequest */
+        StoreApiKeyRequest: {
+            /** Api Key */
+            api_key: string;
+            /** Provider */
+            provider: string;
+        };
         /** TaskAcceptedResponse */
         TaskAcceptedResponse: {
             /** Message */
@@ -1449,6 +1601,8 @@ export interface components {
             retry_count: number;
             /** Srt File */
             srt_file?: string | null;
+            /** Srt Original Name */
+            srt_original_name?: string | null;
             /** Status */
             status: string;
             /** Txt File */
@@ -1465,6 +1619,10 @@ export interface components {
             /** Asr Provider */
             asr_provider?: string | null;
             autonomy_mode?: components["schemas"]["AutonomyMode"] | null;
+            /** Clip Buffer Ms */
+            clip_buffer_ms?: number | null;
+            /** Default Runtime */
+            default_runtime?: ("built-in" | "codex" | "claude") | null;
             /** Keep Audio */
             keep_audio?: boolean | null;
             /** Keep Markdown */
@@ -1481,6 +1639,8 @@ export interface components {
             llm_provider?: ("qwen" | "glm" | "deepseek" | "moonshot" | "baidu" | "doubao" | "minimax" | "ollama") | null;
             /** Mindmap Format */
             mindmap_format?: ("mermaid" | "outline") | null;
+            /** Vault Path */
+            vault_path?: string | null;
         };
         /** UploadResponse */
         UploadResponse: {
@@ -1595,6 +1755,28 @@ export interface components {
             healthy: boolean;
             /** Issues */
             issues: components["schemas"]["WikiLintIssue"][];
+        };
+        /**
+         * WorkspaceConfig
+         * @description Knowledge workspace defaults persisted outside the Markdown Vault.
+         */
+        WorkspaceConfig: {
+            /**
+             * Clip Buffer Ms
+             * @default 1500
+             */
+            clip_buffer_ms: number;
+            /**
+             * Default Runtime
+             * @default built-in
+             * @enum {string}
+             */
+            default_runtime: "built-in" | "codex" | "claude";
+            /**
+             * Vault Path
+             * @default
+             */
+            vault_path: string;
         };
     };
     responses: never;
@@ -2624,6 +2806,73 @@ export interface operations {
             };
         };
     };
+    store_api_key_api_v1_config_api_key_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StoreApiKeyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     verify_api_key_api_v1_config_verify_post: {
         parameters: {
             query?: never;
@@ -2914,7 +3163,7 @@ export interface operations {
                 source_id: string;
                 start_ms: number;
                 end_ms: number;
-                buffer_ms?: number;
+                buffer_ms?: number | null;
             };
             header?: never;
             path?: never;

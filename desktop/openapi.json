@@ -1,6 +1,47 @@
 {
   "components": {
     "schemas": {
+      "ASRConfig": {
+        "description": "ASR 配置",
+        "properties": {
+          "local_model": {
+            "default": "funasr-paraformer-small",
+            "title": "Local Model",
+            "type": "string"
+          },
+          "provider": {
+            "default": "funasr",
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "title": "ASRConfig",
+        "type": "object"
+      },
+      "AdvancedConfig": {
+        "description": "高级选项配置",
+        "properties": {
+          "chunk_size": {
+            "default": 4000,
+            "title": "Chunk Size",
+            "type": "integer"
+          },
+          "max_retries": {
+            "default": 3,
+            "title": "Max Retries",
+            "type": "integer"
+          },
+          "temperature": {
+            "default": 0.3,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Temperature",
+            "type": "number"
+          }
+        },
+        "title": "AdvancedConfig",
+        "type": "object"
+      },
       "AgentCapabilities": {
         "properties": {
           "file_edits": {
@@ -520,8 +561,60 @@
         "type": "object"
       },
       "ConfigResponse": {
-        "additionalProperties": true,
-        "properties": {},
+        "description": "Typed, redacted application configuration returned to the renderer.",
+        "properties": {
+          "advanced": {
+            "$ref": "#/components/schemas/AdvancedConfig"
+          },
+          "asr": {
+            "$ref": "#/components/schemas/ASRConfig"
+          },
+          "autonomy_mode": {
+            "$ref": "#/components/schemas/AutonomyMode"
+          },
+          "llm_provider": {
+            "enum": [
+              "qwen",
+              "glm",
+              "deepseek",
+              "moonshot",
+              "baidu",
+              "doubao",
+              "minimax",
+              "ollama"
+            ],
+            "title": "Llm Provider",
+            "type": "string"
+          },
+          "processing": {
+            "$ref": "#/components/schemas/ProcessingConfig"
+          },
+          "retention": {
+            "$ref": "#/components/schemas/RetentionConfig"
+          },
+          "run_mode": {
+            "title": "Run Mode",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          },
+          "workspace": {
+            "$ref": "#/components/schemas/WorkspaceConfig"
+          }
+        },
+        "required": [
+          "version",
+          "autonomy_mode",
+          "llm_provider",
+          "processing",
+          "advanced",
+          "retention",
+          "asr",
+          "workspace",
+          "run_mode"
+        ],
         "title": "ConfigResponse",
         "type": "object"
       },
@@ -1005,6 +1098,52 @@
         "title": "OllamaStatusResponse",
         "type": "object"
       },
+      "ProcessingConfig": {
+        "description": "处理选项配置",
+        "properties": {
+          "extract_images": {
+            "default": true,
+            "title": "Extract Images",
+            "type": "boolean"
+          },
+          "image_quality": {
+            "default": "medium",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "title": "Image Quality",
+            "type": "string"
+          },
+          "language": {
+            "default": "zh",
+            "enum": [
+              "zh",
+              "en"
+            ],
+            "title": "Language",
+            "type": "string"
+          },
+          "mindmap_format": {
+            "default": "mermaid",
+            "enum": [
+              "mermaid",
+              "outline"
+            ],
+            "title": "Mindmap Format",
+            "type": "string"
+          },
+          "output_format": {
+            "const": "markdown",
+            "default": "markdown",
+            "title": "Output Format",
+            "type": "string"
+          }
+        },
+        "title": "ProcessingConfig",
+        "type": "object"
+      },
       "ProviderListResponse": {
         "properties": {
           "asr_providers": {
@@ -1096,6 +1235,43 @@
           "progress"
         ],
         "title": "ResultResponse",
+        "type": "object"
+      },
+      "RetentionConfig": {
+        "description": "文件保留策略",
+        "properties": {
+          "auto_cleanup_after_days": {
+            "default": 7,
+            "title": "Auto Cleanup After Days",
+            "type": "integer"
+          },
+          "keep_audio": {
+            "default": false,
+            "title": "Keep Audio",
+            "type": "boolean"
+          },
+          "keep_markdown": {
+            "default": true,
+            "title": "Keep Markdown",
+            "type": "boolean"
+          },
+          "keep_mindmap": {
+            "default": true,
+            "title": "Keep Mindmap",
+            "type": "boolean"
+          },
+          "keep_srt": {
+            "default": true,
+            "title": "Keep Srt",
+            "type": "boolean"
+          },
+          "keep_video": {
+            "default": false,
+            "title": "Keep Video",
+            "type": "boolean"
+          }
+        },
+        "title": "RetentionConfig",
         "type": "object"
       },
       "ReviseChangeSetRequest": {
@@ -1413,6 +1589,29 @@
           "current_step"
         ],
         "title": "StatusResponse",
+        "type": "object"
+      },
+      "StoreApiKeyRequest": {
+        "properties": {
+          "api_key": {
+            "maxLength": 8192,
+            "minLength": 1,
+            "title": "Api Key",
+            "type": "string"
+          },
+          "provider": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z0-9_-]+$",
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "api_key"
+        ],
+        "title": "StoreApiKeyRequest",
         "type": "object"
       },
       "TaskAcceptedResponse": {
@@ -1744,6 +1943,17 @@
             ],
             "title": "Srt File"
           },
+          "srt_original_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Srt Original Name"
+          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -1823,6 +2033,35 @@
                 "type": "null"
               }
             ]
+          },
+          "clip_buffer_ms": {
+            "anyOf": [
+              {
+                "maximum": 30000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clip Buffer Ms"
+          },
+          "default_runtime": {
+            "anyOf": [
+              {
+                "enum": [
+                  "built-in",
+                  "codex",
+                  "claude"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Runtime"
           },
           "keep_audio": {
             "anyOf": [
@@ -1929,6 +2168,17 @@
               }
             ],
             "title": "Mindmap Format"
+          },
+          "vault_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vault Path"
           }
         },
         "title": "UpdateConfigRequest",
@@ -2234,6 +2484,35 @@
           "healthy"
         ],
         "title": "WikiLintResponse",
+        "type": "object"
+      },
+      "WorkspaceConfig": {
+        "description": "Knowledge workspace defaults persisted outside the Markdown Vault.",
+        "properties": {
+          "clip_buffer_ms": {
+            "default": 1500,
+            "maximum": 30000.0,
+            "minimum": 0.0,
+            "title": "Clip Buffer Ms",
+            "type": "integer"
+          },
+          "default_runtime": {
+            "default": "built-in",
+            "enum": [
+              "built-in",
+              "codex",
+              "claude"
+            ],
+            "title": "Default Runtime",
+            "type": "string"
+          },
+          "vault_path": {
+            "default": "",
+            "title": "Vault Path",
+            "type": "string"
+          }
+        },
+        "title": "WorkspaceConfig",
         "type": "object"
       }
     }
@@ -3498,6 +3777,81 @@
         ]
       }
     },
+    "/api/v1/config/api-key": {
+      "put": {
+        "description": "Store one provider credential without returning or writing it to YAML.",
+        "operationId": "store_api_key_api_v1_config_api_key_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StoreApiKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Store Api Key",
+        "tags": [
+          "config"
+        ]
+      }
+    },
     "/api/v1/config/verify": {
       "post": {
         "description": "校验 API Key 是否可用（对 LLM provider 做一次最小调用）",
@@ -3853,11 +4207,17 @@
             "name": "buffer_ms",
             "required": false,
             "schema": {
-              "default": 1500,
-              "maximum": 30000,
-              "minimum": 0,
-              "title": "Buffer Ms",
-              "type": "integer"
+              "anyOf": [
+                {
+                  "maximum": 30000,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Buffer Ms"
             }
           }
         ],
