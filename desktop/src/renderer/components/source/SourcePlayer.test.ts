@@ -8,7 +8,20 @@ describe('SourcePlayer', () => {
     expect(wrapper.get('video').element.currentTime).toBeCloseTo(1.5, 2)
   })
 
-  it('shows a transcript fallback when media is unavailable', () => {
-    expect(mount(SourcePlayer, { props: { startMs: 0, endMs: 1000 } }).text()).toContain('仅字幕证据')
+  it('shows a transcript fallback with an explicit recovery action', async () => {
+    const wrapper = mount(SourcePlayer, { props: { startMs: 0, endMs: 1000 } })
+    expect(wrapper.text()).toContain('仅字幕证据')
+    await wrapper.get('button').trigger('click')
+    expect(wrapper.emitted('reacquire')).toHaveLength(1)
+  })
+
+  it('seeks when an asynchronously rendered clip becomes available', async () => {
+    const wrapper = mount(SourcePlayer, {
+      props: { startMs: 4000, endMs: 6000, mediaOffsetMs: 2500 },
+    })
+
+    await wrapper.setProps({ src: 'clip.mp4' })
+
+    expect(wrapper.get('video').element.currentTime).toBeCloseTo(1.5, 2)
   })
 })

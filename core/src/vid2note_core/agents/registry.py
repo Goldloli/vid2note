@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from dataclasses import dataclass
 from typing import Literal, Protocol
@@ -70,6 +71,11 @@ DEFAULT_DESCRIPTORS = (
     ),
 )
 
+RUNTIME_AUTH_ENV = {
+    "codex": frozenset({"OPENAI_API_KEY", "CODEX_API_KEY"}),
+    "claude": frozenset({"ANTHROPIC_API_KEY"}),
+}
+
 
 class RuntimeRegistry:
     def __init__(
@@ -127,7 +133,14 @@ class RuntimeRegistry:
                     reason="version_failed",
                 )
             auth_status: Literal["authenticated", "unauthenticated", "unknown"] = "unknown"
-            if descriptor.auth_args is not None:
+            auth_env = RUNTIME_AUTH_ENV.get(descriptor.id)
+            if auth_env is not None:
+                auth_status = (
+                    "authenticated"
+                    if any(os.environ.get(name) for name in auth_env)
+                    else "unauthenticated"
+                )
+            elif descriptor.auth_args is not None:
                 auth = await self.runner.run(
                     descriptor.executable,
                     descriptor.auth_args,

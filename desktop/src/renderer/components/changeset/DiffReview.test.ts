@@ -31,4 +31,30 @@ describe('DiffReview', () => {
     const wrapper = mount(DiffReview, { props: { changeset, blocked: true } })
     expect(wrapper.get('[data-testid="approve-selected"]').attributes('disabled')).toBeDefined()
   })
+
+  it('renders every operation with a CodeMirror merge view', () => {
+    const wrapper = mount(DiffReview, { props: { changeset } })
+    expect(wrapper.findAll('.cm-mergeView')).toHaveLength(2)
+  })
+
+  it('refreshes diff content and selection when the current ChangeSet changes', async () => {
+    const wrapper = mount(DiffReview, { props: { changeset } })
+    await wrapper.get('[data-operation-index="1"] input').setValue(false)
+    const next = {
+      ...changeset,
+      id: 'chg_000000000002',
+      operations: [
+        { ...changeset.operations[0], after: 'fresh-a' },
+        { ...changeset.operations[1], after: 'fresh-b' },
+        { ...changeset.operations[1], page_id: 'c', path: 'wiki/c.md', after: 'fresh-c' },
+      ],
+    }
+
+    await wrapper.setProps({ changeset: next })
+    await wrapper.get('[data-testid="approve-selected"]').trigger('click')
+
+    const approvals = wrapper.emitted('approve') ?? []
+    expect(approvals[approvals.length - 1]).toEqual([[0, 1, 2]])
+    expect(wrapper.text()).toContain('fresh-a')
+  })
 })

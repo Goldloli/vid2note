@@ -7,6 +7,8 @@ import hashlib
 import json
 import re
 
+import yaml
+
 from .base import BaseLLM
 
 
@@ -103,6 +105,54 @@ class MockLLM(BaseLLM):
         page_id = f"concept_{source_id.rsplit('_', 1)[-1]}"
         title = source["title"] or "Imported knowledge"
         imported_date = source["imported_at"][:10]
+        related_pages = request.get("related_pages") or []
+        if related_pages:
+            related = related_pages[0]
+            frontmatter = dict(related.get("frontmatter") or {})
+            sources = [item for item in frontmatter.get("sources", []) if isinstance(item, str)]
+            if source_id not in sources:
+                sources.append(source_id)
+            frontmatter["sources"] = sources
+            frontmatter["updated_at"] = imported_date
+            body = related["content"]
+            if body.startswith("---\n") and "\n---\n" in body[4:]:
+                body = body.split("\n---\n", 1)[1]
+            body = body.rstrip() + (
+                f"\n- 来源证据 [时间片段](vid2note://source/{source_id}?start={start_ms}&end={end_ms})\n"
+            )
+            after = (
+                "---\n"
+                + yaml.safe_dump(frontmatter, allow_unicode=True, sort_keys=False)
+                + "---\n"
+                + body
+            )
+            payload = {
+                "classification": "enhancement",
+                "changeset": {
+                    "id": f"chg_{hashlib.sha256(source_id.encode()).hexdigest()[:12]}",
+                    "created_at": source["imported_at"],
+                    "source_ids": [source_id],
+                    "base_revision": related["content_hash"],
+                    "agent_runtime": "built-in-mock",
+                    "summary": f"Enhance compiled page with {title}",
+                    "operations": [
+                        {
+                            "page_id": frontmatter["id"],
+                            "path": related["path"],
+                            "base_hash": related["content_hash"],
+                            "action": "update",
+                            "before": related["content"],
+                            "after": after,
+                            "rationale": "Related source evidence",
+                            "citations": [
+                                {"source_id": source_id, "start_ms": start_ms, "end_ms": end_ms}
+                            ],
+                        }
+                    ],
+                    "contradictions": [],
+                },
+            }
+            return json.dumps(payload, ensure_ascii=False)
         path = f"wiki/concepts/{page_id.removeprefix('concept_')}.md"
         after = (
             "---\n"

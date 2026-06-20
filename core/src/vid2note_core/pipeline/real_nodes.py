@@ -352,7 +352,7 @@ class RealRegisterSourceNode(PipelineNode, _RealNodeMixin):
                 SourceRegistration(
                     task_id=task_id,
                     canonical_url=task.video_url,
-                    title=task.video_url or task.srt_file or task_id,
+                    title=task.video_url or task.srt_original_name or task.srt_file or task_id,
                     imported_at=imported_at,
                     srt_path=self.store.artifact_path(
                         task_id, NodeName.TRANSCRIBE.value, "srt_file"

@@ -1,4 +1,4 @@
-import { apiClient, getBaseURL } from './client'
+import { apiClient, fetchApiBlobUrl } from './client'
 import type { components } from './generated/schema'
 
 type CreateTaskRequest = components['schemas']['CreateTaskRequest']
@@ -35,12 +35,14 @@ export const listArtifacts = (taskId: string): Promise<ArtifactListResponse> =>
   apiClient.get<ArtifactListResponse>(`/tasks/${taskId}/artifacts`)
 
 async function triggerDownload(path: string): Promise<void> {
+  const blobUrl = await fetchApiBlobUrl(path)
   const link = document.createElement('a')
-  link.href = `${await getBaseURL()}${path}`
+  link.href = blobUrl
   link.download = ''
   document.body.appendChild(link)
   link.click()
   link.remove()
+  window.setTimeout(() => URL.revokeObjectURL(blobUrl), 0)
 }
 
 export const downloadArtifact = (taskId: string, key: string): Promise<void> =>

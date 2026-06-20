@@ -3,6 +3,7 @@ from __future__ import annotations
 import shutil
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from pathlib import Path
 from secrets import token_hex
 
 import yaml
@@ -15,6 +16,8 @@ from vid2note_core.agents.models import (
     AgentRunInput,
     DetectionResult,
 )
+from vid2note_core.agents.proxy import AllowlistConnectProxy
+from vid2note_core.agents.registry import RUNTIME_AUTH_ENV
 from vid2note_core.agents.sandbox import SandboxPolicy
 from vid2note_core.agents.subprocess import ManagedProcessRunner
 from vid2note_core.agents.workspace import AgentWorkspace, WorkspaceDiff
@@ -22,6 +25,15 @@ from vid2note_core.vault.layout import VaultLayout
 from vid2note_core.vault.repository import VaultRepository, content_hash
 from vid2note_core.wiki.models import ChangeOperation, ChangeSet
 from vid2note_core.wiki.store import ChangeSetStore
+
+RUNTIME_NETWORK_TARGETS = {
+    "codex": {
+        ("api.openai.com", 443),
+        ("chatgpt.com", 443),
+        ("auth.openai.com", 443),
+    },
+    "claude": {("api.anthropic.com", 443)},
+}
 
 
 class ExternalCliRuntime:
@@ -59,17 +71,26 @@ class ExternalCliRuntime:
         )
 
     async def run(self, input: AgentRunInput) -> AsyncIterator[AgentEvent]:
+        executable = shutil.which(self.id)
+        if executable is None:
+            raise RuntimeError("executable_missing")
         workspace = AgentWorkspace.create(
             self.layout, self.repository, input.run_id, input.context_paths
         )
-        policy = self._policy(workspace.root)
-        runner = ManagedProcessRunner(policy)
+        proxy = AllowlistConnectProxy(RUNTIME_NETWORK_TARGETS[self.id])
+        await proxy.start()
+        policy = self._policy(
+            workspace.root,
+            proxy_port=proxy.port,
+            executable=executable,
+        )
+        runner = ManagedProcessRunner(policy, auth_env=set(RUNTIME_AUTH_ENV[self.id]))
         self._active[input.run_id] = runner
         adapter_type = CodexAdapter if self.id == "codex" else ClaudeAdapter
         adapter = adapter_type(
             runner,
             lambda _: workspace,
-            executable=self.id,
+            executable=str(policy.executable_path),
             persist_diff=self._persist_diff,
         )
         try:
@@ -77,6 +98,7 @@ class ExternalCliRuntime:
                 yield event
         finally:
             self._active.pop(input.run_id, None)
+            await proxy.close()
 
     async def cancel(self, run_id: str) -> None:
         runner = self._active.get(run_id)
@@ -87,11 +109,19 @@ class ExternalCliRuntime:
         raise RuntimeError("AGENT_RESUME_MISSING")
         yield  # pragma: no cover
 
-    def _policy(self, workspace_root):
+    def _policy(
+        self,
+        workspace_root,
+        *,
+        proxy_port: int | None = None,
+        executable: str | None = None,
+    ):
         return SandboxPolicy(
             self.layout.root,
             workspace_root,
             workspace_root.parent / "runtime-home",
+            proxy_port=proxy_port,
+            executable=None if executable is None else Path(executable),
         )
 
     def _persist_diff(

@@ -1,4 +1,5 @@
-import { apiClient, getBaseURL } from './client'
+import { apiClient, getApiConnection } from './client'
+import { consumeEventStream } from './eventStream'
 import type { components } from './generated/schema'
 
 export type AgentEvent = {
@@ -39,10 +40,13 @@ export async function openAgentEventStream(
   onError: () => void,
   after = 0,
 ): Promise<() => void> {
-  const source = new EventSource(
-    `${await getBaseURL()}/agent/sessions/${encodeURIComponent(sessionId)}/events?after=${after}`,
-  )
-  source.onmessage = (message) => onEvent(JSON.parse(message.data) as AgentEvent)
-  source.onerror = onError
-  return () => source.close()
+  const { baseURL, token } = await getApiConnection()
+  const controller = new AbortController()
+  void consumeEventStream(
+    `${baseURL}/agent/sessions/${encodeURIComponent(sessionId)}/events?after=${after}`,
+    token,
+    controller.signal,
+    (data) => onEvent(JSON.parse(data) as AgentEvent),
+  ).catch(() => { if (!controller.signal.aborted) onError() })
+  return () => controller.abort()
 }

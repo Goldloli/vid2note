@@ -214,6 +214,20 @@ async def test_worker_runs_up_to_configured_concurrency(env):
 
 
 @pytest.mark.asyncio
+async def test_worker_does_not_replace_host_signal_handlers(env, monkeypatch):
+    root, repo = env
+    worker = TaskWorker(repo, ArtifactStore(root), poll_interval=0.01, nodes=[])
+    loop = asyncio.get_running_loop()
+    registrations = []
+    monkeypatch.setattr(loop, "add_signal_handler", lambda *args: registrations.append(args))
+
+    await worker.start()
+    await worker.stop()
+
+    assert registrations == []
+
+
+@pytest.mark.asyncio
 async def test_worker_marks_unfinished_tasks_interrupted_on_shutdown(env):
     root, repo = env
     store = ArtifactStore(root)

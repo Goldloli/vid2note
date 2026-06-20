@@ -1,4 +1,4 @@
-import { apiClient } from './client'
+import { apiClient, fetchApiBlobUrl } from './client'
 import type { components } from './generated/schema'
 
 export type MediaReference = components['schemas']['MediaReference']
@@ -8,8 +8,11 @@ export const getClip = (
   sourceId: string,
   startMs: number,
   endMs: number,
-  bufferMs = 1500,
+  bufferMs?: number,
 ): Promise<MediaReference> =>
   apiClient.get('/media/clip', {
     params: { source_id: sourceId, start_ms: startMs, end_ms: endMs, buffer_ms: bufferMs },
   })
+
+export const getMediaAssetUrl = (assetPath: string): Promise<string> =>
+  fetchApiBlobUrl(`/media/asset?path=${encodeURIComponent(assetPath)}`)

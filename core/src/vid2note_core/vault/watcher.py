@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import hashlib
 import logging
+import os
 import threading
 import time
 from dataclasses import dataclass
@@ -127,24 +128,32 @@ class VaultWatcher:
 
     def _scan(self) -> dict[str, FileState]:
         snapshot: dict[str, FileState] = {}
-        for candidate in self.root.rglob("*.md"):
-            try:
-                relative = candidate.relative_to(self.root)
-                if ".vid2note" in relative.parts or relative.as_posix() == "log.md":
+        for directory, directories, files in os.walk(
+            self.root,
+            topdown=True,
+            followlinks=False,
+            onerror=lambda _error: None,
+        ):
+            directories[:] = [name for name in directories if name != ".vid2note"]
+            for filename in files:
+                if not filename.endswith(".md"):
                     continue
-                if candidate.name.startswith("."):
+                candidate = Path(directory) / filename
+                try:
+                    relative = candidate.relative_to(self.root)
+                    if relative.as_posix() == "log.md" or candidate.name.startswith("."):
+                        continue
+                    resolved = candidate.resolve()
+                    if not resolved.is_file() or not resolved.is_relative_to(self.root):
+                        continue
+                    stat = resolved.stat()
+                    snapshot[relative.as_posix()] = FileState(
+                        mtime_ns=stat.st_mtime_ns,
+                        size=stat.st_size,
+                        content_hash=_sha256(resolved),
+                    )
+                except OSError:
                     continue
-                resolved = candidate.resolve()
-                if not resolved.is_file() or not resolved.is_relative_to(self.root):
-                    continue
-                stat = resolved.stat()
-                snapshot[relative.as_posix()] = FileState(
-                    mtime_ns=stat.st_mtime_ns,
-                    size=stat.st_size,
-                    content_hash=_sha256(resolved),
-                )
-            except OSError:
-                continue
         return snapshot
 
 

@@ -22,7 +22,7 @@ for name in ("ffmpeg", "yt-dlp", "BBDown"):
         _binaries.append((str(p), "bin"))
 
 a = Analysis(
-    [str(ROOT / "server" / "src" / "vid2note_server" / "main.py")],
+    [str(ROOT / "server" / "src" / "vid2note_server" / "entrypoint.py")],
     pathex=[
         str(ROOT / "core" / "src"),
         str(ROOT / "server" / "src"),
@@ -50,6 +50,10 @@ a = Analysis(
         "slowapi",
         "starlette",
         "python_multipart",
+        # pkg_resources 的冻结运行时 hook 在 Python 3.11 会通过 setuptools
+        # vendor importer 加载 backports.tarfile；显式收集以保留该别名。
+        "setuptools._vendor.backports",
+        "setuptools._vendor.backports.tarfile",
         # 本地 ASR（可选；缺失时 _default_asr 会回退）
         "funasr",
         "torch",
@@ -103,4 +107,3 @@ coll = COLLECT(
     name="vid2note",
     # 输出目录由 build.py 的 --distpath 控制（指向 python-dist）
 )
-

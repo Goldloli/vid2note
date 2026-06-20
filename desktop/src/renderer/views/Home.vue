@@ -103,11 +103,13 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { useTaskStore } from '../stores/task'
 import PipelineRail from '../components/PipelineRail.vue'
 
 const store = useTaskStore()
-const url = ref('')
+const route = useRoute()
+const url = ref(typeof route.query.url === 'string' ? route.query.url : '')
 const canChooseLocalVideo = Boolean(window.electronAPI?.chooseLocalVideo)
 
 const activeTasks = computed(() => store.tasks.filter((t) => t.status === 'running' || t.status === 'pending'))
@@ -117,7 +119,7 @@ const completedCount = computed(() => store.tasks.filter((t) => t.status === 'co
 const failedCount = computed(() => store.tasks.filter((t) => t.status === 'failed').length)
 
 const taskTitle = (t) => {
-  const src = t.video_url || t.video_file || t.source_name || t.srt_file || ''
+  const src = t.video_url || t.video_file || t.source_name || t.srt_original_name || t.srt_file || ''
   const host = src.replace(/^https?:\/\//, '').split('/')[0]
   return host || src || t.id
 }

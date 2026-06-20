@@ -10,7 +10,7 @@
     "isolatedModules": true,
     "esModuleInterop": true,
     "lib": ["ES2020", "DOM", "DOM.Iterable"],
-    "types": ["vite/client", "vitest/globals"],
+    "types": ["node", "vite/client", "vitest/globals"],
     "noEmit": true
   },
   "include": ["src/renderer/**/*.ts", "src/renderer/**/*.vue", "src/renderer/env.d.ts"],

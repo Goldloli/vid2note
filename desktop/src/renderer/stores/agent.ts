@@ -2,6 +2,7 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 
 import * as api from '../api/agents'
+import { getConfig } from '../api/config'
 
 export const useAgentStore = defineStore('agent', () => {
   const runtimes = ref<api.Runtime[]>([])
@@ -15,7 +16,12 @@ export const useAgentStore = defineStore('agent', () => {
   const running = computed(() => run.value?.status === 'running' && !events.value.some(isTerminal))
   async function refreshRuntimes(): Promise<void> {
     try {
-      runtimes.value = await api.listRuntimes()
+      const [detected, config] = await Promise.all([api.listRuntimes(), getConfig()])
+      runtimes.value = detected
+      const configured = config.workspace.default_runtime
+      if (detected.some((runtime) => runtime.id === configured)) {
+        selectedRuntime.value = configured
+      }
     } catch {
       lastError.value = { code: 'AGENT_RUNTIME_DETECTION_FAILED' }
     }

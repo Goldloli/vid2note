@@ -42,6 +42,7 @@ async def start_process(req: StartRequest, services: ServicesDependency):
         video_url=req.video_url,
         video_file=req.video_file,
         srt_file=req.srt_file,
+        srt_original_name=services.uploads.get_name(req.srt_file) if req.srt_file else None,
         pdf_file=req.pdf_file,
         asr_provider=req.asr_provider,
         llm_provider=req.llm_provider,

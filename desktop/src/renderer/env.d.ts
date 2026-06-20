@@ -10,6 +10,7 @@ declare module '*.vue' {
 interface Window {
   electronAPI?: {
     getBackendUrl(): Promise<string>
+    getBackendConnection(): Promise<{ baseUrl: string; token: string }>
     chooseLocalVideo(): Promise<string | null>
     openExternal(url: string): Promise<void>
   }

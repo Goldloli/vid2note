@@ -10,11 +10,18 @@ import sys
 import tarfile
 import urllib.request
 import zipfile
+from hashlib import sha256
 from pathlib import Path
 
 BIN_DIR = Path(__file__).parent / "bin"
 OS = platform.system().lower()
 ARCH = platform.machine().lower()
+FFMPEG_MACOS_URL = "https://evermeet.cx/ffmpeg/ffmpeg-8.1.2.zip"
+FFMPEG_MACOS_SHA256 = "60725ea0467ccaf900bf294d3567c302a802dc661f03bdde6aa7ecc9ccf05c4f"
+YTDLP_MACOS_URL = "https://github.com/yt-dlp/yt-dlp/releases/download/2026.06.09/yt-dlp_macos"
+YTDLP_MACOS_SHA256 = "b82c3626952e6c14eaf654cc565866775ffd0b9ffb7021628ac59b42c2f4f244"
+YTDLP_LINUX_URL = "https://github.com/yt-dlp/yt-dlp/releases/download/2026.06.09/yt-dlp"
+YTDLP_LINUX_SHA256 = "e5d57466682cfa9d61e9cf7c8a4f09b00f4a62af37d3bbdc4bcffdf63615feac"
 
 
 def ensure_bin_dir():
@@ -32,6 +39,24 @@ def make_executable(path: Path):
     os.chmod(path, st.st_mode | stat.S_IEXEC)
 
 
+def verify_sha256(path: Path, expected: str) -> None:
+    digest = sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    actual = digest.hexdigest()
+    if actual != expected:
+        path.unlink(missing_ok=True)
+        raise RuntimeError(f"binary checksum mismatch for {path.name}")
+
+
+def verify_package_binaries() -> None:
+    if OS != "darwin":
+        raise RuntimeError("standalone Electron packaging currently supports macOS only")
+    verify_sha256(BIN_DIR / "ffmpeg", FFMPEG_MACOS_SHA256)
+    verify_sha256(BIN_DIR / "yt-dlp", YTDLP_MACOS_SHA256)
+
+
 def fetch_ffmpeg():
     """下载 ffmpeg 静态构建"""
     ensure_bin_dir()
@@ -42,7 +67,7 @@ def fetch_ffmpeg():
 
     if OS == "darwin":
         # macOS arm64/x64 通用构建
-        url = "https://evermeet.cx/ffmpeg/getrelease/zip"
+        url = FFMPEG_MACOS_URL
         tmp = BIN_DIR / "ffmpeg.zip"
         download(url, tmp)
         with zipfile.ZipFile(tmp, "r") as z:
@@ -78,14 +103,17 @@ def fetch_ytdlp():
         return
 
     if OS == "darwin":
-        url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos"
+        url = YTDLP_MACOS_URL
+        expected_sha256 = YTDLP_MACOS_SHA256
     elif OS == "linux":
-        url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp"
+        url = YTDLP_LINUX_URL
+        expected_sha256 = YTDLP_LINUX_SHA256
     else:
         print("Windows not yet supported in this script")
         sys.exit(1)
 
     download(url, dest)
+    verify_sha256(dest, expected_sha256)
     make_executable(dest)
     print("yt-dlp ready")
 

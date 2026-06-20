@@ -4,14 +4,16 @@ import { toApiError } from './errors'
 
 let baseURL = ''
 let baseURLPromise: Promise<string> | null = null
-let accessToken: string | null = null
+let accessToken: string | null = import.meta.env.VITE_API_TOKEN || null
 
 function resolveBaseURL(): Promise<string> {
   if (baseURLPromise) return baseURLPromise
   baseURLPromise = (async () => {
     if (typeof window !== 'undefined' && window.electronAPI) {
       try {
-        baseURL = `${await window.electronAPI.getBackendUrl()}/api/v1`
+        const connection = await window.electronAPI.getBackendConnection()
+        baseURL = `${connection.baseUrl}/api/v1`
+        accessToken = connection.token
       } catch {
         baseURL = '/api/v1'
       }
@@ -66,4 +68,15 @@ export async function getBaseURL(): Promise<string> {
   return resolveBaseURL()
 }
 
-void resolveBaseURL()
+export async function getApiConnection(): Promise<{ baseURL: string; token: string | null }> {
+  return { baseURL: await resolveBaseURL(), token: accessToken }
+}
+
+export async function fetchApiBlobUrl(path: string): Promise<string> {
+  const { baseURL: resolvedBaseURL, token } = await getApiConnection()
+  const response = await fetch(`${resolvedBaseURL}${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!response.ok) throw new Error(`Protected asset request failed (${response.status})`)
+  return URL.createObjectURL(await response.blob())
+}

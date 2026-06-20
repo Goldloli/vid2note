@@ -1,98 +1,18 @@
 const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron')
 const path = require('path')
-const { spawn, execSync } = require('child_process')
+const { spawn } = require('child_process')
 const net = require('net')
-const fs = require('fs')
 const { PythonService } = require('./python-service')
+const { resolveBackendLaunch } = require('./backend-launch')
+const { createSessionToken, withSessionToken } = require('./session-auth')
 
 let mainWindow = null
 let pythonProcess = null
 let backendPort = null
 const pythonService = new PythonService({ graceMs: 30_000 })
+const apiToken = createSessionToken()
 
 const isDev = process.env.NODE_ENV === 'development'
-const SERVER_SRC_DIR = path.join(process.resourcesPath, 'server-src')
-
-/**
- * 查找可用的 Python 解释器。
- * 优先级：
- *   1. VID2NOTE_VENV_PYTHON 环境变量（开发/测试用）
- *   2. app 数据目录下首次运行创建的 venv
- *   3. 系统 python3.11 / python3
- */
-function findPython() {
-  if (isDev) return process.env.VID2NOTE_VENV_PYTHON || 'python3'
-
-  // 1. 环境变量指定的 Python（高级用户/开发）
-  if (process.env.VID2NOTE_VENV_PYTHON && fs.existsSync(process.env.VID2NOTE_VENV_PYTHON)) {
-    return process.env.VID2NOTE_VENV_PYTHON
-  }
-
-  // 2. app 数据目录下首次运行创建的 venv
-  const userDataDir = app.getPath('userData')
-  const venvPython = path.join(userDataDir, 'venv', 'bin', 'python')
-  if (fs.existsSync(venvPython)) return venvPython
-
-  // 3. 系统 python3.11（推荐）
-  const candidates = [
-    '/opt/homebrew/bin/python3.11',
-    '/usr/local/bin/python3.11',
-    process.env.HOME + '/.local/bin/python3.11',
-    '/usr/bin/python3',
-  ]
-  for (const p of candidates) {
-    if (fs.existsSync(p)) return p
-  }
-  return 'python3'
-}
-
-/**
- * 检查 Python 是否已安装 vid2note 依赖。若无，尝试用内置源码安装到 venv。
- */
-function ensureDeps(pythonExe) {
-  if (isDev) return pythonExe
-
-  // 先检查是否已可 import
-  try {
-    execSync(`"${pythonExe}" -c "import vid2note_server, vid2note_core"`, {
-      stdio: 'pipe',
-      timeout: 10000,
-    })
-    return pythonExe // 已有依赖
-  } catch (e) {
-    // 需要安装
-  }
-
-  // 创建 venv 并安装
-  const userDataDir = app.getPath('userData')
-  const venvDir = path.join(userDataDir, 'venv')
-  const venvPython = path.join(venvDir, 'bin', 'python')
-
-  if (!fs.existsSync(venvPython)) {
-    console.log('[vid2note] 首次运行：创建 venv…')
-    try {
-      execSync(`"${pythonExe}" -m venv "${venvDir}"`, { stdio: 'pipe', timeout: 60000 })
-    } catch (e) {
-      console.error('[vid2note] venv 创建失败:', e.message)
-      return pythonExe
-    }
-  }
-
-  console.log('[vid2note] 安装 vid2note 依赖…（首次约 2-5 分钟）')
-  const coreSrc = path.join(process.resourcesPath, 'core-src')
-  const serverSrc = SERVER_SRC_DIR
-  try {
-    execSync(`"${venvPython}" -m pip install -q -e "${coreSrc}[local-asr]" -e "${serverSrc}"`, {
-      stdio: 'pipe',
-      timeout: 600000,
-    })
-    console.log('[vid2note] 依赖安装完成')
-    return venvPython
-  } catch (e) {
-    console.error('[vid2note] 依赖安装失败:', e.message)
-    return venvPython // 仍尝试用 venv python 运行（可能部分可用）
-  }
-}
 
 async function findFreePort(start = 18080) {
   return new Promise((resolve, reject) => {
@@ -113,34 +33,20 @@ async function findFreePort(start = 18080) {
 
 async function startPythonBackend() {
   backendPort = await findFreePort()
-  const dataDir = path.join(app.getPath('userData'), 'data')
+  const dataDir = process.env.VID2NOTE_DATA_DIR || path.join(app.getPath('userData'), 'data')
+  const launch = resolveBackendLaunch({
+    isDev,
+    resourcesPath: process.resourcesPath,
+    projectRoot: path.join(__dirname, '../..'),
+    dataDir,
+    port: backendPort,
+    inheritedEnv: process.env,
+  })
+  launch.env = withSessionToken(launch.env, apiToken)
 
-  let pythonExe = findPython()
-  pythonExe = ensureDeps(pythonExe)
-
-  // 设置 PYTHONPATH 让系统 python 能找到内置源码
-  const coreSrcPath = path.join(process.resourcesPath, 'core-src', 'src')
-  const serverSrcPath = path.join(SERVER_SRC_DIR, 'src')
-
-  const env = {
-    ...process.env,
-    VID2NOTE_HOST: '127.0.0.1',
-    VID2NOTE_PORT: String(backendPort),
-    VID2NOTE_DATA_DIR: dataDir,
-    VID2NOTE_LOG_LEVEL: isDev ? 'debug' : 'info',
-    PYTHONPATH: isDev ? undefined : `${coreSrcPath}:${serverSrcPath}`,
-  }
-
-  const args = [
-    '-m', 'uvicorn', 'vid2note_server.main:app',
-    '--host', '127.0.0.1', '--port', String(backendPort),
-  ]
-
-  const cwd = isDev ? path.join(__dirname, '../..') : SERVER_SRC_DIR
-
-  pythonProcess = spawn(pythonExe, args, {
-    env,
-    cwd,
+  pythonProcess = spawn(launch.command, launch.args, {
+    env: launch.env,
+    cwd: launch.cwd,
     stdio: isDev ? 'inherit' : 'pipe',
   })
   pythonService.attach(pythonProcess)
@@ -165,8 +71,7 @@ async function startPythonBackend() {
     pythonProcess = null
   })
 
-  // 等待后端启动（首次安装依赖时需要更长超时）
-  await waitForBackend(`http://127.0.0.1:${backendPort}/api/v1/health`, 120000)
+  await waitForBackend(`http://127.0.0.1:${backendPort}/api/v1/health`, 30_000)
   return backendPort
 }
 
@@ -200,8 +105,8 @@ function createWindow() {
   })
 
   if (isDev) {
-    mainWindow.loadURL('http://localhost:5173')
-    mainWindow.webContents.openDevTools()
+    mainWindow.loadURL(process.env.VID2NOTE_RENDERER_URL || 'http://localhost:5173')
+    if (process.env.VID2NOTE_OPEN_DEVTOOLS === '1') mainWindow.webContents.openDevTools()
   } else {
     mainWindow.loadFile(path.join(__dirname, '../../dist/index.html'))
   }
@@ -215,6 +120,10 @@ function createWindow() {
 ipcMain.handle('get-backend-url', () => {
   return `http://127.0.0.1:${backendPort}`
 })
+ipcMain.handle('get-backend-connection', () => ({
+  baseUrl: `http://127.0.0.1:${backendPort}`,
+  token: apiToken,
+}))
 ipcMain.handle('choose-local-video', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openFile'],

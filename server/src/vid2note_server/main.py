@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -47,9 +48,14 @@ def _default_data_root() -> Path:
     return Path(__file__).resolve().parents[3] / "data"
 
 
-def create_app(data_root: str | Path | None = None) -> FastAPI:
+def create_app(
+    data_root: str | Path | None = None,
+    *,
+    api_token: str | None = None,
+) -> FastAPI:
     paths = RuntimePaths.from_data_root(data_root or _default_data_root())
     services = build_services(paths)
+    session_token = api_token or os.environ.get("VID2NOTE_API_TOKEN")
 
     @asynccontextmanager
     async def lifespan(application: FastAPI):
@@ -85,6 +91,32 @@ def create_app(data_root: str | Path | None = None) -> FastAPI:
             status_code=status_code,
             content=ErrorResponse(error=envelope).model_dump(mode="json", exclude_none=True),
         )
+
+    @application.middleware("http")
+    async def authenticate_loopback_request(request: Request, call_next):
+        if (
+            session_token is not None
+            and request.method != "OPTIONS"
+            and request.url.path.startswith("/api/v1")
+            and request.url.path != "/api/v1/health"
+        ):
+            scheme, _, supplied_token = request.headers.get("Authorization", "").partition(" ")
+            authorized = scheme.lower() == "bearer" and hmac.compare_digest(
+                supplied_token.encode(), session_token.encode()
+            )
+            if not authorized:
+                return error_response(
+                    401,
+                    ErrorEnvelope(
+                        code="UNAUTHORIZED",
+                        message="Authentication required",
+                        user_message="认证失败，请重新启动应用",
+                        retryable=False,
+                        component="api",
+                        operation=request.url.path,
+                    ),
+                )
+        return await call_next(request)
 
     @application.exception_handler(VaultConflict)
     async def vault_conflict_handler(request: Request, exc: VaultConflict):

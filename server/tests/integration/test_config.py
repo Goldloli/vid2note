@@ -94,3 +94,69 @@ def test_get_config_masks_api_keys():
         return False
 
     assert not _has_plaintext_key(resp.json())
+
+
+def test_get_config_omits_provider_secret_structures():
+    payload = client.get("/api/v1/config").json()
+
+    assert "qwen" not in payload
+    assert "baidu" not in payload
+    assert "minimax" not in payload
+
+
+def test_update_workspace_defaults():
+    response = client.put(
+        "/api/v1/config",
+        json={
+            "vault_path": "/tmp/vid2note-vault",
+            "default_runtime": "claude",
+            "clip_buffer_ms": 2500,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["changed"] == [
+        "workspace.vault_path",
+        "workspace.default_runtime",
+        "workspace.clip_buffer_ms",
+    ]
+    assert client.get("/api/v1/config").json()["workspace"] == {
+        "vault_path": "/tmp/vid2note-vault",
+        "default_runtime": "claude",
+        "clip_buffer_ms": 2500,
+    }
+
+
+def test_store_api_key_uses_keychain(monkeypatch):
+    stored = {}
+    monkeypatch.setattr(
+        "vid2note_core.config.manager.ConfigManager.set_api_key",
+        lambda self, provider, api_key: stored.update({provider: api_key}),
+    )
+
+    response = client.put(
+        "/api/v1/config/api-key",
+        json={"provider": "qwen", "api_key": "secret-value"},
+    )
+
+    assert response.status_code == 204
+    assert stored == {"qwen": "secret-value"}
+    assert "secret-value" not in response.text
+
+
+def test_verify_api_key_does_not_echo_provider_exception(monkeypatch):
+    secret = "sk-do-not-echo"
+
+    def fail_with_secret(_provider, config):
+        raise RuntimeError(f"provider rejected {config['api_key']}")
+
+    monkeypatch.setattr("vid2note_core.llm.factory.LLMFactory.create", fail_with_secret)
+
+    response = client.post(
+        "/api/v1/config/verify",
+        json={"provider": "qwen", "api_key": secret},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"valid": False, "error": "API key verification failed"}
+    assert secret not in response.text

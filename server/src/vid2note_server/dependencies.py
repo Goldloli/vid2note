@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Annotated, cast
 
 from fastapi import Depends, Request
@@ -50,12 +51,23 @@ class Services:
 
 
 def build_services(paths: RuntimePaths) -> Services:
+    config = ConfigManager(paths.config)
+    configured_vault = config.load().workspace.vault_path.strip()
+    if configured_vault:
+        vault_root = Path(configured_vault).expanduser()
+        if not vault_root.is_absolute():
+            vault_root = paths.data_root / vault_root
+        vault_root = vault_root.resolve()
+        paths = replace(
+            paths,
+            vault=vault_root,
+            database=vault_root / ".vid2note" / "state.sqlite3",
+        )
     database = Database(paths.database)
     tasks = TaskRepository(database)
     artifacts = ArtifactStore(paths.tasks)
     uploads = UploadStore(paths.uploads)
     models = ModelManager(paths.models)
-    config = ConfigManager(paths.config)
     vault_layout = VaultLayout.initialize(paths.vault)
     vault = VaultRepository(vault_layout)
     source_registrar = SourceRegistrar(vault_layout)

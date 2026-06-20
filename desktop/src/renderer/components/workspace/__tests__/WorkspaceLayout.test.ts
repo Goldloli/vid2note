@@ -36,6 +36,10 @@ describe('WorkspaceLayout', () => {
     expect(wrapper.get('[data-testid="agent-panel"]').classes()).toContain('is-drawer')
     expect(wrapper.text()).toContain('A · 审批')
 
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await nextTick()
+    expect(wrapper.get('[data-testid="agent-panel"]').attributes('aria-hidden')).toBe('true')
+
     useWorkspaceStore(pinia).toggleTree()
     await nextTick()
     expect(wrapper.get('[data-testid="workspace-tree"]').attributes('aria-hidden')).toBe('false')
@@ -53,6 +57,6 @@ describe('WorkspaceLayout', () => {
 
     const wrapper = mount(WorkspaceLayout, { global: { plugins: [pinia, router] } })
     await vi.waitFor(() => expect(wrapper.text().match(/C · 高自治/g)).toHaveLength(2))
-    expect(getConfig).toHaveBeenCalledOnce()
+    expect(getConfig).toHaveBeenCalled()
   })
 })

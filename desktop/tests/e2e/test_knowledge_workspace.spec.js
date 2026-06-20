@@ -11,12 +11,15 @@ test('knowledge workspace exposes wiki, review, agent, evidence and health views
   })
   expect(source.ok()).toBeTruthy()
   const { source_id: sourceId } = await source.json()
+  expect(sourceId).toMatch(/^src_\d{8}_[0-9a-f]{8}$/)
 
   await page.goto('/#/workspace/wiki')
   await expect(page.getByRole('tree')).toBeVisible()
   await expect(page.getByTestId('workspace-main')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'index.md', exact: true })).toBeVisible()
 
   await page.goto(`/#/workspace/sources/${sourceId}?start=1000&end=3000`)
+  await expect(page).toHaveURL(new RegExp(`/workspace/sources/${sourceId}`))
   await expect(page.getByRole('heading', { name: 'Workspace evidence fixture' })).toBeVisible()
   await expect(page.getByText('仅字幕证据')).toBeVisible()
   await expect(page.getByText('Traceable evidence.')).toBeVisible()

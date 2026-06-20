@@ -4,19 +4,23 @@
 不把任何密钥回传给前端。
 """
 
-from fastapi import APIRouter
+import logging
+
+from fastapi import APIRouter, Response
 
 from vid2note_server.dependencies import ServicesDependency
 from vid2note_server.schemas.common import ERROR_RESPONSES
 from vid2note_server.schemas.config import (
     ConfigResponse,
     ConfigUpdateResponse,
+    StoreApiKeyRequest,
     UpdateConfigRequest,
     VerifyKeyRequest,
     VerifyKeyResponse,
 )
 
 router = APIRouter(tags=["config"], responses=ERROR_RESPONSES)
+logger = logging.getLogger(__name__)
 
 
 def _safe_config_dump(config) -> dict:
@@ -76,9 +80,25 @@ async def update_config(req: UpdateConfigRequest, services: ServicesDependency):
     if req.mindmap_format is not None:
         config.processing.mindmap_format = req.mindmap_format
         changed.append("processing.mindmap_format")
+    if req.vault_path is not None:
+        config.workspace.vault_path = req.vault_path
+        changed.append("workspace.vault_path")
+    if req.default_runtime is not None:
+        config.workspace.default_runtime = req.default_runtime
+        changed.append("workspace.default_runtime")
+    if req.clip_buffer_ms is not None:
+        config.workspace.clip_buffer_ms = req.clip_buffer_ms
+        changed.append("workspace.clip_buffer_ms")
     if changed:
         manager.save(config)
     return {"message": "配置已更新", "changed": changed}
+
+
+@router.put("/config/api-key", status_code=204)
+async def store_api_key(req: StoreApiKeyRequest, services: ServicesDependency):
+    """Store one provider credential without returning or writing it to YAML."""
+    services.config.set_api_key(req.provider, req.api_key)
+    return Response(status_code=204)
 
 
 @router.post("/config/verify", response_model=VerifyKeyResponse)
@@ -90,5 +110,10 @@ async def verify_api_key(req: VerifyKeyRequest):
         llm = LLMFactory.create(req.provider, {"api_key": req.api_key, "model": "test"})
         llm.chat([{"role": "user", "content": "ping"}], max_tokens=1, timeout=10)
         return {"valid": True}
-    except Exception as e:  # noqa: BLE001
-        return {"valid": False, "error": str(e)}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "API key verification failed provider=%s error_type=%s",
+            req.provider,
+            type(exc).__name__,
+        )
+        return {"valid": False, "error": "API key verification failed"}

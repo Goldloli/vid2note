@@ -39,11 +39,20 @@ function activate(node: Node): void {
   else emit('open', node.path)
 }
 function onKeydown(event: KeyboardEvent, index: number): void {
+  const container = (event.currentTarget as HTMLElement).parentElement
+  const node = nodes.value[index]
   if (event.key === 'ArrowDown') focusIndex.value = Math.min(nodes.value.length - 1, index + 1)
   else if (event.key === 'ArrowUp') focusIndex.value = Math.max(0, index - 1)
-  else if (event.key === 'Enter' || event.key === 'ArrowRight') activate(nodes.value[index]!)
-  else if (event.key === 'ArrowLeft' && nodes.value[index]?.directory) { const next = new Set(expanded.value); next.delete(nodes.value[index]!.path); expanded.value = next }
+  else if (event.key === 'Enter') activate(node!)
+  else if (event.key === 'ArrowRight' && node?.directory) {
+    if (!expanded.value.has(node.path)) { const next = new Set(expanded.value); next.add(node.path); expanded.value = next }
+    else focusIndex.value = Math.min(nodes.value.length - 1, index + 1)
+  }
+  else if (event.key === 'ArrowLeft') {
+    if (node?.directory && expanded.value.has(node.path)) { const next = new Set(expanded.value); next.delete(node.path); expanded.value = next }
+    else if (node) { const parentIndex = nodes.value.findIndex((candidate) => candidate.directory && node.path.startsWith(`${candidate.path}/`)); if (parentIndex >= 0) focusIndex.value = parentIndex }
+  }
   else return
-  event.preventDefault(); void nextTick(() => (event.currentTarget as HTMLElement)?.parentElement?.querySelectorAll<HTMLElement>('[role="treeitem"]')[focusIndex.value]?.focus())
+  event.preventDefault(); void nextTick(() => container?.querySelectorAll<HTMLElement>('[role="treeitem"]')[focusIndex.value]?.focus())
 }
 </script>

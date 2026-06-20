@@ -1,4 +1,6 @@
 import type { components } from './generated/schema'
+import { getApiConnection } from './client'
+import { consumeEventStream } from './eventStream'
 
 export type TaskEvent = components['schemas']['TaskEvent']
 
@@ -43,7 +45,7 @@ export function parseTaskEvent(value: unknown): TaskEvent | null {
 }
 
 export class TaskEventSource {
-  private eventSource: EventSource | null = null
+  private controller: AbortController | null = null
   private closed = false
 
   constructor(
@@ -53,30 +55,21 @@ export class TaskEventSource {
   ) {}
 
   async connect(): Promise<void> {
-    let baseURL = ''
-    if (typeof window !== 'undefined' && window.electronAPI) {
-      baseURL = await window.electronAPI.getBackendUrl()
-    } else {
-      baseURL = import.meta.env.VITE_API_BASE_URL || ''
-    }
-    const apiBase = baseURL.endsWith('/api/v1') ? baseURL : `${baseURL}/api/v1`
-    this.eventSource = new EventSource(`${apiBase}/tasks/${this.taskId}/events`)
-    this.eventSource.onmessage = (event) => {
+    const { baseURL, token } = await getApiConnection()
+    this.controller = new AbortController()
+    void consumeEventStream(`${baseURL}/tasks/${this.taskId}/events`, token, this.controller.signal, (data) => {
       try {
-        const parsed = parseTaskEvent(JSON.parse(event.data) as unknown)
+        const parsed = parseTaskEvent(JSON.parse(data) as unknown)
         if (parsed) this.onEvent(parsed)
       } catch (error) {
         console.error('Failed to parse SSE event:', error)
       }
-    }
-    this.eventSource.onerror = (event) => {
-      if (!this.closed) this.onError?.(event)
-    }
+    }).catch(() => { if (!this.closed) this.onError?.(new Event('error')) })
   }
 
   close(): void {
     this.closed = true
-    this.eventSource?.close()
-    this.eventSource = null
+    this.controller?.abort()
+    this.controller = null
   }
 }

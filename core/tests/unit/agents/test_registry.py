@@ -17,8 +17,9 @@ class FakeRunner:
         return result
 
 
-def test_registry_detects_version_and_auth_without_model_call():
-    runner = FakeRunner([CommandResult(0, "codex 1.2.3", ""), CommandResult(0, "Logged in", "")])
+def test_registry_detects_version_and_controlled_auth_without_model_call(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "controlled-key")
+    runner = FakeRunner([CommandResult(0, "codex 1.2.3", "")])
     registry = RuntimeRegistry(runner=runner)
 
     result = asyncio.run(registry.detect("codex", refresh=True))
@@ -26,7 +27,19 @@ def test_registry_detects_version_and_auth_without_model_call():
     assert result.available
     assert result.version == "codex 1.2.3"
     assert result.auth_status == "authenticated"
-    assert [args for _, args, _ in runner.calls] == [["--version"], ["login", "status"]]
+    assert [args for _, args, _ in runner.calls] == [["--version"]]
+
+
+def test_registry_does_not_report_user_home_login_as_runtime_auth(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("CODEX_API_KEY", raising=False)
+    runner = FakeRunner([CommandResult(0, "codex 1.2.3", "")])
+
+    result = asyncio.run(RuntimeRegistry(runner=runner).detect("codex", refresh=True))
+
+    assert result.available
+    assert result.auth_status == "unauthenticated"
+    assert len(runner.calls) == 1
 
 
 def test_registry_reports_missing_and_timeout():
@@ -45,13 +58,12 @@ def test_registry_reports_missing_and_timeout():
     assert asyncio.run(timeout.detect("custom")).reason == "detection_timeout"
 
 
-def test_registry_caches_and_refreshes_detection():
+def test_registry_caches_and_refreshes_detection(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "controlled-key")
     runner = FakeRunner(
         [
             CommandResult(0, "claude 1", ""),
-            CommandResult(1, "", "not logged in"),
             CommandResult(0, "claude 2", ""),
-            CommandResult(0, "authenticated", ""),
         ]
     )
     registry = RuntimeRegistry(runner=runner)
@@ -62,7 +74,7 @@ def test_registry_caches_and_refreshes_detection():
 
     assert cached == first
     assert refreshed.version == "claude 2"
-    assert len(runner.calls) == 4
+    assert len(runner.calls) == 2
 
 
 def test_builtin_is_always_available():
