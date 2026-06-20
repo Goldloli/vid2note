@@ -10,17 +10,12 @@ upload SRT → process/start → process/status → process/result
 
 数据隔离：UploadStore 和 ArtifactStore 通过 monkeypatch 指到 tmp_path。
 """
+
 import io
-from pathlib import Path
+import time
 
-import pytest
-
-from vid2note_core.storage.artifact_store import ArtifactStore
-from vid2note_core.storage.task_repo import TaskRepository
-from vid2note_core.storage.upload_store import UploadStore
-from vid2note_core.types import NodeName, TaskStatus
+from vid2note_core.types import TaskStatus
 from vid2note_core.utils.security import validate_file_id
-
 
 SAMPLE_SRT = """1
 00:00:00,000 --> 00:00:02,000
@@ -32,26 +27,7 @@ SAMPLE_SRT = """1
 """
 
 
-@pytest.fixture
-def isolated_stores(tmp_path, monkeypatch):
-    """隔离 UploadStore + ArtifactStore 到 tmp_path。"""
-    upload_dir = tmp_path / "uploads"
-    artifact_dir = tmp_path / "tasks"
-
-    def _upload_init(self, base_dir=None):
-        object.__setattr__(self, "base_dir", upload_dir)
-        upload_dir.mkdir(parents=True, exist_ok=True)
-
-    def _artifact_init(self, base_dir=None):
-        object.__setattr__(self, "base_dir", artifact_dir)
-        artifact_dir.mkdir(parents=True, exist_ok=True)
-
-    monkeypatch.setattr(UploadStore, "__init__", _upload_init)
-    monkeypatch.setattr(ArtifactStore, "__init__", _artifact_init)
-    return tmp_path
-
-
-def test_full_chain_upload_start_status_result(client, isolated_stores):
+def test_full_chain_upload_start_status_result(client):
     """全链路：上传 → 启动 → 状态 → 产物"""
     # ── Step 1: 上传 SRT ──────────────────────────────
     upload_resp = client.post(
@@ -65,67 +41,57 @@ def test_full_chain_upload_start_status_result(client, isolated_stores):
     assert upload_data["filename"] == "test.srt"
 
     # 验证文件确实落盘
-    store = UploadStore()
+    store = client.app.state.services.uploads
     assert store.exists(file_id)
 
     # ── Step 2: 启动处理（用上传的 file_id）─────────
     start_resp = client.post(
         "/api/v1/process/start",
-        json={"srt_file": file_id, "llm_provider": "mock", "asr_provider": "asrtools-b"},
+        json={"srt_file": file_id, "llm_provider": "mock", "asr_provider": "funasr"},
     )
     assert start_resp.status_code == 200
     task_id = start_resp.json()["task_id"]
     assert start_resp.json()["status"] == "pending"
 
     # 任务入库
-    repo = TaskRepository()
+    repo = client.app.state.services.tasks
     task = repo.get_by_id(task_id)
     assert task is not None
     assert task.status == TaskStatus.PENDING
     assert task.srt_file == file_id
 
-    # ── Step 3: 查询状态（pending）────────────────────
-    status_resp = client.get(f"/api/v1/process/status/{task_id}")
-    assert status_resp.status_code == 200
-    status_data = status_resp.json()
-    assert status_data["task_id"] == task_id
-    assert status_data["status"] == "pending"
-    assert status_data["progress"] == 0
+    # ── Step 3: 等待真实 Worker 完成 ──────────────────
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        task = repo.get_by_id(task_id)
+        if task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED):
+            break
+        time.sleep(0.05)
+    assert task.status is TaskStatus.COMPLETED, task.error_message
 
-    # 模拟任务推进到 running
-    repo.update(task_id, status=TaskStatus.RUNNING, progress=50, current_step="transcribe")
-    status_resp = client.get(f"/api/v1/process/status/{task_id}")
-    assert status_resp.json()["status"] == "running"
-    assert status_resp.json()["progress"] == 50
-    assert status_resp.json()["current_step"] == "transcribe"
-
-    # ── Step 4: 产物查询（未完成时仅状态）────────────
-    result_resp = client.get(f"/api/v1/process/result/{task_id}")
-    assert result_resp.status_code == 200
-    result_data = result_resp.json()
-    assert result_data["status"] == "running"
-    assert "artifacts" not in result_data
-
-    # ── Step 5: 完成后产物查询 ────────────────────────
-    astore = ArtifactStore()
-    astore.write_artifact(
-        task_id, NodeName.ORGANIZE.value, "markdown_file", "# 全链路测试笔记".encode("utf-8")
-    )
-    astore.write_artifact(
-        task_id, NodeName.MINDMAP.value, "mindmap_file", "mindmap".encode("utf-8")
-    )
-    repo.update(task_id, status=TaskStatus.COMPLETED, progress=100)
-
+    # ── Step 4: 从真实 ArtifactStore 查询产物 ─────────
     result_resp = client.get(f"/api/v1/process/result/{task_id}")
     result_data = result_resp.json()
     assert result_data["status"] == "completed"
     assert result_data["progress"] == 100
     assert "artifacts" in result_data
-    assert result_data["artifacts"]["markdown"] == "# 全链路测试笔记"
-    assert result_data["artifacts"]["mindmap"] == "mindmap"
+    assert "# 来源笔记" in result_data["artifacts"]["markdown"]
+    assert "证据：00:00:00–00:00:02" in result_data["artifacts"]["markdown"]
+    assert "这是第一句字幕" in result_data["artifacts"]["srt"]
+    assert result_data["artifacts"]["mindmap"]
+
+    rerun_resp = client.post(f"/api/v1/tasks/{task_id}/rerun", json={"from_node": "organize"})
+    assert rerun_resp.status_code == 200
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        task = repo.get_by_id(task_id)
+        if task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED):
+            break
+        time.sleep(0.05)
+    assert task.status is TaskStatus.COMPLETED, task.error_message
 
 
-def test_full_chain_invalid_file_id_rejected(client, isolated_stores):
+def test_full_chain_invalid_file_id_rejected(client):
     """用不存在的 file_id 启动应仍创建任务（file_id 校验在执行阶段）"""
     start_resp = client.post(
         "/api/v1/process/start",
@@ -136,13 +102,13 @@ def test_full_chain_invalid_file_id_rejected(client, isolated_stores):
     assert start_resp.json()["status"] == "pending"
 
 
-def test_full_chain_status_not_found(client, isolated_stores):
+def test_full_chain_status_not_found(client):
     """查询不存在的任务返回 404"""
     resp = client.get("/api/v1/process/status/task_000000000000")
     assert resp.status_code == 404
 
 
-def test_full_chain_result_not_found(client, isolated_stores):
+def test_full_chain_result_not_found(client):
     """查询不存在任务的产物返回 404"""
     resp = client.get("/api/v1/process/result/task_000000000000")
     assert resp.status_code == 404

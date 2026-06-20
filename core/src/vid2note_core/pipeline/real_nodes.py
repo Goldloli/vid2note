@@ -12,7 +12,8 @@ Real pipeline nodes for vid2note.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+import json
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -27,9 +28,15 @@ from vid2note_core.errors import ASRError, LLMError, Vid2NoteError
 from vid2note_core.events.bus import TaskEvent, get_event_bus
 from vid2note_core.pipeline.context import TaskContext
 from vid2note_core.pipeline.node import PipelineNode
+from vid2note_core.source.registrar import SourceRegistrar, SourceRegistration
 from vid2note_core.storage.artifact_store import ArtifactStore
-from vid2note_core.storage.task_repo import TaskRepository
 from vid2note_core.types import ArtifactRef, NodeName, NodeResult, NodeStatus
+from vid2note_core.vault.repository import VaultRepository
+from vid2note_core.wiki.applier import ChangeSetApplier
+from vid2note_core.wiki.compiler import CompileInput, WikiCompiler
+from vid2note_core.wiki.policy import AutonomyMode, AutonomyPolicy
+from vid2note_core.wiki.retrieval import WikiRetriever
+from vid2note_core.wiki.store import ChangeSetStore
 
 
 def _build_default_router() -> DownloaderRouter:
@@ -84,7 +91,10 @@ class _RealNodeMixin:
         metadata: dict[str, Any] | None = None,
         error: dict[str, str] | None = None,
     ) -> None:
-        TaskRepository().update_node(
+        repository = getattr(self, "repository", None)
+        if repository is None:
+            return
+        repository.update_node(
             task_id,
             self.name.value,
             status,
@@ -101,9 +111,12 @@ class RealDownloadNode(PipelineNode, _RealNodeMixin):
     requires: list[str] = []
     produces: list[str] = ["video_file"]
 
-    def __init__(self, router: DownloaderRouter | None = None, store: ArtifactStore | None = None):
+    def __init__(self, router=None, store: ArtifactStore | None = None, repository=None):
         self.router = router or _build_default_router()
-        self.store = store or ArtifactStore()
+        if store is None:
+            raise TypeError("store is required")
+        self.store = store
+        self.repository = repository
 
     async def run(self, ctx: TaskContext) -> NodeResult:
         task_id = ctx.task_id.value
@@ -128,7 +141,7 @@ class RealDownloadNode(PipelineNode, _RealNodeMixin):
             )
         except Vid2NoteError as e:
             self._update_db(task_id, NodeStatus.FAILED, error={"code": e.code, "message": str(e)})
-            return NodeResult.failure(self.name, e.code, str(e))
+            return NodeResult.failure(self.name, e)
         except Exception as e:  # noqa: BLE001 - 下载器底层异常兜底
             self._update_db(
                 task_id, NodeStatus.FAILED, error={"code": "DOWNLOAD_ERROR", "message": str(e)}
@@ -140,12 +153,12 @@ class RealDownloadNode(PipelineNode, _RealNodeMixin):
             return NodeResult.failure(self.name, "DOWNLOAD_ERROR", "下载完成但未找到视频文件")
 
         # 落盘产物到标准产物名
-        self.store.write_artifact(
-            task_id, self.name.value, "video_file", Path(video_path).read_bytes()
+        stored_video = self.store.import_file(
+            task_id, self.name.value, "video_file", Path(video_path), move=True
         )
 
         metadata = {
-            "video_file": str(video_path),
+            "video_file": str(stored_video),
             "title": result.metadata.get("title"),
         }
         self._update_db(task_id, NodeStatus.COMPLETED, artifacts=["video_file"], metadata=metadata)
@@ -164,29 +177,28 @@ class RealExtractAudioNode(PipelineNode, _RealNodeMixin):
     requires: list[str] = ["video_file"]
     produces: list[str] = ["audio_file"]
 
-    def __init__(self, extractor: AudioExtractor | None = None, store: ArtifactStore | None = None):
+    def __init__(self, extractor=None, store: ArtifactStore | None = None, repository=None):
         self.extractor = extractor or AudioExtractor()
-        self.store = store or ArtifactStore()
+        if store is None:
+            raise TypeError("store is required")
+        self.store = store
+        self.repository = repository
 
     async def run(self, ctx: TaskContext) -> NodeResult:
         task_id = ctx.task_id.value
         task_dir = self.store.ensure_task_dir(task_id)
-        video_bytes = self.store.read_artifact(task_id, NodeName.DOWNLOAD.value, "video_file")
-
-        # 把上游视频写入临时文件供 ffmpeg 处理
-        video_tmp = task_dir / "_source_video"
-        video_tmp.write_bytes(video_bytes)
+        video_path = self.store.artifact_path(task_id, NodeName.DOWNLOAD.value, "video_file")
 
         self._update_db(task_id, NodeStatus.RUNNING)
         await self._publish(task_id, "node.started", 30, "提取音频中...")
 
         try:
             audio_path = await asyncio.to_thread(
-                self.extractor.extract, video_tmp, task_dir / "artifacts"
+                self.extractor.extract, video_path, task_dir / "artifacts"
             )
         except Vid2NoteError as e:
             self._update_db(task_id, NodeStatus.FAILED, error={"code": e.code, "message": str(e)})
-            return NodeResult.failure(self.name, e.code, str(e))
+            return NodeResult.failure(self.name, e)
         except Exception as e:  # noqa: BLE001
             self._update_db(
                 task_id,
@@ -194,13 +206,10 @@ class RealExtractAudioNode(PipelineNode, _RealNodeMixin):
                 error={"code": "AUDIO_EXTRACT_FAILED", "message": str(e)},
             )
             return NodeResult.failure(self.name, "AUDIO_EXTRACT_FAILED", str(e))
-        finally:
-            video_tmp.unlink(missing_ok=True)
-
-        self.store.write_artifact(
-            task_id, self.name.value, "audio_file", Path(audio_path).read_bytes()
+        stored_audio = self.store.import_file(
+            task_id, self.name.value, "audio_file", Path(audio_path), move=True
         )
-        metadata = {"audio_file": str(audio_path)}
+        metadata = {"audio_file": str(stored_audio)}
         self._update_db(task_id, NodeStatus.COMPLETED, artifacts=["audio_file"], metadata=metadata)
         await self._publish(task_id, "node.completed", 45, "音频提取完成", artifact="audio_file")
         return NodeResult.success(
@@ -217,17 +226,17 @@ class RealTranscribeNode(PipelineNode, _RealNodeMixin):
     requires: list[str] = ["audio_file"]
     produces: list[str] = ["srt_file"]
 
-    def __init__(self, asr=None, store: ArtifactStore | None = None):
+    def __init__(self, asr=None, store: ArtifactStore | None = None, repository=None):
         # asr: 实现了 transcribe(audio_path, opts) -> ASRResult 的对象
         self.asr = asr
-        self.store = store or ArtifactStore()
+        if store is None:
+            raise TypeError("store is required")
+        self.store = store
+        self.repository = repository
 
     async def run(self, ctx: TaskContext) -> NodeResult:
         task_id = ctx.task_id.value
-        task_dir = self.store.ensure_task_dir(task_id)
-        audio_bytes = self.store.read_artifact(task_id, NodeName.EXTRACT_AUDIO.value, "audio_file")
-        audio_tmp = task_dir / "_source_audio.wav"
-        audio_tmp.write_bytes(audio_bytes)
+        audio_path = self.store.artifact_path(task_id, NodeName.EXTRACT_AUDIO.value, "audio_file")
 
         self._update_db(task_id, NodeStatus.RUNNING)
         await self._publish(task_id, "node.started", 50, "语音识别中...")
@@ -235,18 +244,15 @@ class RealTranscribeNode(PipelineNode, _RealNodeMixin):
         asr = self.asr or _default_asr(ctx.config)
         opts = {"language": ctx.config.get("language", "zh")}
         try:
-            result = await _maybe_await(asr.transcribe(audio_tmp, opts))
+            result = await _maybe_await(asr.transcribe(audio_path, opts))
         except Vid2NoteError as e:
             self._update_db(task_id, NodeStatus.FAILED, error={"code": e.code, "message": str(e)})
-            return NodeResult.failure(self.name, e.code, str(e))
+            return NodeResult.failure(self.name, e)
         except Exception as e:  # noqa: BLE001
             self._update_db(
                 task_id, NodeStatus.FAILED, error={"code": "ASR_ERROR", "message": str(e)}
             )
             return NodeResult.failure(self.name, "ASR_ERROR", str(e))
-        finally:
-            audio_tmp.unlink(missing_ok=True)
-
         srt_text = _asr_result_to_srt(result)
         self.store.write_artifact(task_id, self.name.value, "srt_file", srt_text.encode("utf-8"))
         metadata = {"srt_file": "srt_file", "language": getattr(result, "language", "zh")}
@@ -266,9 +272,12 @@ class RealOrganizeNode(PipelineNode, _RealNodeMixin):
     requires: list[str] = ["srt_file"]
     produces: list[str] = ["markdown_file"]
 
-    def __init__(self, llm=None, store: ArtifactStore | None = None):
+    def __init__(self, llm=None, store: ArtifactStore | None = None, repository=None):
         self.llm = llm
-        self.store = store or ArtifactStore()
+        if store is None:
+            raise TypeError("store is required")
+        self.store = store
+        self.repository = repository
 
     async def run(self, ctx: TaskContext) -> NodeResult:
         task_id = ctx.task_id.value
@@ -286,7 +295,7 @@ class RealOrganizeNode(PipelineNode, _RealNodeMixin):
             )
         except Vid2NoteError as e:
             self._update_db(task_id, NodeStatus.FAILED, error={"code": e.code, "message": str(e)})
-            return NodeResult.failure(self.name, e.code, str(e))
+            return NodeResult.failure(self.name, e)
         except Exception as e:  # noqa: BLE001
             self._update_db(
                 task_id, NodeStatus.FAILED, error={"code": "LLM_ERROR", "message": str(e)}
@@ -308,6 +317,208 @@ class RealOrganizeNode(PipelineNode, _RealNodeMixin):
         )
 
 
+class RealRegisterSourceNode(PipelineNode, _RealNodeMixin):
+    """Register immutable transcript evidence and a regenerable source note in the Vault."""
+
+    name = NodeName.REGISTER_SOURCE
+    requires: list[str] = ["srt_file", "markdown_file"]
+    produces: list[str] = ["source_record"]
+
+    def __init__(
+        self,
+        registrar: SourceRegistrar,
+        store: ArtifactStore,
+        repository=None,
+    ):
+        self.registrar = registrar
+        self.store = store
+        self.repository = repository
+
+    async def run(self, ctx: TaskContext) -> NodeResult:
+        task_id = ctx.task_id.value
+        task = self.repository.get_by_id(task_id) if self.repository is not None else None
+        if task is None:
+            return NodeResult.failure(self.name, "SOURCE_TASK_NOT_FOUND", "找不到待注册任务")
+
+        self._update_db(task_id, NodeStatus.RUNNING)
+        await self._publish(task_id, "node.started", 96, "注册来源证据...")
+        original_path = self.store.artifact_path(task_id, NodeName.DOWNLOAD.value, "video_file")
+        imported_at = task.created_at or datetime.now(UTC)
+        if imported_at.tzinfo is None:
+            imported_at = imported_at.replace(tzinfo=UTC)
+        try:
+            record = await asyncio.to_thread(
+                self.registrar.register,
+                SourceRegistration(
+                    task_id=task_id,
+                    canonical_url=task.video_url,
+                    title=task.video_url or task.srt_original_name or task.srt_file or task_id,
+                    imported_at=imported_at,
+                    srt_path=self.store.artifact_path(
+                        task_id, NodeName.TRANSCRIBE.value, "srt_file"
+                    ),
+                    note_path=self.store.artifact_path(
+                        task_id, NodeName.ORGANIZE.value, "markdown_file"
+                    ),
+                    original_path=original_path if original_path.is_file() else None,
+                ),
+            )
+        except Vid2NoteError as exc:
+            self._update_db(
+                task_id, NodeStatus.FAILED, error={"code": exc.code, "message": str(exc)}
+            )
+            return NodeResult.failure(self.name, exc)
+        except Exception as exc:  # noqa: BLE001 - convert registration failures to node failure
+            self._update_db(
+                task_id,
+                NodeStatus.FAILED,
+                error={"code": "SOURCE_REGISTRATION_FAILED", "message": str(exc)},
+            )
+            return NodeResult.failure(self.name, "SOURCE_REGISTRATION_FAILED", str(exc))
+
+        payload = json.dumps(record.model_dump(mode="json"), ensure_ascii=False).encode()
+        self.store.write_artifact(task_id, self.name.value, "source_record", payload)
+        metadata = {"source_id": record.source_id}
+        self._update_db(
+            task_id, NodeStatus.COMPLETED, artifacts=["source_record"], metadata=metadata
+        )
+        await self._publish(
+            task_id,
+            "node.completed",
+            97,
+            "来源证据已注册",
+            artifact="source_record",
+        )
+        return NodeResult.success(
+            node=self.name,
+            artifacts=[ArtifactRef(node=self.name, name="source_record")],
+            metadata=metadata,
+        )
+
+
+class RealProposeWikiChangesNode(PipelineNode, _RealNodeMixin):
+    """Compile a registered source into a pending ChangeSet without editing the Wiki."""
+
+    name = NodeName.PROPOSE_WIKI_CHANGES
+    requires: list[str] = ["source_record"]
+    produces: list[str] = ["changeset_id"]
+
+    def __init__(
+        self,
+        *,
+        store: ArtifactStore,
+        vault: VaultRepository,
+        changesets: ChangeSetStore,
+        applier: ChangeSetApplier | None = None,
+        autonomy_mode_provider=None,
+        llm=None,
+        repository=None,
+    ):
+        self.store = store
+        self.vault = vault
+        self.changesets = changesets
+        self.applier = applier
+        self.autonomy_mode_provider = autonomy_mode_provider
+        self.llm = llm
+        self.repository = repository
+
+    async def run(self, ctx: TaskContext) -> NodeResult:
+        from vid2note_core.source.models import SourceRecord
+
+        task_id = ctx.task_id.value
+        self._update_db(task_id, NodeStatus.RUNNING)
+        await self._publish(task_id, "node.started", 97, "分析 Wiki 变更提案...")
+        try:
+            source = SourceRecord.model_validate_json(
+                self.store.read_artifact(
+                    task_id,
+                    NodeName.REGISTER_SOURCE.value,
+                    "source_record",
+                )
+            )
+            note_paths = sorted(self.vault.layout.sources.glob(f"{source.source_id}--*.md"))
+            if len(note_paths) != 1:
+                raise FileNotFoundError(f"source note for {source.source_id}")
+            source_note = self.vault.read_page(
+                note_paths[0].relative_to(self.vault.root).as_posix()
+            )
+            context = WikiRetriever(self.vault).find_context(source.title)
+            related_pages = [
+                self.vault.read_page(page.path)
+                for page in context.pages
+                if page.knowledge_layer == "wiki"
+            ]
+            compiler = WikiCompiler(self.llm or _default_llm(ctx.config))
+            result = await asyncio.to_thread(
+                compiler.propose,
+                CompileInput(
+                    source=source,
+                    source_note=source_note,
+                    schema_text=context.schema_text,
+                    index_text=context.index_text,
+                    related_pages=related_pages,
+                ),
+            )
+            changeset_id = result.changeset.id if result.changeset is not None else None
+            if result.changeset is not None:
+                existing = self.changesets.get(result.changeset.id)
+                if existing is None:
+                    self.changesets.save_pending(result.changeset)
+                elif existing != result.changeset:
+                    raise FileExistsError(result.changeset.id)
+                mode = (
+                    self.autonomy_mode_provider()
+                    if self.autonomy_mode_provider is not None
+                    else AutonomyMode.APPROVAL
+                )
+                stored = self.changesets.get(result.changeset.id)
+                if (
+                    AutonomyPolicy(mode).decide(result.classification) == "auto_apply"
+                    and self.applier is not None
+                    and stored is not None
+                    and stored.status == "pending"
+                ):
+                    self.applier.apply(result.changeset)
+            self.store.write_artifact(
+                task_id,
+                self.name.value,
+                "changeset_id",
+                (changeset_id or "").encode(),
+            )
+        except Vid2NoteError as exc:
+            self._update_db(
+                task_id, NodeStatus.FAILED, error={"code": exc.code, "message": str(exc)}
+            )
+            return NodeResult.failure(self.name, exc)
+        except Exception as exc:  # noqa: BLE001 - normalize proposal failures
+            self._update_db(
+                task_id,
+                NodeStatus.FAILED,
+                error={"code": "WIKI_PROPOSAL_FAILED", "message": str(exc)},
+            )
+            return NodeResult.failure(self.name, "WIKI_PROPOSAL_FAILED", str(exc))
+
+        metadata = {
+            "classification": result.classification,
+            "changeset_id": changeset_id,
+        }
+        self._update_db(
+            task_id, NodeStatus.COMPLETED, artifacts=["changeset_id"], metadata=metadata
+        )
+        await self._publish(
+            task_id,
+            "node.completed",
+            98,
+            "Wiki 变更提案已生成" if changeset_id else "来源未产生新的 Wiki 变更",
+            artifact="changeset_id",
+        )
+        return NodeResult.success(
+            node=self.name,
+            artifacts=[ArtifactRef(node=self.name, name="changeset_id")],
+            metadata=metadata,
+        )
+
+
 class RealMindmapNode(PipelineNode, _RealNodeMixin):
     """生成思维导图：markdown_file → mindmap_file（Mermaid）。
 
@@ -320,11 +531,18 @@ class RealMindmapNode(PipelineNode, _RealNodeMixin):
     produces: list[str] = ["mindmap_file"]
 
     def __init__(
-        self, llm=None, store: ArtifactStore | None = None, mindmap_format: str = "mermaid"
+        self,
+        llm=None,
+        store: ArtifactStore | None = None,
+        mindmap_format: str = "mermaid",
+        repository=None,
     ):
         self.llm = llm
-        self.store = store or ArtifactStore()
+        if store is None:
+            raise TypeError("store is required")
+        self.store = store
         self.mindmap_format = mindmap_format  # "mermaid" 或 "outline"
+        self.repository = repository
 
     def _build_prompt(self, markdown: str) -> str:
         """根据格式选择 prompt 模板并填充内容。"""
@@ -342,7 +560,7 @@ class RealMindmapNode(PipelineNode, _RealNodeMixin):
         markdown = md_bytes.decode("utf-8")
 
         self._update_db(task_id, NodeStatus.RUNNING)
-        await self._publish(task_id, "node.started", 96, "生成思维导图...")
+        await self._publish(task_id, "node.started", 98, "生成思维导图...")
 
         llm = self.llm or _default_llm(ctx.config)
         prompt = self._build_prompt(markdown)
@@ -355,7 +573,7 @@ class RealMindmapNode(PipelineNode, _RealNodeMixin):
             mindmap = await asyncio.to_thread(llm.chat, messages, temperature=0.3, max_tokens=3000)
         except Vid2NoteError as e:
             self._update_db(task_id, NodeStatus.FAILED, error={"code": e.code, "message": str(e)})
-            return NodeResult.failure(self.name, e.code, str(e))
+            return NodeResult.failure(self.name, e)
         except Exception as e:  # noqa: BLE001
             self._update_db(
                 task_id, NodeStatus.FAILED, error={"code": "LLM_ERROR", "message": str(e)}
@@ -369,7 +587,7 @@ class RealMindmapNode(PipelineNode, _RealNodeMixin):
             task_id, NodeStatus.COMPLETED, artifacts=["mindmap_file"], metadata=metadata
         )
         await self._publish(
-            task_id, "node.completed", 98, "思维导图生成完成", artifact="mindmap_file"
+            task_id, "node.completed", 99, "思维导图生成完成", artifact="mindmap_file"
         )
         return NodeResult.success(
             node=self.name,
@@ -389,8 +607,11 @@ class RealCleanupNode(PipelineNode, _RealNodeMixin):
     requires: list[str] = ["markdown_file"]
     produces: list[str] = ["cleanup_manifest"]
 
-    def __init__(self, store: ArtifactStore | None = None):
-        self.store = store or ArtifactStore()
+    def __init__(self, store: ArtifactStore | None = None, repository=None):
+        if store is None:
+            raise TypeError("store is required")
+        self.store = store
+        self.repository = repository
 
     async def run(self, ctx: TaskContext) -> NodeResult:
         task_id = ctx.task_id.value
@@ -465,9 +686,12 @@ def _default_asr(config: dict):
     """根据 config 创建 ASR。provider 错误或初始化失败时显式抛 ASRError（不再静默回退 mock）。"""
     from vid2note_core.asr.factory import ASRFactory
 
-    provider = config.get("asr_provider", "asrtools-b")
+    provider = config.get("asr_provider", "funasr")
     try:
-        return ASRFactory.create(provider, {})
+        asr_config = {}
+        if model_manager := config.get("model_manager"):
+            asr_config["model_manager"] = model_manager
+        return ASRFactory.create(provider, asr_config)
     except ValueError as e:
         raise ASRError(
             f"不支持的 ASR 提供商: {provider}（{e}）",
@@ -501,7 +725,10 @@ def _default_llm(config: dict):
             step="organize",
         )
     try:
-        return LLMFactory.create(provider, {"api_key": api_key, "model": config.get("llm_model")})
+        llm_config = {"api_key": api_key, "model": config.get("llm_model")}
+        if provider == "baidu":
+            llm_config["secret_key"] = config.get("secret_key", "")
+        return LLMFactory.create(provider, llm_config)
     except Exception as e:
         raise LLMError(
             f"LLM 初始化失败: {e}",

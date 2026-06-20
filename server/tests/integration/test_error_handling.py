@@ -1,12 +1,9 @@
 """测试全局异常处理与 CORS/health 修复。"""
 
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from vid2note_core.errors import LLMRateLimited, LLMError
+from vid2note_core.errors import LLMError, LLMRateLimited
 from vid2note_core.storage.db import Database
-
 from vid2note_server.main import app
-
 
 client = TestClient(app)
 
@@ -56,7 +53,7 @@ def test_vid2note_error_non_retryable_returns_400():
     assert resp.status_code == 400
     data = resp.json()
     assert data["error"]["retryable"] is False
-    assert data["message"] == "请配置 API Key"
+    assert data["error"]["user_message"] == "请配置 API Key"
 
 
 def test_value_error_returns_422():

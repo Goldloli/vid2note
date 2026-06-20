@@ -5,16 +5,16 @@ from vid2note_core.asr.local.model_manager import ModelManager
 from vid2note_core.errors import ASRModelNotFound
 
 
-def test_list_available():
-    mgr = ModelManager()
+def test_list_available(tmp_path):
+    mgr = ModelManager(tmp_path)
     models = mgr.list_available()
     assert len(models) >= 4
     ids = [m["id"] for m in models]
     assert "funasr-paraformer-small" in ids
 
 
-def test_get_path_missing():
-    mgr = ModelManager()
+def test_get_path_missing(tmp_path):
+    mgr = ModelManager(tmp_path)
     with pytest.raises(ASRModelNotFound):
         mgr.get_path("nonexistent-model")
 

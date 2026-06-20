@@ -1,6 +1,7 @@
 """测试产物存储"""
 
 from pathlib import Path
+
 from vid2note_core.storage.artifact_store import ArtifactStore
 
 
@@ -43,3 +44,19 @@ def test_delete_downstream_artifacts(tmp_path):
     assert store.artifact_path("task_abc123456789", "download", "video.mp4").exists()
     assert not store.artifact_path("task_abc123456789", "extract_audio", "audio.wav").exists()
     assert not store.artifact_path("task_abc123456789", "transcribe", "subtitle.srt").exists()
+
+
+def test_import_file_does_not_read_whole_media(tmp_path, monkeypatch):
+    source = tmp_path / "large.mp4"
+    source.write_bytes(b"video")
+    store = ArtifactStore(tmp_path / "tasks")
+    monkeypatch.setattr(
+        Path,
+        "read_bytes",
+        lambda self: (_ for _ in ()).throw(AssertionError("whole-file read")),
+    )
+
+    stored = store.import_file("task_abc123456789", "download", "video_file", source)
+
+    with stored.open("rb") as handle:
+        assert handle.read() == b"video"

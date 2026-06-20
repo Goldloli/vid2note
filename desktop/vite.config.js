@@ -5,6 +5,11 @@ import { resolve } from 'path'
 export default defineConfig({
   plugins: [vue()],
   base: './',
+  test: {
+    environment: 'jsdom',
+    globals: true,
+    include: ['src/renderer/**/*.test.ts'],
+  },
   build: {
     outDir: 'dist',
     emptyOutDir: true,

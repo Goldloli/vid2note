@@ -2,7 +2,8 @@
 
 import json
 import logging
-from vid2note_core.utils.logger import get_logger, JsonFormatter
+
+from vid2note_core.utils.logger import JsonFormatter, get_logger
 
 
 def test_json_formatter():

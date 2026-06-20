@@ -1,16 +1,7 @@
-"""基于 bk_asr 的云端 ASR 适配器（B 站必剪 / 剪映 / 快手）。
+"""Legacy bk_asr adapter boundary.
 
-AsrTools 项目（https://github.com/WEIFENG2333/AsrTools）逆向了三个
-免费、无需 API Key、无需 GPU 的云端语音识别接口：
-
-  - BcutASR   B 站"必剪"接口，分片上传 + 轮询，最稳定
-  - JianYingASR 剪映接口，需要第三方签名服务
-  - KuaiShouASR 快手接口，一次 POST 最简单
-
-本模块把 bk_asr 桥接到 vid2note 的 IASR 接口，作为 `asrtools-b`
-provider 的真实实现（替换原先的占位 AsrToolsBLLM）。
-
-默认用 BcutASR（最稳定，纯 HTTP 轮询，无第三方签名依赖）。
+No backend implementation is distributed. The injectable mapping remains only
+to verify the old result-conversion boundary while stored tasks are migrated.
 """
 
 from __future__ import annotations
@@ -19,23 +10,13 @@ from pathlib import Path
 from typing import Any
 
 from vid2note_core.asr.base import IASR, ASRResult, ASRSegment
-from vid2note_core.asr.bk_asr import BcutASR, JianYingASR, KuaiShouASR
 from vid2note_core.errors import ASRError
 
-# provider 名 → bk_asr 类
-_BACKENDS = {
-    "bcut": BcutASR,
-    "jianying": JianYingASR,
-    "kuaishou": KuaiShouASR,
-}
+_BACKENDS: dict[str, type] = {}
 
 
 class BkAsrAdapter(IASR):
-    """bk_asr 云端 ASR 适配器（无需 API Key、无需 GPU）。
-
-    通过 bk_asr 调用 B 站必剪 / 剪映 / 快手的免费云端识别接口。
-    支持 mp3/flac/m4a/wav；若输入是 wav 会被重命名为 .wav 后缀供 bk_asr 校验。
-    """
+    """Compatibility boundary with no production backend bundled."""
 
     name = "asrtools-b"
     is_cloud = True
@@ -108,4 +89,4 @@ class BkAsrAdapter(IASR):
         return p
 
     def is_available(self) -> bool:
-        return True
+        return self.backend_name in _BACKENDS

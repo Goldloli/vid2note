@@ -2,8 +2,9 @@
 
 from pathlib import Path
 from unittest.mock import MagicMock
-from vid2note_core.downloaders.router import DownloaderRouter
+
 from vid2note_core.downloaders.base import DownloadResult
+from vid2note_core.downloaders.router import DownloaderRouter
 
 
 def test_youtube_selects_ytdlp():

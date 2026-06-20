@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from vid2note_core.errors import Vid2NoteError
+
 
 class TaskId:
     """任务 ID 值对象，防止路径遍历"""
@@ -52,6 +54,8 @@ class NodeName(str, Enum):
     EXTRACT_AUDIO = "extract_audio"
     TRANSCRIBE = "transcribe"
     ORGANIZE = "organize"
+    REGISTER_SOURCE = "register_source"
+    PROPOSE_WIKI_CHANGES = "propose_wiki_changes"
     MINDMAP = "mindmap"
     CLEANUP = "cleanup"
 
@@ -74,6 +78,7 @@ class TaskStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    INTERRUPTED = "interrupted"
     PARTIAL = "partial"
 
 
@@ -94,6 +99,27 @@ class ArtifactRef:
     name: str
 
 
+@dataclass(frozen=True, slots=True)
+class NodeFailure:
+    code: str
+    message: str
+    user_message: str
+    retryable: bool
+    step: str | None = None
+
+    def __getitem__(self, key: str) -> Any:
+        return getattr(self, key)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "user_message": self.user_message,
+            "retryable": self.retryable,
+            "step": self.step,
+        }
+
+
 @dataclass
 class NodeResult:
     """节点执行结果"""
@@ -102,7 +128,7 @@ class NodeResult:
     status: NodeStatus
     artifacts: list[ArtifactRef] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
-    error: dict[str, str] | None = None
+    error: NodeFailure | None = None
 
     @classmethod
     def success(
@@ -123,13 +149,30 @@ class NodeResult:
     def failure(
         cls,
         node: NodeName,
-        error_code: str,
-        error_message: str,
+        error_code: Vid2NoteError | str,
+        error_message: str | None = None,
         artifacts: list[ArtifactRef] | None = None,
     ) -> NodeResult:
+        if isinstance(error_code, Vid2NoteError):
+            failure = NodeFailure(
+                code=error_code.code,
+                message=str(error_code),
+                user_message=error_code.user_message,
+                retryable=error_code.retryable,
+                step=error_code.step,
+            )
+        else:
+            message = error_message or error_code
+            failure = NodeFailure(
+                code=error_code,
+                message=message,
+                user_message=message,
+                retryable=False,
+                step=node.value,
+            )
         return cls(
             node=node,
             status=NodeStatus.FAILED,
             artifacts=artifacts or [],
-            error={"code": error_code, "message": error_message},
+            error=failure,
         )

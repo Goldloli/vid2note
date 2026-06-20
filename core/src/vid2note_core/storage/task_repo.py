@@ -19,6 +19,7 @@ class TaskRecord:
     video_file: str | None = None
     audio_file: str | None = None
     srt_file: str | None = None
+    srt_original_name: str | None = None
     txt_file: str | None = None
     pdf_file: str | None = None
     output_file: str | None = None
@@ -29,6 +30,10 @@ class TaskRecord:
     export_mindmap: bool = False
     mindmap_format: str = "xmind"
     error_message: str | None = None
+    retry_count: int = 0
+    error_code: str | None = None
+    error_retryable: bool = False
+    rerun_from_node: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
     completed_at: datetime | None = None
@@ -47,8 +52,8 @@ class TaskNodeRecord:
 
 
 class TaskRepository:
-    def __init__(self, db: Database | None = None):
-        self.db = db or Database()
+    def __init__(self, db: Database):
+        self.db = db
 
     def create(self, task_id: str, **kwargs) -> TaskRecord | None:
         now = datetime.now().isoformat()
@@ -59,6 +64,7 @@ class TaskRepository:
             "video_file": kwargs.get("video_file"),
             "audio_file": kwargs.get("audio_file"),
             "srt_file": kwargs.get("srt_file"),
+            "srt_original_name": kwargs.get("srt_original_name"),
             "txt_file": kwargs.get("txt_file"),
             "pdf_file": kwargs.get("pdf_file"),
             "output_file": kwargs.get("output_file"),
@@ -171,8 +177,9 @@ class TaskRepository:
         with self.db.get_connection() as conn:
             conn.execute(
                 "UPDATE tasks SET status = ?, progress = 0, error_message = NULL, "
-                "current_step = NULL WHERE id = ?",
-                (TaskStatus.PENDING.value, task_id),
+                "error_code = NULL, error_retryable = 0, current_step = NULL, "
+                "rerun_from_node = ? WHERE id = ?",
+                (TaskStatus.PENDING.value, from_node, task_id),
             )
             downstream = self._node_and_downstream(from_node) if from_node else None
             if downstream:
@@ -199,6 +206,8 @@ class TaskRepository:
             "extract_audio",
             "transcribe",
             "organize",
+            "register_source",
+            "propose_wiki_changes",
             "mindmap",
             "cleanup",
         ]
@@ -245,6 +254,7 @@ class TaskRepository:
             video_file=row["video_file"],
             audio_file=row["audio_file"],
             srt_file=row["srt_file"],
+            srt_original_name=row["srt_original_name"],
             txt_file=row["txt_file"],
             pdf_file=row["pdf_file"],
             output_file=row["output_file"],
@@ -255,6 +265,10 @@ class TaskRepository:
             export_mindmap=bool(row["export_mindmap"]),
             mindmap_format=row["mindmap_format"] or "xmind",
             error_message=row["error_message"],
+            retry_count=row["retry_count"] or 0,
+            error_code=row["error_code"],
+            error_retryable=bool(row["error_retryable"]),
+            rerun_from_node=row["rerun_from_node"],
             created_at=_dt(row["created_at"]),
             updated_at=_dt(row["updated_at"]),
             completed_at=_dt(row["completed_at"]),

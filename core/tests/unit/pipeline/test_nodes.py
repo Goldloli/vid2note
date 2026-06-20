@@ -3,16 +3,16 @@ Stub pipeline nodes tests
 """
 
 import pytest
+from vid2note_core.pipeline.context import TaskContext
 from vid2note_core.pipeline.nodes import (
+    CleanupNode,
     DownloadNode,
     ExtractAudioNode,
-    TranscribeNode,
-    OrganizeNode,
     MindmapNode,
-    CleanupNode,
+    OrganizeNode,
+    TranscribeNode,
 )
-from vid2note_core.pipeline.context import TaskContext
-from vid2note_core.types import TaskId, NodeStatus
+from vid2note_core.types import NodeStatus, TaskId
 
 
 @pytest.fixture

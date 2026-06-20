@@ -3,6 +3,7 @@
 from typing import Literal
 
 from pydantic import BaseModel, Field
+from vid2note_core.wiki.policy import AutonomyMode
 
 
 class QwenConfig(BaseModel):
@@ -109,7 +110,7 @@ class RetentionConfig(BaseModel):
 class ASRConfig(BaseModel):
     """ASR 配置"""
 
-    provider: str = "asrtools-b"
+    provider: str = "funasr"
     local_model: str = "funasr-paraformer-small"
 
 
@@ -122,10 +123,19 @@ class ServerConfig(BaseModel):
     temp_dir: str = "/tmp/course-doc-generator"
 
 
+class WorkspaceConfig(BaseModel):
+    """Knowledge workspace defaults persisted outside the Markdown Vault."""
+
+    vault_path: str = ""
+    default_runtime: Literal["built-in", "codex", "claude"] = "built-in"
+    clip_buffer_ms: int = Field(default=1500, ge=0, le=30_000)
+
+
 class AppConfig(BaseModel):
     """应用主配置"""
 
     version: str = "0.1.0"
+    autonomy_mode: AutonomyMode = AutonomyMode.APPROVAL
     llm_provider: Literal[
         "qwen", "glm", "deepseek", "moonshot", "baidu", "doubao", "minimax", "ollama"
     ] = "qwen"
@@ -142,6 +152,7 @@ class AppConfig(BaseModel):
     pdf_watermarks: PDFWatermarksConfig = PDFWatermarksConfig()
     default_models: dict = {}
     server: ServerConfig = ServerConfig()
+    workspace: WorkspaceConfig = WorkspaceConfig()
     retention: RetentionConfig = RetentionConfig()
     asr: ASRConfig = ASRConfig()
     run_mode: str = "dev"

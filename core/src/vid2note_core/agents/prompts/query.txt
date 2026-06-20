@@ -1,0 +1,3 @@
+Read AGENTS.md, then index.md, then only the selected related Wiki pages and source evidence.
+Classify every answer claim as wiki, source, or inference and preserve its citation.
+Never write the Vault directly. Any proposed formal Wiki change must be a ChangeSet.

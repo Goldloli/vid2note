@@ -13,7 +13,7 @@
       </div>
       <div class="col" style="align-items:flex-end; gap:4px">
         <span class="mono" style="font-size:16px; font-weight:600" :style="{color: progressColor}">{{ progress }}%</span>
-        <router-link v-if="taskId" :to="`/tasks/${taskId}`" class="btn btn-ghost btn-sm" style="padding:0 4px">查看详情 →</router-link>
+        <router-link v-if="taskId" :to="`/workspace/tasks/${taskId}`" class="btn btn-ghost btn-sm" style="padding:0 4px">查看详情 →</router-link>
       </div>
     </div>
     <div class="pipeline-rail">
@@ -59,15 +59,16 @@ const nodeClass = (i) => {
 const linkDone = (i) => (i + 1) <= currentIndex.value
 
 const badgeClass = computed(() => {
-  const m = { pending: 'pending', running: 'running', completed: 'completed', failed: 'failed' }
+  const m = { pending: 'pending', running: 'running', completed: 'completed', failed: 'failed', interrupted: 'warn' }
   return m[props.status] || 'pending'
 })
 const statusLabel = computed(() => {
-  const m = { pending: '等待中', running: '处理中', completed: '已完成', failed: '失败' }
+  const m = { pending: '等待中', running: '处理中', completed: '已完成', failed: '失败', interrupted: '已中断' }
   return m[props.status] || props.status
 })
 const progressColor = computed(() => {
   if (props.status === 'failed') return 'var(--danger)'
+  if (props.status === 'interrupted') return 'var(--warn)'
   if (props.status === 'completed') return 'var(--success)'
   return 'var(--accent)'
 })

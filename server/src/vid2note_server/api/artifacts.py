@@ -11,11 +11,12 @@ from io import BytesIO
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
-from vid2note_core.storage.artifact_store import ArtifactStore
-from vid2note_core.storage.task_repo import TaskRepository
 from vid2note_core.types import TaskId
 
-router = APIRouter(tags=["artifacts"])
+from vid2note_server.dependencies import Services, ServicesDependency
+from vid2note_server.schemas.common import ERROR_RESPONSES, ArtifactListResponse
+
+router = APIRouter(tags=["artifacts"], responses=ERROR_RESPONSES)
 
 # artifact 键名 → (下载文件名, Content-Type, 友好类型)
 # 键名来自 ArtifactStore 的 f"{node}_{name}" 命名约定
@@ -27,21 +28,21 @@ _ARTIFACT_META = {
 }
 
 
-def _validate_task(task_id: str):
+def _validate_task(task_id: str, services: Services):
     """校验 task_id 格式与存在性，返回 TaskRepository。"""
     if not TaskId.is_valid(task_id):
         raise HTTPException(404, "任务不存在")
-    repo = TaskRepository()
+    repo = services.tasks
     if not repo.get_by_id(task_id):
         raise HTTPException(404, "任务不存在")
     return repo
 
 
-@router.get("/tasks/{task_id}/artifacts")
-async def list_artifacts(task_id: str):
+@router.get("/tasks/{task_id}/artifacts", response_model=ArtifactListResponse)
+async def list_artifacts(task_id: str, services: ServicesDependency):
     """列出任务的所有产物文件（名称、类型、大小）。"""
-    _validate_task(task_id)
-    store = ArtifactStore()
+    _validate_task(task_id, services)
+    store = services.artifacts
     items = []
     for path in store.list_artifacts(task_id):
         meta = _ARTIFACT_META.get(path.name)
@@ -57,11 +58,11 @@ async def list_artifacts(task_id: str):
     return {"task_id": task_id, "artifacts": items}
 
 
-@router.get("/tasks/{task_id}/artifacts/{key}")
-async def download_artifact(task_id: str, key: str):
+@router.get("/tasks/{task_id}/artifacts/{key}", response_class=Response)
+async def download_artifact(task_id: str, key: str, services: ServicesDependency):
     """下载单个产物文件（返回原始字节 + 正确 Content-Type + 附件下载头）。"""
-    _validate_task(task_id)
-    store = ArtifactStore()
+    _validate_task(task_id, services)
+    store = services.artifacts
     path = store._task_dir(task_id) / "artifacts" / key
     if not path.exists():
         raise HTTPException(404, "产物不存在")
@@ -78,11 +79,11 @@ async def download_artifact(task_id: str, key: str):
     )
 
 
-@router.get("/tasks/{task_id}/export")
-async def export_all_artifacts(task_id: str):
+@router.get("/tasks/{task_id}/export", response_class=Response)
+async def export_all_artifacts(task_id: str, services: ServicesDependency):
     """把任务所有产物打包为 zip 下载。"""
-    _validate_task(task_id)
-    store = ArtifactStore()
+    _validate_task(task_id, services)
+    store = services.artifacts
     files = store.list_artifacts(task_id)
     if not files:
         raise HTTPException(404, "任务暂无产物")

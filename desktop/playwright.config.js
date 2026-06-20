@@ -6,12 +6,17 @@
 //     通过环境变量注入，避免真实下载/识别
 //   - DB / 上传目录隔离到临时目录
 const path = require('path')
+const fs = require('fs')
+const os = require('os')
 
 const FRONT_PORT = process.env.VID2NOTE_E2E_FRONT_PORT || 5174
 const BACK_PORT = process.env.VID2NOTE_E2E_BACK_PORT || 18765
 // 优先用仓库 venv 的 python（已装好 vid2note 依赖），否则系统 python
 const ROOT = path.resolve(__dirname, '..')
-const PY = process.env.VID2NOTE_E2E_PYTHON || (require('fs').existsSync(path.join(ROOT, '.venv', 'bin', 'python')) ? path.join(ROOT, '.venv', 'bin', 'python') : 'python')
+const PY = process.env.VID2NOTE_E2E_PYTHON || (fs.existsSync(path.join(ROOT, '.venv', 'bin', 'python')) ? path.join(ROOT, '.venv', 'bin', 'python') : 'python')
+const SYSTEM_CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+const E2E_DATA_DIR = process.env.VID2NOTE_E2E_DATA_DIR || path.join(os.tmpdir(), `vid2note-e2e-${process.pid}`)
+process.env.VID2NOTE_E2E_DATA_DIR = E2E_DATA_DIR
 
 // defineConfig 是可选的类型辅助；不 import 以避免全局/本地 playwright 版本冲突
 /** @type {import('@playwright/test').PlaywrightTestConfig} */
@@ -27,6 +32,7 @@ const config = {
     baseURL: `http://localhost:${FRONT_PORT}`,
     trace: 'on-first-retry',
     actionTimeout: 10_000,
+    launchOptions: fs.existsSync(SYSTEM_CHROME) ? { executablePath: SYSTEM_CHROME } : undefined,
   },
   webServer: [
     {
@@ -36,17 +42,18 @@ const config = {
       timeout: 30_000,
       cwd: ROOT,
       env: {
-        VID2NOTE_DATA_DIR: process.env.VID2NOTE_E2E_DATA_DIR || '/tmp/vid2note-e2e',
+        VID2NOTE_DATA_DIR: E2E_DATA_DIR,
         VID2NOTE_RUN_MODE: 'dev',
+        PYTHONPATH: `${path.join(ROOT, 'core/src')}:${path.join(ROOT, 'server/src')}`,
       },
-      reuseExistingServer: true,
+      reuseExistingServer: false,
     },
     {
       // 前端：Vite dev server，API 指向后端
       command: `VITE_API_BASE_URL=http://localhost:${BACK_PORT}/api/v1 npx vite --port ${FRONT_PORT} --strictPort`,
       port: FRONT_PORT,
       timeout: 30_000,
-      reuseExistingServer: true,
+      reuseExistingServer: false,
     },
   ],
 }

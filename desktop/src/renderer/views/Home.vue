@@ -1,5 +1,10 @@
 <template>
   <div class="page">
+    <header class="page-head">
+      <div class="eyebrow">媒体入口</div>
+      <h1>导入与处理</h1>
+      <p class="sub">将视频链接或本地字幕转为可追溯的来源笔记。</p>
+    </header>
     <!-- 输入 composer -->
     <section class="card card-pad reveal" style="margin-bottom:22px">
       <div class="eyebrow" style="margin-bottom:10px">新建任务</div>
@@ -18,10 +23,21 @@
       <p v-if="store.error" class="muted mono-sm" style="margin-top:8px;color:var(--danger)">{{ store.error }}</p>
 
       <div class="spread" style="margin-top:14px; flex-wrap:wrap; gap:12px">
+        <label class="btn btn-sm">
+          导入 SRT
+          <input
+            data-testid="srt-input"
+            type="file"
+            accept=".srt"
+            hidden
+            :disabled="store.isCreating"
+            @change="importSrt"
+          >
+        </label>
+        <button type="button" class="btn btn-sm" :disabled="store.isCreating || !canChooseLocalVideo" @click="chooseLocalVideo">导入本地视频</button>
         <div class="row gap-s">
           <span class="kicker">ASR</span>
-          <button type="button" class="chip active">asrtools-b</button>
-          <button type="button" class="chip">FunASR 本地</button>
+          <button type="button" class="chip active">FunASR 本地</button>
         </div>
         <div class="row gap-s">
           <span class="kicker">LLM</span>
@@ -30,6 +46,7 @@
           <button type="button" class="chip">ollama · llama3</button>
         </div>
       </div>
+      <p class="muted mono-sm" style="margin-top:12px">在线来源由下载器获取；本地视频和 SRT 留在本机。选择云 ASR/LLM 时内容可能发送给对应提供商。请确认你有权处理和保存该来源。</p>
     </section>
 
     <!-- 统计 -->
@@ -73,7 +90,7 @@
               <td class="mono-sm muted">{{ task.progress || 100 }}%</td>
               <td>
                 <div class="row gap-xs" style="justify-content:flex-end">
-                  <router-link :to="`/tasks/${task.id}`" class="btn btn-sm">详情</router-link>
+                  <router-link :to="`/workspace/tasks/${task.id}`" class="btn btn-sm">详情</router-link>
                 </div>
               </td>
             </tr>
@@ -86,11 +103,14 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { useTaskStore } from '../stores/task'
 import PipelineRail from '../components/PipelineRail.vue'
 
 const store = useTaskStore()
-const url = ref('')
+const route = useRoute()
+const url = ref(typeof route.query.url === 'string' ? route.query.url : '')
+const canChooseLocalVideo = Boolean(window.electronAPI?.chooseLocalVideo)
 
 const activeTasks = computed(() => store.tasks.filter((t) => t.status === 'running' || t.status === 'pending'))
 const completedTasks = computed(() => store.tasks.filter((t) => t.status === 'completed').slice(0, 6))
@@ -99,7 +119,7 @@ const completedCount = computed(() => store.tasks.filter((t) => t.status === 'co
 const failedCount = computed(() => store.tasks.filter((t) => t.status === 'failed').length)
 
 const taskTitle = (t) => {
-  const src = t.video_url || t.video_file || ''
+  const src = t.video_url || t.video_file || t.source_name || t.srt_original_name || t.srt_file || ''
   const host = src.replace(/^https?:\/\//, '').split('/')[0]
   return host || src || t.id
 }
@@ -124,6 +144,21 @@ async function submit() {
   store.error = ''
   await store.addTask(v)
   url.value = ''
+}
+
+async function importSrt(event) {
+  const file = event.target.files?.[0]
+  if (!file) return
+  try {
+    await store.addSrtTask(file)
+  } finally {
+    event.target.value = ''
+  }
+}
+
+async function chooseLocalVideo() {
+  const path = await window.electronAPI?.chooseLocalVideo()
+  if (path) await store.addLocalVideo(path)
 }
 
 onMounted(() => store.loadTasks())

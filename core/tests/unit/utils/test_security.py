@@ -1,12 +1,12 @@
 """测试安全工具"""
 
 from pathlib import Path
+
 from vid2note_core.utils.security import (
     is_safe_path,
+    sanitize_content,
     secure_filename,
     validate_file_id,
-    sanitize_content,
-    PROMPT_INJECTION_PATTERNS,
 )
 
 

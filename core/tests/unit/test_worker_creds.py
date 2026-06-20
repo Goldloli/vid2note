@@ -1,8 +1,6 @@
 """测试 worker._resolve_llm_creds（provider→API key/model 解析）。"""
 
-import pytest
-
-from vid2note_core.worker import _resolve_llm_creds
+from vid2note_core.worker import _resolve_llm_config, _resolve_llm_creds
 
 
 def test_qwen_reads_dashscope_key(monkeypatch):
@@ -42,12 +40,18 @@ def test_unknown_provider_falls_back(monkeypatch):
     assert key == "foo-key"
 
 
-@pytest.mark.xfail(reason="已知问题：baidu 错误映射到 BAICHUAN_API_KEY，Phase 4 稳定性阶段修复")
-def test_baidu_mapping_bug():
-    """baidu 应读 BAIDU_API_KEY 而非 BAICHUAN_API_KEY。当前是 bug。"""
-    import os
-
-    os.environ.pop("BAICHUAN_API_KEY", None)
-    os.environ["BAIDU_API_KEY"] = "baidu-key"
+def test_baidu_reads_api_key(monkeypatch):
+    monkeypatch.delenv("BAICHUAN_API_KEY", raising=False)
+    monkeypatch.setenv("BAIDU_API_KEY", "baidu-key")
     key, _ = _resolve_llm_creds("baidu")
     assert key == "baidu-key"
+
+
+def test_baidu_reads_secret_key(monkeypatch):
+    monkeypatch.setenv("BAIDU_API_KEY", "baidu-key")
+    monkeypatch.setenv("BAIDU_SECRET_KEY", "baidu-secret")
+
+    config = _resolve_llm_config("baidu")
+
+    assert config["api_key"] == "baidu-key"
+    assert config["secret_key"] == "baidu-secret"

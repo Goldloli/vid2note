@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from vid2note_core.asr.base import ASRResult
+from vid2note_core.asr.local.model_manager import ModelManager
 from vid2note_core.asr.local.qwen_asr import Qwen3ASRAdapter
 from vid2note_core.errors import ASRError
 
@@ -34,20 +35,24 @@ def _make_mock_factories(result_text: str = "你好世界"):
     return proc_factory, model_factory, mock_processor, mock_model
 
 
-def test_qwen3asr_not_available_without_model():
-    asr = Qwen3ASRAdapter()
+def test_qwen3asr_not_available_without_model(tmp_path):
+    asr = Qwen3ASRAdapter(model_manager=ModelManager(tmp_path))
     assert asr.is_available() is False
 
 
-def test_qwen3asr_name():
-    asr = Qwen3ASRAdapter()
+def test_qwen3asr_name(tmp_path):
+    asr = Qwen3ASRAdapter(model_manager=ModelManager(tmp_path))
     assert asr.name == "qwen3-asr"
 
 
-def test_qwen3asr_transcribe_success():
+def test_qwen3asr_transcribe_success(tmp_path):
     """注入 mock 工厂，验证 transcribe 返回 ASRResult"""
     proc_f, model_f, mock_proc, mock_model = _make_mock_factories("转录结果文本")
-    asr = Qwen3ASRAdapter(processor_factory=proc_f, model_factory=model_f)
+    asr = Qwen3ASRAdapter(
+        model_manager=ModelManager(tmp_path),
+        processor_factory=proc_f,
+        model_factory=model_f,
+    )
 
     result = asr.transcribe(Path("/fake/audio.wav"), {"language": "zh"})
 
@@ -59,40 +64,49 @@ def test_qwen3asr_transcribe_success():
     mock_model.generate.assert_called_once()
 
 
-def test_qwen3asr_transcribe_english():
+def test_qwen3asr_transcribe_english(tmp_path):
     proc_f, model_f, _, mock_model = _make_mock_factories("hello world")
-    asr = Qwen3ASRAdapter(processor_factory=proc_f, model_factory=model_f)
+    asr = Qwen3ASRAdapter(
+        model_manager=ModelManager(tmp_path),
+        processor_factory=proc_f,
+        model_factory=model_f,
+    )
     result = asr.transcribe(Path("/fake/audio.wav"), {"language": "en"})
     assert result.text_full == "hello world"
     assert result.language == "en"
 
 
-def test_qwen3asr_model_load_failure():
+def test_qwen3asr_model_load_failure(tmp_path):
     """模型加载失败 → ASRError"""
     proc_f = MagicMock()
     proc_f.from_pretrained.side_effect = RuntimeError("model not found")
-    asr = Qwen3ASRAdapter(processor_factory=proc_f, model_factory=MagicMock())
+    asr = Qwen3ASRAdapter(
+        model_manager=ModelManager(tmp_path),
+        processor_factory=proc_f,
+        model_factory=MagicMock(),
+    )
     with pytest.raises(ASRError) as exc_info:
         asr.transcribe(Path("/fake/audio.wav"), {})
     assert exc_info.value.code == "ASR_MODEL_LOAD_FAILED"
 
 
-def test_qwen3asr_infer_failure():
+def test_qwen3asr_infer_failure(tmp_path):
     """推理失败 → ASRError（可重试）"""
     proc_f, model_f, _, mock_model = _make_mock_factories()
     mock_model.generate.side_effect = RuntimeError("infer failed")
-    asr = Qwen3ASRAdapter(processor_factory=proc_f, model_factory=model_f)
+    asr = Qwen3ASRAdapter(
+        model_manager=ModelManager(tmp_path),
+        processor_factory=proc_f,
+        model_factory=model_f,
+    )
     with pytest.raises(ASRError) as exc_info:
         asr.transcribe(Path("/fake/audio.wav"), {})
     assert exc_info.value.code == "ASR_INFER_FAILED"
     assert exc_info.value.retryable is True
 
 
-def test_qwen3asr_available_with_local_model(tmp_path, monkeypatch):
+def test_qwen3asr_available_with_local_model(tmp_path):
     """本地已安装模型时 is_available 返回 True"""
-    from vid2note_core.asr.local import model_manager as mm
-
-    monkeypatch.setattr(mm.ModelManager, "_default_dir", lambda self: str(tmp_path))
     (tmp_path / "qwen3-asr-base").mkdir()
-    asr = Qwen3ASRAdapter()
+    asr = Qwen3ASRAdapter(model_manager=ModelManager(tmp_path))
     assert asr.is_available() is True

@@ -1,14 +1,14 @@
 """测试类型定义"""
 
-from pathlib import Path
+from vid2note_core.errors import DownloadError
 from vid2note_core.types import (
-    TaskId,
     ArtifactRef,
     NodeName,
-    NodeStatus,
     NodeResult,
-    TaskStatus,
+    NodeStatus,
     RunMode,
+    TaskId,
+    TaskStatus,
 )
 
 
@@ -53,6 +53,23 @@ def test_node_result_failure():
     )
     assert r.status == NodeStatus.FAILED
     assert r.artifacts == []
+
+
+def test_node_result_preserves_retryable_domain_error():
+    error = DownloadError(
+        "timeout",
+        code="DOWNLOAD_TIMEOUT",
+        retryable=True,
+        user_message="下载超时，请重试",
+        step="download",
+    )
+
+    result = NodeResult.failure(NodeName.DOWNLOAD, error)
+
+    assert result.error.code == "DOWNLOAD_TIMEOUT"
+    assert result.error.retryable is True
+    assert result.error.user_message == "下载超时，请重试"
+    assert result.error.step == "download"
 
 
 def test_run_mode_values():

@@ -1,6 +1,8 @@
 <template>
   <div class="page">
+    <p v-if="settingsError" role="alert" class="muted" style="color:var(--danger)">{{ settingsError }}</p>
     <div class="set-tabs">
+      <button class="tab" :class="{active: tab === 'workspace'}" @click="tab = 'workspace'">知识工作台</button>
       <button class="tab" :class="{active: tab === 'asr'}" @click="tab = 'asr'">ASR 语音识别</button>
       <button class="tab" :class="{active: tab === 'llm'}" @click="tab = 'llm'">LLM 大模型</button>
       <button class="tab" :class="{active: tab === 'proc'}" @click="tab = 'proc'">处理选项</button>
@@ -10,9 +12,17 @@
     </div>
     <div class="set-grid">
       <div>
+        <div v-show="tab === 'workspace'" class="card card-pad reveal">
+          <div class="section-title"><h2>知识工作台</h2><span class="tag">Markdown Vault</span></div>
+          <div class="form-row"><div><div class="fr-label">Vault 路径</div><div class="fr-desc">正文事实源；修改后重启应用生效，现有 Vault 不会被自动移动。</div></div><input data-testid="vault-path" v-model="form.vault_path" class="input mono" placeholder="留空使用默认 data/vault"></div>
+          <div class="form-row"><div><div class="fr-label">Agent 自治模式</div><div class="fr-desc">默认审批；Agent 和 Wiki Compiler 只能通过 ChangeSet 写回正式 Wiki。</div></div><select v-model="form.autonomy_mode" class="input"><option value="approval">A · 审批模式</option><option value="auto-revertible">B · 可回滚自治</option><option value="high-autonomy">C · 高自治</option></select></div>
+          <div class="form-row"><div><div class="fr-label">默认 Runtime</div><div class="fr-desc">外部 CLI 始终在隔离工作区运行。</div></div><select data-testid="default-runtime" v-model="form.default_runtime" class="input"><option value="built-in">Built-in Runtime</option><option value="codex">Codex CLI</option><option value="claude">Claude Code</option></select></div>
+          <div class="form-row"><div><div class="fr-label">证据片段缓冲</div><div class="fr-desc">播放器在引用范围前后各保留缓冲（0–30000 ms）。</div></div><input data-testid="clip-buffer-ms" v-model.number="form.clip_buffer_ms" class="input" type="number" min="0" max="30000"></div>
+          <div class="form-row"><div><div class="fr-label">云数据说明</div><div class="fr-desc">本地 FunASR 不上传音频；选择云 ASR/LLM 时仅发送完成任务所需内容。</div></div><div>按提供商隐私政策处理</div></div>
+        </div>
         <!-- ASR -->
         <div v-show="tab === 'asr'" class="card card-pad reveal">
-          <div class="section-title"><h2>语音识别引擎 (ASR)</h2><span class="tag">默认 asrtools-b</span></div>
+          <div class="section-title"><h2>语音识别引擎 (ASR)</h2><span class="tag">默认 funasr</span></div>
           <div class="opt-grid">
             <div v-for="p in asrProviders" :key="p.name" class="opt-card" :class="{sel: form.asr_provider === p.name}" @click="selectAsr(p.name)">
               <span class="opt-radio"></span>
@@ -21,9 +31,9 @@
           </div>
           <div class="divider-h"></div>
           <div class="form-row">
-            <div><div class="fr-label">ASR 密钥</div><div class="fr-desc">当前 ASR（asrtools-b）为免费云端接口（B站必剪/剪映/快手），无需 API 密钥。</div></div>
+            <div><div class="fr-label">本地模型</div><div class="fr-desc">FunASR 在本机运行，音频不会发送到第三方识别接口。</div></div>
             <div class="fr-control">
-              <span class="mono-sm muted">— 免接口密钥 —</span>
+              <span class="mono-sm muted">— 无需接口密钥 —</span>
             </div>
           </div>
         </div>
@@ -36,7 +46,7 @@
               <div class="prov-head"><span class="prov-radio"></span><span class="prov-name">{{ p }}</span><span class="prov-model">{{ defaultModel(p) }}</span></div>
               <div v-if="form.llm_provider === p" class="prov-body" style="display:block">
                 <div class="grid grid-2" style="padding-top:14px">
-                  <div class="field"><span class="label">API Key</span><input class="input" type="password" v-model="form.llm_keys[p]" placeholder="sk-…"></div>
+                  <div class="field"><span class="label">API Key</span><input data-testid="provider-api-key" class="input" type="password" v-model="form.api_key" autocomplete="new-password" placeholder="留空表示不修改"></div>
                   <div class="field"><span class="label">模型</span><input class="input" :value="defaultModel(p)" disabled></div>
                 </div>
               </div>
@@ -85,12 +95,13 @@
             <dt>语言</dt><dd>{{ form.language === 'zh' ? '中文' : 'English' }}</dd>
             <dt>分块</dt><dd>{{ form.chunk_size }}</dd>
             <dt>温度</dt><dd>{{ form.temperature }}</dd>
+            <dt>自治</dt><dd>{{ form.autonomy_mode === 'approval' ? '审批模式' : form.autonomy_mode }}</dd>
             <dt>保留</dt><dd>{{ form.keep_srt ? 'SRT' : '无' }}</dd>
           </dl>
           <div class="divider-h"></div>
           <div class="kicker" style="margin-bottom:8px">安全提示</div>
           <p class="muted" style="font-size:12px; line-height:1.6">所有 API Key 通过系统钥匙串加密存储，绝不写入明文配置或日志。</p>
-          <div style="margin-top:14px"><button class="btn btn-primary btn-sm" @click="save">保存配置</button></div>
+          <div style="margin-top:14px"><button data-testid="save-settings" class="btn btn-primary btn-sm" @click="save">保存配置</button></div>
         </div>
       </aside>
     </div>
@@ -99,23 +110,28 @@
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
-import { getConfig, updateConfig, verifyApiKey } from '../api/config'
+import { getConfig, storeApiKey, updateConfig, verifyApiKey } from '../api/config'
 import { listModels } from '../api/models'
+import { useWorkspaceStore } from '../stores/workspace'
 
-const tab = ref('asr')
+const tab = ref('workspace')
+const workspace = useWorkspaceStore()
 const asrProviders = [
-  { name: 'asrtools-b', meta: '云端 · 高精度 · 中文最佳' },
   { name: 'funasr', meta: '本地 · paraformer-small' },
 ]
 const llmProviders = ref([])
 const verifyMsg = ref('')
 const verifyOk = ref(false)
+const settingsError = ref('')
 
 const form = reactive({
-  asr_provider: 'asrtools-b',
+  asr_provider: 'funasr',
   llm_provider: 'qwen',
   api_key: '',
   llm_keys: {},
+  vault_path: '',
+  default_runtime: 'built-in',
+  clip_buffer_ms: 1500,
   language: 'zh',
   extract_images: true,
   keep_video: false,
@@ -123,6 +139,7 @@ const form = reactive({
   keep_srt: true,
   chunk_size: 4000,
   temperature: 0.3,
+  autonomy_mode: 'approval',
 })
 
 const defaultModel = (p) => ({ qwen: 'qwen-turbo', deepseek: 'deepseek-chat', glm: 'glm-4-flash', moonshot: 'moonshot-v1-8k', ollama: 'llama3', mock: 'mock' }[p] || p)
@@ -130,7 +147,7 @@ const selectAsr = (name) => { form.asr_provider = name; saveField('asr_provider'
 const selectLlm = (name) => { form.llm_provider = name; saveField('llm_provider', name) }
 
 async function saveField(field, value) {
-  try { await updateConfig({ [field]: value }) } catch (e) {}
+  try { await updateConfig({ [field]: value }); settingsError.value = '' } catch (e) { settingsError.value = `配置保存失败：${e.message || e}` }
 }
 async function save() {
   try {
@@ -140,8 +157,17 @@ async function save() {
       keep_video: form.keep_video,
       keep_audio: form.keep_audio,
       keep_srt: form.keep_srt,
+      autonomy_mode: form.autonomy_mode,
+      vault_path: form.vault_path,
+      default_runtime: form.default_runtime,
+      clip_buffer_ms: form.clip_buffer_ms,
     })
-  } catch (e) {}
+    if (form.api_key.trim()) {
+      await storeApiKey(form.llm_provider, form.api_key)
+      form.api_key = ''
+    }
+    await workspace.loadAutonomyMode()
+  } catch (e) { settingsError.value = `配置保存失败：${e.message || e}` }
 }
 async function verifyKey() {
   verifyMsg.value = '验证中…'
@@ -159,11 +185,16 @@ onMounted(async () => {
   try {
     const cfg = await getConfig()
     Object.assign(form, cfg)
-  } catch (e) {}
+    if (cfg.asr) form.asr_provider = cfg.asr.provider
+    if (cfg.retention) Object.assign(form, cfg.retention)
+    if (cfg.processing) Object.assign(form, cfg.processing)
+    if (cfg.advanced) Object.assign(form, cfg.advanced)
+    if (cfg.workspace) Object.assign(form, cfg.workspace)
+  } catch (e) { settingsError.value = `配置读取失败：${e.message || e}` }
   try {
     const data = await listModels()
     llmProviders.value = data.llm_providers || []
-  } catch (e) {}
+  } catch (e) { settingsError.value = `模型列表读取失败：${e.message || e}` }
 })
 </script>
 
