@@ -59,15 +59,16 @@ const nodeClass = (i) => {
 const linkDone = (i) => (i + 1) <= currentIndex.value
 
 const badgeClass = computed(() => {
-  const m = { pending: 'pending', running: 'running', completed: 'completed', failed: 'failed' }
+  const m = { pending: 'pending', running: 'running', completed: 'completed', failed: 'failed', interrupted: 'warn' }
   return m[props.status] || 'pending'
 })
 const statusLabel = computed(() => {
-  const m = { pending: '等待中', running: '处理中', completed: '已完成', failed: '失败' }
+  const m = { pending: '等待中', running: '处理中', completed: '已完成', failed: '失败', interrupted: '已中断' }
   return m[props.status] || props.status
 })
 const progressColor = computed(() => {
   if (props.status === 'failed') return 'var(--danger)'
+  if (props.status === 'interrupted') return 'var(--warn)'
   if (props.status === 'completed') return 'var(--success)'
   return 'var(--accent)'
 })

@@ -75,7 +75,7 @@ class ManagedProcessRunner:
         self._cancelled.discard(run_id)
         return ProcessResult(
             returncode=process.returncode if process.returncode is not None else -1,
-            stdout_lines=stdout_lines,
+            stdout_lines=[_redact(line) for line in stdout_lines],
             stderr=_redact(stderr),
             timed_out=timed_out,
             cancelled=cancelled,
@@ -128,11 +128,27 @@ class ManagedProcessRunner:
         runtime_home = getattr(self.sandbox, "runtime_home", None)
         if runtime_home is not None:
             environment["HOME"] = str(runtime_home)
+        proxy_url = getattr(self.sandbox, "proxy_url", None)
+        if proxy_url is not None:
+            environment.update(
+                HTTP_PROXY=proxy_url,
+                HTTPS_PROXY=proxy_url,
+                ALL_PROXY=proxy_url,
+                NO_PROXY="",
+            )
         return environment
 
 
-_SECRET = re.compile(r"(?i)(api[_-]?key|token|secret)=([^\s]+)")
+_SECRETS = (
+    re.compile(r"(?i)(authorization\s*:\s*(?:bearer|basic)\s+)([^\s]+)"),
+    re.compile(r"(?i)(cookie\s*:\s*)([^\r\n]+)"),
+    re.compile(
+        r"(?i)((?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|secret)\s*[:=]\s*)([^\s&]+)"
+    ),
+)
 
 
 def _redact(value: str) -> str:
-    return _SECRET.sub(r"\1=[REDACTED]", value)
+    for pattern in _SECRETS:
+        value = pattern.sub(r"\1[REDACTED]", value)
+    return value

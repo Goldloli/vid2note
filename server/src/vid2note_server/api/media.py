@@ -35,11 +35,14 @@ def media_clip(
     services: ServicesDependency,
     start_ms: int = Query(ge=0),
     end_ms: int = Query(gt=0),
-    buffer_ms: int = Query(default=1500, ge=0, le=30_000),
+    buffer_ms: int | None = Query(default=None, ge=0, le=30_000),
 ):
+    effective_buffer = (
+        buffer_ms if buffer_ms is not None else services.config.load().workspace.clip_buffer_ms
+    )
     return services.media.clip(
         source_id,
         start_ms=start_ms,
         end_ms=end_ms,
-        buffer_ms=buffer_ms,
+        buffer_ms=effective_buffer,
     )

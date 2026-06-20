@@ -19,6 +19,7 @@ class TaskRecord:
     video_file: str | None = None
     audio_file: str | None = None
     srt_file: str | None = None
+    srt_original_name: str | None = None
     txt_file: str | None = None
     pdf_file: str | None = None
     output_file: str | None = None
@@ -63,6 +64,7 @@ class TaskRepository:
             "video_file": kwargs.get("video_file"),
             "audio_file": kwargs.get("audio_file"),
             "srt_file": kwargs.get("srt_file"),
+            "srt_original_name": kwargs.get("srt_original_name"),
             "txt_file": kwargs.get("txt_file"),
             "pdf_file": kwargs.get("pdf_file"),
             "output_file": kwargs.get("output_file"),
@@ -252,6 +254,7 @@ class TaskRepository:
             video_file=row["video_file"],
             audio_file=row["audio_file"],
             srt_file=row["srt_file"],
+            srt_original_name=row["srt_original_name"],
             txt_file=row["txt_file"],
             pdf_file=row["pdf_file"],
             output_file=row["output_file"],

@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "electron:dev": "NODE_ENV=development electron .",
-    "electron:build": "vite build && electron-builder",
+    "electron:build": "uv run --project .. python ../scripts/prepare_package.py && vite build && electron-builder",
+    "test:package": "node tests/package-smoke.js",
     "test:e2e": "playwright test",
     "test:main": "node --test tests/unit/*.test.js",
     "contracts:export": "PYTHONPATH=../core/src:../server/src ../.venv/bin/python ../scripts/export_openapi.py openapi.json",
@@ -18,25 +19,36 @@
     "typecheck": "vue-tsc --noEmit"
   },
   "dependencies": {
+    "@codemirror/lang-markdown": "^6.5.0",
+    "@codemirror/merge": "^6.12.2",
+    "@codemirror/state": "^6.6.0",
+    "@codemirror/view": "^6.43.1",
     "@element-plus/icons-vue": "^2.3.0",
     "axios": "^1.6.0",
+    "dompurify": "^3.4.11",
     "element-plus": "^2.5.0",
+    "markdown-it": "^14.2.0",
     "pinia": "^2.1.0",
     "vue": "^3.4.0",
     "vue-router": "^4.2.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.0",
+    "@types/markdown-it": "^14.1.2",
+    "@types/node": "^24.13.2",
+    "@vitejs/plugin-vue": "^6.0.4",
     "@vue/test-utils": "^2.4.6",
-    "@vitejs/plugin-vue": "^5.0.0",
-    "electron": "^28.0.0",
-    "electron-builder": "^24.0.0",
+    "electron": "^42.4.1",
+    "electron-builder": "^26.15.3",
     "jsdom": "^25.0.1",
     "openapi-typescript": "^7.6.1",
     "typescript": "^5.6.3",
-    "vite": "^5.0.0",
-    "vitest": "^2.1.8",
+    "vite": "^8.0.16",
+    "vitest": "^4.1.9",
     "vue-tsc": "^2.2.0"
+  },
+  "overrides": {
+    "js-yaml": "^4.2.0"
   },
   "build": {
     "appId": "com.vid2note.app",
@@ -52,27 +64,12 @@
     ],
     "extraResources": [
       {
-        "from": "../core",
-        "to": "core-src",
-        "filter": [
-          "src/**/*",
-          "pyproject.toml",
-          "README.md",
-          "!src/**/__pycache__/**",
-          "!src/**/*.pyc",
-          "!src/vid2note_core/asr/bk_asr/**"
-        ]
+        "from": "../THIRD_PARTY_NOTICES.md",
+        "to": "THIRD_PARTY_NOTICES.md"
       },
       {
-        "from": "../server",
-        "to": "server-src",
-        "filter": [
-          "src/**/*",
-          "pyproject.toml",
-          "README.md",
-          "!src/**/__pycache__/**",
-          "!src/**/*.pyc"
-        ]
+        "from": "../python-dist/vid2note",
+        "to": "backend"
       }
     ],
     "mac": {

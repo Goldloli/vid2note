@@ -36,6 +36,7 @@ class TaskResponse(BaseModel):
     video_file: str | None = None
     audio_file: str | None = None
     srt_file: str | None = None
+    srt_original_name: str | None = None
     txt_file: str | None = None
     pdf_file: str | None = None
     output_file: str | None = None

@@ -21,6 +21,7 @@
 </template>
 
 <script setup lang="ts">
+import { onMounted, onUnmounted } from 'vue'
 import AgentPlaceholder from '../components/workspace/AgentPlaceholder.vue'
 import ToolRail from '../components/workspace/ToolRail.vue'
 import WorkspaceMain from '../components/workspace/WorkspaceMain.vue'
@@ -28,4 +29,9 @@ import WorkspaceTree from '../components/workspace/WorkspaceTree.vue'
 import { useWorkspaceStore } from '../stores/workspace'
 
 const store = useWorkspaceStore()
+const closeDrawer = (event: KeyboardEvent): void => {
+  if (event.key === 'Escape' && store.agentDrawer && store.agentOpen) store.agentOpen = false
+}
+onMounted(() => window.addEventListener('keydown', closeDrawer))
+onUnmounted(() => window.removeEventListener('keydown', closeDrawer))
 </script>

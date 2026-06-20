@@ -1,4 +1,7 @@
 import time
+from unittest.mock import AsyncMock
+
+from vid2note_core.agents.models import DetectionResult
 
 
 def _wait_terminal(client, session_id):
@@ -43,6 +46,38 @@ def test_unknown_runtime_is_rejected(client):
         "/api/v1/agent/sessions", json={"runtime_id": "unknown", "context_paths": []}
     )
     assert response.status_code == 404
+
+
+def test_runtime_api_uses_registry_detection_and_preserves_sandbox_guard(client):
+    services = client.app.state.services
+    services.agent_registry.detect = AsyncMock(
+        side_effect=lambda runtime_id: DetectionResult(
+            available=True,
+            version=f"registry-{runtime_id}",
+            auth_status="authenticated",
+        )
+    )
+    services.agent_sessions.runtimes["codex"].detect = AsyncMock(
+        return_value=DetectionResult(
+            available=False,
+            auth_status="unknown",
+            reason="sandbox_unavailable",
+        )
+    )
+
+    response = client.get("/api/v1/agents")
+    codex = next(item for item in response.json() if item["id"] == "codex")
+    created = client.post(
+        "/api/v1/agent/sessions", json={"runtime_id": "codex", "context_paths": []}
+    )
+
+    assert response.status_code == 200
+    assert codex["detection"]["available"] is False
+    assert codex["detection"]["version"] == "registry-codex"
+    assert codex["detection"]["auth_status"] == "authenticated"
+    assert codex["detection"]["reason"] == "sandbox_unavailable"
+    assert created.status_code == 409
+    assert services.agent_registry.detect.await_count == 4
 
 
 def test_sessions_can_be_listed_for_workspace_recovery(client):

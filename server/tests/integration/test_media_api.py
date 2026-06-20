@@ -87,3 +87,18 @@ def test_generated_media_asset_can_be_streamed_but_paths_cannot_escape(client, t
     assert asset.status_code == 200
     assert asset.content == b"rendered"
     assert escaped.status_code == 404
+
+
+def test_clip_uses_configured_default_buffer(client, tmp_path):
+    source = _source_with_media(client, tmp_path)
+    client.app.state.services.media.runner = FakeRunner()
+    client.put("/api/v1/config", json={"clip_buffer_ms": 250})
+
+    response = client.get(
+        "/api/v1/media/clip",
+        params={"source_id": source.source_id, "start_ms": 1000, "end_ms": 3000},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["rendered_start_ms"] == 750
+    assert response.json()["rendered_end_ms"] == 3250

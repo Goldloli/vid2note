@@ -123,6 +123,14 @@ class ServerConfig(BaseModel):
     temp_dir: str = "/tmp/course-doc-generator"
 
 
+class WorkspaceConfig(BaseModel):
+    """Knowledge workspace defaults persisted outside the Markdown Vault."""
+
+    vault_path: str = ""
+    default_runtime: Literal["built-in", "codex", "claude"] = "built-in"
+    clip_buffer_ms: int = Field(default=1500, ge=0, le=30_000)
+
+
 class AppConfig(BaseModel):
     """应用主配置"""
 
@@ -144,6 +152,7 @@ class AppConfig(BaseModel):
     pdf_watermarks: PDFWatermarksConfig = PDFWatermarksConfig()
     default_models: dict = {}
     server: ServerConfig = ServerConfig()
+    workspace: WorkspaceConfig = WorkspaceConfig()
     retention: RetentionConfig = RetentionConfig()
     asr: ASRConfig = ASRConfig()
     run_mode: str = "dev"

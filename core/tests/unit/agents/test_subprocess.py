@@ -10,6 +10,8 @@ FAKE = Path(__file__).parents[2] / "fake_cli" / "fake_agent.py"
 class PassthroughSandbox:
     available = True
     unavailable_reason = None
+    runtime_home = None
+    proxy_url = "http://localhost:43123"
 
     def wrap(self, executable, args):
         return executable, args
@@ -32,6 +34,21 @@ def test_runner_limits_and_redacts_stderr(tmp_path):
     assert result.returncode == 7
     assert len(result.stderr.encode()) <= 65536
     assert "super-secret" not in result.stderr
+
+
+def test_runner_redacts_credentials_from_stdout_stderr_and_urls(tmp_path):
+    runner = ManagedProcessRunner(PassthroughSandbox())
+
+    result = asyncio.run(
+        runner.run("run_secrets", sys.executable, [str(FAKE), "secrets"], "", tmp_path)
+    )
+
+    output = "\n".join([*result.stdout_lines, result.stderr])
+    assert "stdout-token" not in output
+    assert "url-token" not in output
+    assert "stderr-cookie" not in output
+    assert "stderr-key" not in output
+    assert output.count("[REDACTED]") >= 4
 
 
 def test_runner_timeout_terminates_process(tmp_path):
@@ -65,3 +82,16 @@ def test_runner_explicit_cancel_is_distinct_from_failure(tmp_path):
     result = asyncio.run(scenario())
     assert result.cancelled
     assert not result.timed_out
+
+
+def test_runner_passes_only_explicit_auth_and_proxy_environment(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "controlled-key")
+    monkeypatch.setenv("UNRELATED_SECRET", "must-not-pass")
+    runner = ManagedProcessRunner(PassthroughSandbox(), auth_env={"OPENAI_API_KEY"})
+
+    environment = runner._environment()
+
+    assert environment["OPENAI_API_KEY"] == "controlled-key"
+    assert environment["HTTPS_PROXY"] == "http://localhost:43123"
+    assert environment["HTTP_PROXY"] == "http://localhost:43123"
+    assert "UNRELATED_SECRET" not in environment

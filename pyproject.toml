@@ -56,3 +56,8 @@ omit = ["*/tests/*", "*/test_*.py"]
 # 设 75% 为 CI 门限，保证核心逻辑覆盖同时不阻塞无密钥环境。
 fail_under = 75
 show_missing = true
+
+[dependency-groups]
+dev = [
+    "pyinstaller==6.16.0",
+]

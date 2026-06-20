@@ -4,8 +4,9 @@ import asyncio
 
 from fastapi import APIRouter, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
+from vid2note_core.agents.models import DetectionResult
 
-from vid2note_server.dependencies import ServicesDependency
+from vid2note_server.dependencies import Services, ServicesDependency
 from vid2note_server.schemas.agents import (
     AgentMessageRequest,
     AgentRunResponse,
@@ -22,13 +23,12 @@ router = APIRouter(tags=["agents"], responses=ERROR_RESPONSES)
 async def list_agents(services: ServicesDependency):
     results = []
     for runtime_id, descriptor in services.agent_registry.descriptors.items():
-        runtime = services.agent_sessions.runtimes[runtime_id]
         results.append(
             RuntimeResponse(
                 id=runtime_id,
                 label=descriptor.label,
-                detection=await runtime.detect(),
-                capabilities=runtime.capabilities(),
+                detection=await _detect_runtime(runtime_id, services),
+                capabilities=services.agent_registry.capabilities(runtime_id),
             )
         )
     return results
@@ -37,8 +37,7 @@ async def list_agents(services: ServicesDependency):
 @router.post("/agent/sessions", response_model=AgentSessionResponse, status_code=201)
 async def create_session(request: CreateAgentSessionRequest, services: ServicesDependency):
     try:
-        runtime = services.agent_sessions.runtimes[request.runtime_id]
-        detection = await runtime.detect()
+        detection = await _detect_runtime(request.runtime_id, services)
         if not detection.available:
             raise HTTPException(409, detection.reason or "Agent Runtime 不可用")
         return services.agent_sessions.create_session(
@@ -48,6 +47,18 @@ async def create_session(request: CreateAgentSessionRequest, services: ServicesD
         )
     except KeyError as exc:
         raise HTTPException(404, "Agent Runtime 不存在或不可用") from exc
+
+
+async def _detect_runtime(runtime_id: str, services: Services) -> DetectionResult:
+    detection = await services.agent_registry.detect(runtime_id)
+    if not detection.available or runtime_id == "built-in":
+        return detection
+    sandbox = await services.agent_sessions.runtimes[runtime_id].detect()
+    if sandbox.available:
+        return detection
+    return detection.model_copy(
+        update={"available": False, "reason": sandbox.reason or "sandbox_unavailable"}
+    )
 
 
 @router.get("/agent/sessions", response_model=list[AgentSessionResponse])

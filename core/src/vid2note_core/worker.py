@@ -6,7 +6,6 @@ import asyncio
 import contextlib
 import logging
 import os
-import signal
 from collections.abc import Callable
 from datetime import datetime
 
@@ -115,11 +114,6 @@ class TaskWorker:
         self._running = True
         # 启动时恢复上次崩溃留下的 RUNNING 任务（进程被 kill 后未正常关闭）
         await self._recover_stale_tasks()
-        # 注册信号处理：SIGTERM/SIGINT 时优雅关闭
-        loop = asyncio.get_running_loop()
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            with contextlib.suppress(NotImplementedError, RuntimeError):
-                loop.add_signal_handler(sig, lambda: asyncio.create_task(self.stop()))
         self._task = asyncio.create_task(self._loop())
         logger.info("TaskWorker started")
 
