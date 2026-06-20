@@ -1,0 +1,9 @@
+name: reject-stale-base-hash
+classification: enhancement
+action: update
+before_claim: Initial claim.
+after_claim: Stale attempted enhancement.
+stale_base: true
+expected_valid: false
+expected_issue: STALE_BASE_HASH
+expected_source_count: 2

@@ -11,6 +11,7 @@ from unittest.mock import MagicMock
 import pytest
 from vid2note_core.asr.base import ASRResult, ASRSegment
 from vid2note_core.downloaders.base import DownloadResult
+from vid2note_core.events.bus import get_event_bus
 from vid2note_core.pipeline.context import TaskContext
 from vid2note_core.pipeline.real_nodes import (
     RealCleanupNode,
@@ -18,14 +19,22 @@ from vid2note_core.pipeline.real_nodes import (
     RealExtractAudioNode,
     RealMindmapNode,
     RealOrganizeNode,
+    RealProposeWikiChangesNode,
+    RealRegisterSourceNode,
     RealTranscribeNode,
     _asr_result_to_srt,
     _clean_mindmap_output,
     _format_timestamp,
 )
+from vid2note_core.source.registrar import SourceRegistrar
 from vid2note_core.storage.artifact_store import ArtifactStore
 from vid2note_core.storage.db import Database
-from vid2note_core.types import NodeName, NodeStatus, TaskId
+from vid2note_core.storage.task_repo import TaskRecord
+from vid2note_core.types import NodeName, NodeStatus, TaskId, TaskStatus
+from vid2note_core.vault.layout import VaultLayout
+from vid2note_core.vault.repository import VaultRepository
+from vid2note_core.wiki.policy import AutonomyMode
+from vid2note_core.wiki.store import ChangeSetStore
 
 
 @pytest.fixture
@@ -122,6 +131,152 @@ async def test_extract_audio_node_ffmpeg_failure(store):
     result = await node.run(ctx)
     assert result.status == NodeStatus.FAILED
     assert result.error["code"] == "AUDIO_EXTRACT_FAILED"
+
+
+@pytest.mark.asyncio
+async def test_register_source_node_writes_vault_source(store, tmp_path):
+    task_id = "task_abcdef012345"
+    store.write_artifact(
+        task_id,
+        NodeName.TRANSCRIBE.value,
+        "srt_file",
+        b"1\n00:00:01,000 --> 00:00:03,000\nEvidence.\n",
+    )
+    store.write_artifact(
+        task_id,
+        NodeName.ORGANIZE.value,
+        "markdown_file",
+        b"# Summary\n",
+    )
+    repository = MagicMock()
+    repository.get_by_id.return_value = TaskRecord(
+        id=task_id,
+        status=TaskStatus.RUNNING,
+        video_url="https://example.com/watch?v=1",
+    )
+    registrar = SourceRegistrar(VaultLayout.initialize(tmp_path / "vault"))
+    node = RealRegisterSourceNode(registrar=registrar, store=store, repository=repository)
+
+    result = await node.run(TaskContext(task_id=TaskId(task_id)))
+
+    assert result.status == NodeStatus.COMPLETED
+    assert list(registrar.layout.raw.glob("*/source.yaml"))
+    assert store.exists(task_id, NodeName.REGISTER_SOURCE.value, "source_record")
+
+
+@pytest.mark.asyncio
+async def test_register_then_mindmap_progress_never_moves_backwards(store, tmp_path):
+    task_id = "task_abcdef012345"
+    store.write_artifact(
+        task_id,
+        NodeName.TRANSCRIBE.value,
+        "srt_file",
+        b"1\n00:00:00,000 --> 00:00:01,000\nEvidence.\n",
+    )
+    store.write_artifact(task_id, NodeName.ORGANIZE.value, "markdown_file", b"# Summary\n")
+    repository = MagicMock()
+    repository.get_by_id.return_value = TaskRecord(
+        id=task_id,
+        status=TaskStatus.RUNNING,
+        video_url="https://example.com/watch?v=1",
+    )
+    registrar = SourceRegistrar(VaultLayout.initialize(tmp_path / "vault"))
+    register = RealRegisterSourceNode(registrar=registrar, store=store, repository=repository)
+    llm = MagicMock()
+    llm.chat.return_value = "mindmap\n  root((Summary))"
+    mindmap = RealMindmapNode(llm=llm, store=store)
+    queue = get_event_bus().subscribe(task_id)
+
+    try:
+        await register.run(TaskContext(task_id=TaskId(task_id)))
+        await mindmap.run(TaskContext(task_id=TaskId(task_id)))
+        progress = [queue.get_nowait().progress for _ in range(queue.qsize())]
+    finally:
+        get_event_bus().unsubscribe(task_id, queue)
+
+    assert progress == sorted(progress)
+
+
+@pytest.mark.asyncio
+async def test_propose_wiki_changes_node_saves_pending_changeset(store, tmp_path):
+    import json
+    from datetime import UTC, datetime
+
+    from vid2note_core.source.registrar import SourceRegistration
+
+    task_id = "task_abcdef012345"
+    layout = VaultLayout.initialize(tmp_path / "vault")
+    srt = tmp_path / "source.srt"
+    srt.write_text("1\n00:00:01,000 --> 00:00:03,000\nEvidence.\n", encoding="utf-8")
+    note = tmp_path / "note.md"
+    note.write_text("# Evidence\n", encoding="utf-8")
+    record = SourceRegistrar(layout).register(
+        SourceRegistration(
+            task_id=task_id,
+            canonical_url="https://example.com/wiki",
+            title="Wiki evidence",
+            imported_at=datetime(2026, 6, 19, tzinfo=UTC),
+            srt_path=srt,
+            note_path=note,
+        )
+    )
+    store.write_artifact(
+        task_id,
+        NodeName.REGISTER_SOURCE.value,
+        "source_record",
+        record.model_dump_json().encode(),
+    )
+    response = {
+        "classification": "new",
+        "changeset": {
+            "id": "chg_abcdef012345",
+            "created_at": "2026-06-19T00:00:00Z",
+            "source_ids": [record.source_id],
+            "base_revision": "initial",
+            "agent_runtime": "built-in",
+            "summary": "Create Wiki evidence",
+            "operations": [
+                {
+                    "page_id": "concept_wiki_evidence",
+                    "path": "wiki/concepts/wiki-evidence.md",
+                    "action": "create",
+                    "after": "# Wiki evidence\n",
+                    "rationale": "New source",
+                    "citations": [
+                        {"source_id": record.source_id, "start_ms": 1000, "end_ms": 3000}
+                    ],
+                }
+            ],
+            "contradictions": [],
+        },
+    }
+    llm = MagicMock()
+    llm.chat.return_value = json.dumps(response)
+    changesets = ChangeSetStore(layout.root)
+    node = RealProposeWikiChangesNode(
+        llm=llm,
+        store=store,
+        vault=VaultRepository(layout),
+        changesets=changesets,
+    )
+
+    result = await node.run(TaskContext(task_id=TaskId(task_id)))
+
+    assert result.status == NodeStatus.COMPLETED
+    assert changesets.get("chg_abcdef012345") is not None
+    assert result.metadata["changeset_id"] == "chg_abcdef012345"
+
+    applier = MagicMock()
+    auto_node = RealProposeWikiChangesNode(
+        llm=llm,
+        store=store,
+        vault=VaultRepository(layout),
+        changesets=changesets,
+        applier=applier,
+        autonomy_mode_provider=lambda: AutonomyMode.AUTO_REVERTIBLE,
+    )
+    await auto_node.run(TaskContext(task_id=TaskId(task_id)))
+    applier.apply.assert_called_once()
 
 
 # ── TranscribeNode ──────────────────────────────────────────
@@ -231,7 +386,7 @@ async def test_mindmap_node_success(store):
         "task_abcdef012345",
         NodeName.ORGANIZE.value,
         "markdown_file",
-        "# 笔记\n\n- 要点".encode("utf-8"),
+        "# 笔记\n\n- 要点".encode(),
     )
     fake_llm = MagicMock()
     fake_llm.chat.return_value = "mindmap\n  root((主题))\n    要点"
@@ -259,7 +414,7 @@ async def test_mindmap_node_strips_code_fence(store):
         "task_abcdef012345",
         NodeName.ORGANIZE.value,
         "markdown_file",
-        "# 笔记".encode("utf-8"),
+        "# 笔记".encode(),
     )
     fake_llm = MagicMock()
     fake_llm.chat.return_value = "```mermaid\nmindmap\n  root((T))\n```"
@@ -280,7 +435,7 @@ async def test_mindmap_node_llm_failure(store):
         "task_abcdef012345",
         NodeName.ORGANIZE.value,
         "markdown_file",
-        "# 笔记".encode("utf-8"),
+        "# 笔记".encode(),
     )
     fake_llm = MagicMock()
     fake_llm.chat.side_effect = RuntimeError("llm down")
@@ -298,7 +453,7 @@ async def test_mindmap_node_outline_format(store):
         "task_abcdef012345",
         NodeName.ORGANIZE.value,
         "markdown_file",
-        "# 笔记".encode("utf-8"),
+        "# 笔记".encode(),
     )
     fake_llm = MagicMock()
     fake_llm.chat.return_value = "课程主题\n  第一章"

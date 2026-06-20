@@ -8,7 +8,7 @@
           <div class="muted mono-sm" style="margin-top:4px">{{ id }} · {{ task?.video_url || task?.video_file || '—' }}</div>
         </div>
       </div>
-      <div class="row gap-s"><span class="tag">asrtools-b</span><span class="tag">qwen-turbo</span></div>
+      <div class="row gap-s"><span class="tag">{{ task?.asr_provider || 'funasr' }}</span><span class="tag">{{ task?.llm_provider || 'qwen' }}</span></div>
     </div>
     <div class="td-grid">
       <div>
@@ -36,7 +36,7 @@
           <div v-show="tab === 'srt'" style="padding:16px 18px"><pre v-if="artifacts?.srt" class="srt-pre">{{ artifacts.srt }}</pre><div v-else class="muted">暂无转录稿</div></div>
           <div v-show="tab === 'note'" style="padding:18px"><pre v-if="artifacts?.markdown" class="srt-pre note-pre">{{ artifacts.markdown }}</pre><div v-else class="muted">暂无笔记</div></div>
           <div v-show="tab === 'mindmap'" style="padding:18px"><pre v-if="artifacts?.mindmap" class="srt-pre">{{ artifacts.mindmap }}</pre><div v-else class="muted">暂无思维导图</div></div>
-          <div v-show="tab === 'meta'" style="padding:18px"><dl class="kv" v-if="task"><dt>任务 ID</dt><dd>{{ task.id }}</dd><dt>来源</dt><dd>{{ task.video_url || task.video_file || '—' }}</dd><dt>状态</dt><dd>{{ task.status }}</dd><dt>ASR</dt><dd>{{ task.asr_provider || 'asrtools-b' }}</dd><dt>LLM</dt><dd>{{ task.llm_provider || 'qwen' }}</dd></dl></div>
+          <div v-show="tab === 'meta'" style="padding:18px"><dl class="kv" v-if="task"><dt>任务 ID</dt><dd>{{ task.id }}</dd><dt>来源</dt><dd>{{ task.video_url || task.video_file || '—' }}</dd><dt>状态</dt><dd>{{ task.status }}</dd><dt>ASR</dt><dd>{{ task.asr_provider || 'funasr' }}</dd><dt>LLM</dt><dd>{{ task.llm_provider || 'qwen' }}</dd></dl></div>
         </div>
       </div>
       <div class="td-side">
@@ -100,8 +100,8 @@ const lineFillPct = computed(() => {
   return p
 })
 const currentNodeLabel = computed(() => NODES[currentIndex.value]?.name || '—')
-const statusLabel = computed(() => ({ pending: '等待中', running: '处理中', completed: '已完成', failed: '失败', partial: '部分完成' }[task.value?.status] || task.value?.status || '—'))
-const badgeClass = computed(() => ({ pending: 'pending', running: 'running', completed: 'completed', failed: 'failed', partial: 'warn' }[task.value?.status] || 'pending'))
+const statusLabel = computed(() => ({ pending: '等待中', running: '处理中', completed: '已完成', failed: '失败', interrupted: '已中断，可从节点恢复', partial: '部分完成' }[task.value?.status] || task.value?.status || '—'))
+const badgeClass = computed(() => ({ pending: 'pending', running: 'running', completed: 'completed', failed: 'failed', interrupted: 'warn', partial: 'warn' }[task.value?.status] || 'pending'))
 
 const nodeState = (i) => {
   if (progress.value >= TH[i]) return 'done'
@@ -114,7 +114,7 @@ const nodeHint = (i) => nodeState(i) === 'done' ? NODES[i].key + ' ✓' : NODES[
 const nodeTime = (i) => { const s = nodeState(i); return s === 'done' ? '完成' : s === 'active' ? '进行中' : '—' }
 const nodeStateLabel = (i) => ({ done: '完成', active: '运行中', failed: '失败', idle: '等待' }[nodeState(i)] || '等待')
 const nodeBadge = (i) => ({ done: 'completed', active: 'running', failed: 'failed', idle: 'pending' }[nodeState(i)] || 'pending')
-const canRerun = (i) => nodeState(i) === 'failed' || task.value?.status === 'completed' || task.value?.status === 'partial'
+const canRerun = (i) => nodeState(i) === 'failed' || task.value?.status === 'completed' || task.value?.status === 'partial' || task.value?.status === 'interrupted'
 
 const platClass = computed(() => {
   const s = task.value?.video_url || ''
@@ -133,6 +133,7 @@ function _applyEvent(event) {
   if (event.progress !== undefined && task.value) task.value = { ...task.value, progress: event.progress }
   if (event.event_type === 'task.completed' && task.value) { task.value = { ...task.value, status: 'completed', progress: 100 }; _loadResult() }
   if (event.event_type === 'task.failed' && task.value) task.value = { ...task.value, status: 'failed' }
+  if (event.event_type === 'task.interrupted' && task.value) task.value = { ...task.value, status: 'interrupted' }
 }
 async function rerunFrom(nodeKey) { try { await rerunTask(props.id, nodeKey); logs.value = []; _subscribe() } catch (e) {} }
 async function onExportAll() { try { await exportAllArtifacts(props.id) } catch (e) {} }

@@ -8,16 +8,9 @@ from vid2note_core.errors import ASRModelNotFound
 
 
 class ModelManager:
-    def __init__(self, base_dir: Path | None = None):
-        self.base_dir = Path(base_dir or self._default_dir())
+    def __init__(self, base_dir: Path):
+        self.base_dir = Path(base_dir)
         self.base_dir.mkdir(parents=True, exist_ok=True)
-
-    def _default_dir(self) -> Path:
-        import os
-
-        if os.environ.get("VID2NOTE_RUN_MODE") == "electron":
-            return Path.home() / "Library/Application Support/vid2note/models"
-        return Path("data/models")
 
     def list_available(self) -> list[dict]:
         """返回所有支持的模型元数据"""

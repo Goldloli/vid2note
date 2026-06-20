@@ -1,14 +1,14 @@
 """测试数据库管理"""
 
 import sqlite3
-import pytest
+
 from vid2note_core.storage.db import Database
 
 
-def test_singleton():
+def test_database_instances_are_isolated():
     db1 = Database(":memory:")
     db2 = Database(":memory:")
-    assert db1 is db2
+    assert db1 is not db2
 
 
 def test_init_creates_tables(tmp_path):
@@ -40,3 +40,4 @@ def test_migrations_add_mindmap_columns(tmp_path):
         cursor = conn.execute("PRAGMA table_info(tasks)")
         columns = {r[1] for r in cursor.fetchall()}
     assert "mindmap_url" in columns
+    assert {"retry_count", "error_code", "error_retryable", "rerun_from_node"} <= columns

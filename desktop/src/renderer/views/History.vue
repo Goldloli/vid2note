@@ -28,8 +28,8 @@
               <td class="mono-sm muted">{{ task.progress || 0 }}%</td>
               <td class="mono-sm muted">{{ fmtTime(task.created_at) }}</td>
               <td><div class="row gap-xs" style="justify-content:flex-end">
-                <router-link :to="`/tasks/${task.id}`" class="btn btn-sm">详情</router-link>
-                <router-link v-if="task.status === 'completed'" :to="`/note/${task.id}`" class="btn btn-sm">笔记</router-link>
+                <router-link :to="`/workspace/tasks/${task.id}`" class="btn btn-sm">详情</router-link>
+                <router-link v-if="task.status === 'completed'" :to="`/workspace/note/${task.id}`" class="btn btn-sm">笔记</router-link>
               </div></td>
             </tr>
             <tr v-if="!paged.length"><td colspan="5" class="muted" style="text-align:center;padding:24px">暂无任务</td></tr>
@@ -62,6 +62,7 @@ const filters = [
   { key: 'running', label: '进行中' },
   { key: 'completed', label: '已完成' },
   { key: 'failed', label: '失败' },
+  { key: 'interrupted', label: '已中断' },
 ]
 
 const filtered = computed(() => {
@@ -71,17 +72,17 @@ const filtered = computed(() => {
     else list = list.filter((t) => t.status === filter.value)
   }
   const q = query.value.toLowerCase().trim()
-  if (q) list = list.filter((t) => (t.video_url || t.video_file || t.id).toLowerCase().includes(q))
+  if (q) list = list.filter((t) => (t.video_url || t.video_file || t.srt_original_name || t.id).toLowerCase().includes(q))
   return list
 })
 const totalPages = computed(() => Math.ceil(filtered.value.length / pageSize) || 1)
 const paged = computed(() => filtered.value.slice((page.value - 1) * pageSize, page.value * pageSize))
 
-const taskTitle = (t) => { const s = t.video_url || t.video_file || ''; return s.replace(/^https?:\/\//, '').split('/')[0] || t.id }
+const taskTitle = (t) => { const s = t.video_url || t.video_file || t.srt_original_name || ''; return s.replace(/^https?:\/\//, '').split('/')[0] || t.id }
 const platClass = (t) => { const s = t.video_url || ''; if (s.includes('bilibili')||s.includes('b23.tv')) return 'plat-bili'; if (s.includes('youtube')||s.includes('youtu.be')) return 'plat-yt'; return 'plat-file' }
 const platChar = (t) => { const c = platClass(t); return c === 'plat-yt' ? '▶' : c === 'plat-bili' ? 'B' : '▲' }
-const statusLabel = (s) => ({ pending: '等待', running: '进行中', completed: '已完成', failed: '失败', partial: '部分完成' }[s] || s)
-const badgeClass = (s) => ({ pending: 'pending', running: 'running', completed: 'completed', failed: 'failed', partial: 'warn' }[s] || 'pending')
+const statusLabel = (s) => ({ pending: '等待', running: '进行中', completed: '已完成', failed: '失败', interrupted: '已中断', partial: '部分完成' }[s] || s)
+const badgeClass = (s) => ({ pending: 'pending', running: 'running', completed: 'completed', failed: 'failed', interrupted: 'warn', partial: 'warn' }[s] || 'pending')
 const fmtTime = (t) => { if (!t) return '—'; try { return new Date(t).toLocaleString('zh-CN', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }) } catch { return String(t).slice(0,16) } }
 
 onMounted(() => store.loadTasks())

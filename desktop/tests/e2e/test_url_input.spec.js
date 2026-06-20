@@ -15,8 +15,6 @@ test.describe('URL 输入', () => {
     await page.goto('/')
     await page.locator('.input-affix input').fill('not-a-valid-url')
     await page.locator('.input-affix button[type="submit"]').click()
-    await expect(page.locator('.input-affix + p, .page .muted.mono-sm')).toContainText(/URL|http/i).catch(() => {
-      // 允许不同错误提示位置
-    })
+    await expect(page.locator('.input-affix + p')).toContainText(/URL|http/i)
   })
 })

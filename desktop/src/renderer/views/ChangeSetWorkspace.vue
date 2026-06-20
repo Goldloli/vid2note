@@ -1,0 +1,14 @@
+<template><section class="focus-workspace changeset-workspace"><header class="focus-header"><div><small>Wiki Compiler</small><h1>变更审批</h1></div></header><div class="review-grid"><ChangeSetList :items="store.items" /><main v-if="current"><h2>{{ current.summary }}</h2><p v-if="store.error" role="alert">应用失败；选择已保留，可重试或重新生成。</p><ContradictionPanel v-for="(item, index) in current.contradictions" :key="item.topic" :contradiction="item" @choose="contradictionChoices[index] = $event" /><p v-if="contradictionsMissing" role="status">处理全部矛盾后才能批准。</p><p v-else-if="requiresRevision" role="status">该决定不会写入 Wiki；提交后退回 ChangeSet 重新生成。</p><button v-if="requiresRevision" type="button" @click="submitContradictionDecision">提交矛盾处理决定</button><DiffReview :changeset="current" :blocked="approvalBlocked" @approve="approve" /><button type="button" @click="reject">拒绝 ChangeSet</button><button v-if="current.status === 'applied'" type="button" @click="store.revert(current.id)">回滚</button></main><div v-else class="empty-state">选择一个 ChangeSet 查看多文件 Diff。</div></div></section></template>
+<script setup lang="ts">
+import { computed, onMounted, reactive, watch } from 'vue'
+import { useRoute } from 'vue-router'
+import ChangeSetList from '../components/changeset/ChangeSetList.vue'; import ContradictionPanel from '../components/changeset/ContradictionPanel.vue'; import DiffReview from '../components/changeset/DiffReview.vue'
+import { useChangeSetStore } from '../stores/changesets'; import { useVaultStore } from '../stores/vault'
+const route = useRoute(); const store = useChangeSetStore(); const vault = useVaultStore(); const current = computed(() => store.items.find((item) => item.id === route.params.id) ?? store.current)
+const contradictionChoices = reactive<Record<number, string>>({}); const contradictionsMissing = computed(() => Boolean(current.value?.contradictions.some((_item, index) => !contradictionChoices[index]))); const requiresRevision = computed(() => Object.values(contradictionChoices).some((choice) => choice !== 'keep')); const approvalBlocked = computed(() => contradictionsMissing.value || requiresRevision.value)
+async function approve(indexes: number[]): Promise<void> { if (!current.value) return; await store.approve(current.value.id, indexes); await vault.refreshTree(); if (vault.currentPage) await vault.open(vault.currentPage.path) }
+function reject(): void { if (current.value) void store.reject(current.value.id, '用户在工作台拒绝') }
+function submitContradictionDecision(): void { if (current.value) void store.reject(current.value.id, `矛盾处理决定：${JSON.stringify(contradictionChoices)}`) }
+watch(() => route.params.id, (id) => { store.current = store.items.find((item) => item.id === id) ?? null }); onMounted(store.refresh)
+watch(() => current.value?.id, () => { for (const key of Object.keys(contradictionChoices)) delete contradictionChoices[Number(key)] })
+</script>

@@ -21,6 +21,9 @@ class _StubNodeMixin:
     name: NodeName
     """Mixin for stub nodes: publishes events and updates DB."""
 
+    def __init__(self, repository: TaskRepository | None = None) -> None:
+        self.repository = repository
+
     async def _publish(
         self,
         task_id: str,
@@ -48,8 +51,8 @@ class _StubNodeMixin:
     def _update_db(
         self, task_id: str, status: NodeStatus, artifacts: list[str] | None = None
     ) -> None:
-        repo = TaskRepository()
-        repo.update_node(task_id, self.name.value, status, artifacts=artifacts or [])
+        if self.repository is not None:
+            self.repository.update_node(task_id, self.name.value, status, artifacts=artifacts or [])
 
 
 class DownloadNode(PipelineNode, _StubNodeMixin):

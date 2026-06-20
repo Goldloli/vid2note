@@ -1,0 +1,5 @@
+{"type":"thread.started","thread_id":"thread-1"}
+{"type":"item.completed","item":{"type":"reasoning","text":"Inspecting index"}}
+{"type":"item.completed","item":{"type":"agent_message","text":"Compounding rewards patience."}}
+{"type":"item.completed","item":{"type":"file_change","path":"wiki/concepts/topic.md"}}
+{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":5}}

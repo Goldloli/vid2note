@@ -1,5 +1,8 @@
 """产物文件系统存储"""
 
+import errno
+import os
+import shutil
 from pathlib import Path
 
 from vid2note_core.types import NodeName
@@ -10,14 +13,16 @@ _NODE_ORDER = [
     NodeName.EXTRACT_AUDIO,
     NodeName.TRANSCRIBE,
     NodeName.ORGANIZE,
+    NodeName.REGISTER_SOURCE,
+    NodeName.PROPOSE_WIKI_CHANGES,
     NodeName.MINDMAP,
     NodeName.CLEANUP,
 ]
 
 
 class ArtifactStore:
-    def __init__(self, base_dir: Path | None = None):
-        self.base_dir = Path(base_dir or "data/tasks")
+    def __init__(self, base_dir: Path):
+        self.base_dir = Path(base_dir)
         self.base_dir.mkdir(parents=True, exist_ok=True)
 
     def _task_dir(self, task_id: str) -> Path:
@@ -37,6 +42,35 @@ class ArtifactStore:
         path = self.artifact_path(task_id, node, name)
         path.write_bytes(data)
         return path
+
+    def import_file(
+        self,
+        task_id: str,
+        node: str,
+        name: str,
+        source: Path,
+        *,
+        move: bool = False,
+    ) -> Path:
+        self.ensure_task_dir(task_id)
+        destination = self.artifact_path(task_id, node, name)
+        temporary = destination.with_name(f".{destination.name}.tmp")
+        temporary.unlink(missing_ok=True)
+        try:
+            if move:
+                try:
+                    os.replace(source, temporary)
+                except OSError as exc:
+                    if exc.errno != errno.EXDEV:
+                        raise
+                    shutil.copyfile(source, temporary)
+                    source.unlink()
+            else:
+                shutil.copyfile(source, temporary)
+            os.replace(temporary, destination)
+        finally:
+            temporary.unlink(missing_ok=True)
+        return destination
 
     def read_artifact(self, task_id: str, node: str, name: str) -> bytes:
         path = self.artifact_path(task_id, node, name)
@@ -71,3 +105,7 @@ class ArtifactStore:
 
     def exists(self, task_id: str, node: str, name: str) -> bool:
         return self.artifact_path(task_id, node, name).exists()
+
+    def is_complete(self, task_id: str, node: str, name: str) -> bool:
+        path = self.artifact_path(task_id, node, name)
+        return path.is_file() and path.stat().st_size > 0

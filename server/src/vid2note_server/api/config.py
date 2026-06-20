@@ -4,11 +4,23 @@
 不把任何密钥回传给前端。
 """
 
-from fastapi import APIRouter
-from pydantic import BaseModel
-from vid2note_core.config.manager import ConfigManager
+import logging
 
-router = APIRouter(tags=["config"])
+from fastapi import APIRouter, Response
+
+from vid2note_server.dependencies import ServicesDependency
+from vid2note_server.schemas.common import ERROR_RESPONSES
+from vid2note_server.schemas.config import (
+    ConfigResponse,
+    ConfigUpdateResponse,
+    StoreApiKeyRequest,
+    UpdateConfigRequest,
+    VerifyKeyRequest,
+    VerifyKeyResponse,
+)
+
+router = APIRouter(tags=["config"], responses=ERROR_RESPONSES)
+logger = logging.getLogger(__name__)
 
 
 def _safe_config_dump(config) -> dict:
@@ -22,38 +34,25 @@ def _safe_config_dump(config) -> dict:
     return data
 
 
-@router.get("/config")
-async def get_config():
+@router.get("/config", response_model=ConfigResponse)
+async def get_config(services: ServicesDependency):
     """返回当前配置（脱敏，不含密钥）"""
-    manager = ConfigManager()
+    manager = services.config
     config = manager.load()
     return _safe_config_dump(config)
 
 
-class UpdateConfigRequest(BaseModel):
-    """配置更新请求（部分字段）"""
-
-    llm_provider: str | None = None
-    asr_provider: str | None = None
-    # 保留策略（Settings.vue "保留策略" tab）
-    keep_video: bool | None = None
-    keep_audio: bool | None = None
-    keep_srt: bool | None = None
-    keep_markdown: bool | None = None
-    keep_mindmap: bool | None = None
-    # 处理选项
-    language: str | None = None
-    mindmap_format: str | None = None
-
-
-@router.put("/config")
-async def update_config(req: UpdateConfigRequest):
+@router.put("/config", response_model=ConfigUpdateResponse)
+async def update_config(req: UpdateConfigRequest, services: ServicesDependency):
     """更新配置（部分字段），持久化到 yaml"""
-    manager = ConfigManager()
+    manager = services.config
     config = manager.load()
     changed = []
+    if req.autonomy_mode is not None:
+        config.autonomy_mode = req.autonomy_mode
+        changed.append("autonomy_mode")
     if req.llm_provider is not None:
-        config.llm_provider = req.llm_provider  # type: ignore[assignment]
+        config.llm_provider = req.llm_provider
         changed.append("llm_provider")
     if req.asr_provider is not None and config.asr is not None:
         config.asr.provider = req.asr_provider
@@ -76,22 +75,33 @@ async def update_config(req: UpdateConfigRequest):
         changed.append("retention.keep_mindmap")
     # 处理选项
     if req.language is not None:
-        config.processing.language = req.language  # type: ignore[assignment]
+        config.processing.language = req.language
         changed.append("processing.language")
     if req.mindmap_format is not None:
-        config.processing.mindmap_format = req.mindmap_format  # type: ignore[assignment]
+        config.processing.mindmap_format = req.mindmap_format
         changed.append("processing.mindmap_format")
+    if req.vault_path is not None:
+        config.workspace.vault_path = req.vault_path
+        changed.append("workspace.vault_path")
+    if req.default_runtime is not None:
+        config.workspace.default_runtime = req.default_runtime
+        changed.append("workspace.default_runtime")
+    if req.clip_buffer_ms is not None:
+        config.workspace.clip_buffer_ms = req.clip_buffer_ms
+        changed.append("workspace.clip_buffer_ms")
     if changed:
         manager.save(config)
     return {"message": "配置已更新", "changed": changed}
 
 
-class VerifyKeyRequest(BaseModel):
-    provider: str
-    api_key: str
+@router.put("/config/api-key", status_code=204)
+async def store_api_key(req: StoreApiKeyRequest, services: ServicesDependency):
+    """Store one provider credential without returning or writing it to YAML."""
+    services.config.set_api_key(req.provider, req.api_key)
+    return Response(status_code=204)
 
 
-@router.post("/config/verify")
+@router.post("/config/verify", response_model=VerifyKeyResponse)
 async def verify_api_key(req: VerifyKeyRequest):
     """校验 API Key 是否可用（对 LLM provider 做一次最小调用）"""
     from vid2note_core.llm.factory import LLMFactory
@@ -100,5 +110,10 @@ async def verify_api_key(req: VerifyKeyRequest):
         llm = LLMFactory.create(req.provider, {"api_key": req.api_key, "model": "test"})
         llm.chat([{"role": "user", "content": "ping"}], max_tokens=1, timeout=10)
         return {"valid": True}
-    except Exception as e:  # noqa: BLE001
-        return {"valid": False, "error": str(e)}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "API key verification failed provider=%s error_type=%s",
+            req.provider,
+            type(exc).__name__,
+        )
+        return {"valid": False, "error": "API key verification failed"}

@@ -3,6 +3,12 @@ Mock LLM 实现
 用于测试环境，避免真实API调用
 """
 
+import hashlib
+import json
+import re
+
+import yaml
+
 from .base import BaseLLM
 
 
@@ -31,13 +37,19 @@ class MockLLM(BaseLLM):
         # 根据消息内容返回不同的模拟响应
         content = str(messages).lower()
 
-        # 分类请求
-        if "分类" in content or "category" in content:
-            return '{"category": "knowledge", "confidence": 0.95, "reason": "这是知识点内容"}'
+        if "vid2note wiki compiler" in content:
+            return self._generate_mock_wiki_result(messages)
+
+        if "思维导图" in content or "mindmap" in content:
+            return "mindmap\n  root((来源笔记))\n    内容要点\n    证据说明"
 
         # 重组/整理请求
         if "重组" in content or "整理" in content or "markdown" in content:
             return self._generate_mock_markdown(messages)
+
+        # 分类请求
+        if "分类" in content or "category" in content:
+            return '{"category": "knowledge", "confidence": 0.95, "reason": "这是知识点内容"}'
 
         # 过滤请求
         if "过滤" in content or "filter" in content:
@@ -47,48 +59,145 @@ class MockLLM(BaseLLM):
         return "## 整理后的内容\n\n这是Mock LLM生成的测试内容。\n\n### 要点1\n- 内容要点A\n- 内容要点B\n\n### 要点2\n- 内容要点C\n- 内容要点D"
 
     def _generate_mock_markdown(self, messages) -> str:
-        """生成模拟的Markdown内容"""
-        return """## 课程笔记整理
+        """把固定 SRT 输入转为可核验、无补充事实的来源笔记。"""
+        user_content = next(
+            (message["content"] for message in messages if message.get("role") == "user"), ""
+        )
+        if "字幕：\n" in user_content:
+            user_content = user_content.split("字幕：\n", 1)[1]
+        if "\n\n转换为" in user_content:
+            user_content = user_content.rsplit("\n\n转换为", 1)[0]
 
-### 第一部分：概述
+        segments = re.findall(
+            r"\d+\s*\n"
+            r"(\d{2}:\d{2}:\d{2}),\d{3}\s+-->\s+"
+            r"(\d{2}:\d{2}:\d{2}),\d{3}\s*\n"
+            r"(.+?)(?=\n\s*\n\d+\s*\n|\Z)",
+            user_content,
+            flags=re.DOTALL,
+        )
+        lines = ["# 来源笔记", "", "## 内容要点", ""]
+        for start, end, raw_text in segments:
+            text = " ".join(raw_text.split())
+            uncertainty = " **ASR 不确定：**" if "[听不清]" in text else ""
+            lines.append(f"-{uncertainty} {text}（证据：{start}–{end}）")
+        lines.extend(
+            [
+                "",
+                "## 证据说明",
+                "",
+                "以上内容仅重排字幕原文；时间范围来自对应 SRT 片段。",
+            ]
+        )
+        return "\n".join(lines)
 
-本节主要介绍了RAG（检索增强生成）、Function Calling和MCP（模型上下文协议）的概念和应用。
-
-**核心要点：**
-- RAG用于解决大模型预训练数据之外的知识问题
-- Function Calling允许大模型调用外部API
-- MCP是一种统一的外部系统调用协议
-
-### 第二部分：RAG详解
-
-RAG（Retrieval-Augmented Generation）通过将用户查询与知识库匹配，增强大模型的回答能力。
-
-**适用场景：**
-1. 企业内部知识问答
-2. 产品文档查询
-3. 规章制度检索
-
-### 第三部分：Function Calling
-
-Function Calling让大模型能够调用外部函数获取实时数据。
-
-**典型应用：**
-- 订单查询
-- 天气查询
-- 数据库操作
-
-### 第四部分：MCP协议
-
-MCP（Model Context Protocol）是Anthropic提出的开放标准，用于统一AI与外部系统的集成。
-
-**优势：**
-- 统一接口标准
-- 降低开发成本
-- 提高可维护性
-
----
-
-*本内容由AI自动生成，仅供参考*"""
+    @staticmethod
+    def _generate_mock_wiki_result(messages: list[dict[str, str]]) -> str:
+        request = json.loads(messages[-1]["content"])
+        source = request["source"]
+        source_id = source["source_id"]
+        evidence = re.search(
+            rf"vid2note://source/{re.escape(source_id)}\?start=(\d+)&end=(\d+)",
+            request["source_note"]["content"],
+        )
+        start_ms = int(evidence.group(1)) if evidence else 0
+        end_ms = int(evidence.group(2)) if evidence else max(1, source["duration_ms"])
+        page_id = f"concept_{source_id.rsplit('_', 1)[-1]}"
+        title = source["title"] or "Imported knowledge"
+        imported_date = source["imported_at"][:10]
+        related_pages = request.get("related_pages") or []
+        if related_pages:
+            related = related_pages[0]
+            frontmatter = dict(related.get("frontmatter") or {})
+            sources = [item for item in frontmatter.get("sources", []) if isinstance(item, str)]
+            if source_id not in sources:
+                sources.append(source_id)
+            frontmatter["sources"] = sources
+            frontmatter["updated_at"] = imported_date
+            body = related["content"]
+            if body.startswith("---\n") and "\n---\n" in body[4:]:
+                body = body.split("\n---\n", 1)[1]
+            body = body.rstrip() + (
+                f"\n- 来源证据 [时间片段](vid2note://source/{source_id}?start={start_ms}&end={end_ms})\n"
+            )
+            after = (
+                "---\n"
+                + yaml.safe_dump(frontmatter, allow_unicode=True, sort_keys=False)
+                + "---\n"
+                + body
+            )
+            payload = {
+                "classification": "enhancement",
+                "changeset": {
+                    "id": f"chg_{hashlib.sha256(source_id.encode()).hexdigest()[:12]}",
+                    "created_at": source["imported_at"],
+                    "source_ids": [source_id],
+                    "base_revision": related["content_hash"],
+                    "agent_runtime": "built-in-mock",
+                    "summary": f"Enhance compiled page with {title}",
+                    "operations": [
+                        {
+                            "page_id": frontmatter["id"],
+                            "path": related["path"],
+                            "base_hash": related["content_hash"],
+                            "action": "update",
+                            "before": related["content"],
+                            "after": after,
+                            "rationale": "Related source evidence",
+                            "citations": [
+                                {"source_id": source_id, "start_ms": start_ms, "end_ms": end_ms}
+                            ],
+                        }
+                    ],
+                    "contradictions": [],
+                },
+            }
+            return json.dumps(payload, ensure_ascii=False)
+        path = f"wiki/concepts/{page_id.removeprefix('concept_')}.md"
+        after = (
+            "---\n"
+            f"id: {page_id}\n"
+            f"title: {json.dumps(title, ensure_ascii=False)}\n"
+            "page_type: concept\n"
+            "status: active\n"
+            f"sources:\n  - {source_id}\n"
+            f"created_at: {imported_date}\n"
+            f"updated_at: {imported_date}\n"
+            "---\n\n"
+            f"# {title}\n\n"
+            f"- 来源证据 [时间片段](vid2note://source/{source_id}?start={start_ms}&end={end_ms})\n"
+        )
+        payload = {
+            "classification": "new",
+            "changeset": {
+                "id": f"chg_{hashlib.sha256(source_id.encode()).hexdigest()[:12]}",
+                "created_at": source["imported_at"],
+                "source_ids": [source_id],
+                "base_revision": "index-first",
+                "agent_runtime": "built-in-mock",
+                "summary": f"Create compiled page for {title}",
+                "operations": [
+                    {
+                        "page_id": page_id,
+                        "path": path,
+                        "base_hash": None,
+                        "action": "create",
+                        "before": None,
+                        "after": after,
+                        "rationale": "New source evidence",
+                        "citations": [
+                            {
+                                "source_id": source_id,
+                                "start_ms": start_ms,
+                                "end_ms": end_ms,
+                            }
+                        ],
+                    }
+                ],
+                "contradictions": [],
+            },
+        }
+        return json.dumps(payload, ensure_ascii=False)
 
     def reset(self):
         """重置计数器"""

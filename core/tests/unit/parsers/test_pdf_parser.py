@@ -1,6 +1,7 @@
 """测试 PDF 解析器"""
 
 from unittest.mock import MagicMock, patch
+
 from vid2note_core.parsers.pdf_parser import PDFParser
 
 

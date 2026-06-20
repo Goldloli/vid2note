@@ -7,7 +7,9 @@ ffmpeg 为外部二进制，CI 环境可能未安装。测试用 mock 注入，
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 from vid2note_core.audio.extractor import AudioExtractor
+from vid2note_core.errors import DownloadError
 
 
 def test_extract_success(tmp_path):
@@ -39,8 +41,6 @@ def test_extract_failure(tmp_path):
     ):
         mock_run.return_value = MagicMock(returncode=1, stderr="error")
         extractor = AudioExtractor()
-        try:
+        with pytest.raises(DownloadError) as exc_info:
             extractor.extract(Path("/tmp/video.mp4"), tmp_path)
-            assert False, "should raise"
-        except Exception as e:
-            assert "AUDIO_EXTRACT_FAILED" in str(e) or "ffmpeg" in str(e)
+        assert exc_info.value.code == "AUDIO_EXTRACT_FAILED"

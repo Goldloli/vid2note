@@ -161,9 +161,8 @@ def test_resolve_bvid_video_not_found():
         mock.get("https://api.bilibili.com/x/web-interface/view").respond(
             json={"code": -404, "message": "视频不存在"}
         )
-        with httpx.Client() as client:
-            with pytest.raises(DownloadError, match="解析视频信息失败"):
-                _resolve_bvid(client, "BV0000000000")
+        with httpx.Client() as client, pytest.raises(DownloadError, match="解析视频信息失败"):
+            _resolve_bvid(client, "BV0000000000")
 
 
 # ── buvid 获取 ─────────────────────────────────────────
