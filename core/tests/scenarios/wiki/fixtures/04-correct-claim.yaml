@@ -1,7 +1,0 @@
-name: correct-claim
-classification: correction
-action: update
-before_claim: Earlier claim A.
-after_claim: "Earlier claim A. Correction: claim B is supported by newer evidence."
-expected_valid: true
-expected_source_count: 2

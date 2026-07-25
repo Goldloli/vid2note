@@ -1,7 +1,0 @@
-name: create-concept
-classification: new
-action: create
-before_claim: null
-after_claim: Initial evidence-backed claim.
-expected_valid: true
-expected_source_count: 1

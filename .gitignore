@@ -1,40 +1,23 @@
-__pycache__/
-*.pyc
-*.pyo
-.venv/
-.env
-*.db
-*.db-journal
-htmlcov/
-.coverage
-coverage.xml
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-
-node_modules/
-dist/
-build/
-dist-electron/
-python-dist/
-*.dmg
-*.app
-
-# 外部二进制（由 scripts/fetch_binaries.sh 拉取，不入库）
-scripts/bin/
-
-data/
-logs/
-output/
-models/
-config/config.yaml
-
-# 评估报告（运行时生成）
-tests/fixtures/eval-report.json
-
-# 前端设计模板（HTML 原型，不入库）
+# 保留的前端模板设计素材（不入 git）
 前端模板设计/
 
-.idea/
-.vscode/
-*.swp
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.coverage
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+dist-electron-v*/
+
+# 运行时数据
+data/
+logs/
+.env
