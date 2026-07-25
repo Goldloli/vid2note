@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "vid2note",
+  "project_id": "4918a040-eb41-43f1-b77f-b64b3224448a"
+}
