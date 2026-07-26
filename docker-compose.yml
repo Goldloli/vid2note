@@ -1,0 +1,15 @@
+services:
+  vid2note:
+    build: .
+    container_name: vid2note
+    ports:
+      - "8761:8765"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - DATA_ROOT=/app/data
+      - DB_PATH=/app/data/tasks.db
+      - LLM_PROVIDER=${LLM_PROVIDER:-deepseek}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - DEEPSEEK_MODEL=${DEEPSEEK_MODEL:-deepseek-v4-flash}
+    restart: unless-stopped

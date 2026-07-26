@@ -1,0 +1,31 @@
+# FastAPI and Server
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+python-multipart==0.0.6
+python-dotenv==1.0.0
+
+# CORS
+starlette==0.35.0
+
+# LLM APIs
+openai==1.10.0
+
+# File Parsing
+PyMuPDF==1.23.8
+Pillow==10.2.0
+
+# Configuration and Validation
+pydantic==2.5.3
+pydantic-settings==2.1.0
+PyYAML==6.0.1
+
+# Utilities
+aiofiles==23.2.1
+httpx==0.26.0
+requests==2.31.0
+pypdf==4.0.0
+slowapi==0.1.9
+
+# vid2note v1 新增 —— 视频下载与 SSE 实时推送
+yt-dlp>=2024.0.0
+sse-starlette>=2.0.0
