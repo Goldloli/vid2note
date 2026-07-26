@@ -16,6 +16,7 @@ __pycache__/
 # Node
 node_modules/
 dist-electron-v*/
+frontend/dist/
 
 # 运行时数据
 data/
@@ -27,3 +28,12 @@ logs/
 *.db
 .beads-credential-key
 .beads/proxieddb/
+
+# 本地工具索引(codegraph)
+.codegraph/
+
+# 基底遗留配置(含真实 API key;v1 用 SQLite settings,不入 git)
+config/config.yaml
+
+# beads 任务数据(本地,不上传)
+.beads/

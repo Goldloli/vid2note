@@ -1,0 +1,49 @@
+schema: spec-driven
+
+context: |
+  # vid2note —— 视频 → Markdown 笔记 + 思维导图的本地工具
+
+  ## 产品形态(第一版)
+  Docker 部署的 Web 应用,浏览器访问 localhost:8765,个人本地自用,无登录。
+  不在 v1 范围(以后版本):Electron 客户端、扫码登录、远程/多用户、GPU/MLX 加速、交互式思维导图页。
+
+  ## 技术栈
+  - 后端: Python 3 + FastAPI。基底 = fork 自 ai_srt2md(/Volumes/worknie/Desktop/ai_code/ai_srt2md)改造。
+    ai_srt2md 已具备: FastAPI:8765 + SQLite + 7 家 LLM 适配(OpenAI 兼容协议) + PDF 讲义对照(pypdf)
+    + 思维导图(XMind/PNG) + prompt 库(restructure/generate_directly/generate_with_pdf_reference/classify)
+    + 提示词注入防护 + SRT 校验。
+  - 前端: Vue3(沿用 ai_srt2md 前端骨架),UI 换成 `前端模板设计/59ade7a1-996f-4fb4-b292-65c36be3d549/` 下的
+    高保真原型(6 个 HTML 页:主控台/任务详情/笔记/思维导图/历史/设置)。
+  - 部署: docker compose up;SQLite + Docker volume 持久化。
+
+  ## 外部工具依赖
+  - yt-dlp: 下载整段高清视频(最高画质);bilibili 需 cookie(SESSDATA / bili_jct / DedeUserID)。
+  - ffmpeg: 提取音频;视频按时间点截图。
+  - AsrTools (bk_asr): 在线 ASR(剪映/必剪/快手),纯 HTTP,无需 GPU。
+  - whisper.cpp: 本地 ASR(CPU + int8 量化);长音频 VAD 切片并行 + 时间戳偏移拼回。留"外部 ASR endpoint"扩展位。
+  - MinerU: PDF 版面结构化拆解(公式 LaTeX / 表格 HTML / 版面还原),可选;CPU pipeline 模式,留 GPU 扩展位。
+
+  ## 六步流水线
+  下载 → 提取音频 → ASR 转录 → LLM 整理笔记(+可选截图嵌入) → 思维导图 → 清理。
+  字幕来源一律走 ASR(不做官方字幕分支)。默认 LLM = DeepSeek deepseek-v4-flash。
+
+  ## 关键功能要点
+  - 截图嵌 md(可开关,默认关):开启时字幕带时间戳喂 LLM,LLM 在"需图/重要"处输出标记 [IMG:ts],
+    后端去整段视频截该秒的帧替换成 markdown 图片;纯文本 LLM 猜测精度,以后不准再优化。
+  - PDF 讲义对照:两方案(简单 pypdf / MinerU 拆解),设置可选。
+  - 思维导图: v1 仅导出 xmind/png/md 大纲。
+  - 产物保留:每种产物(视频/音频/SRT/笔记/截图)各自独立可配 永久/7天/30天。
+  - 并发任务: 1~3 可配,默认 1。
+
+  ## 约定
+  - 所有用户可见文本(代码注释、文档、UI 文案)用中文。
+  - 任务追踪用 bd (beads);不用 TodoWrite/TaskCreate/markdown TODO。
+  - 保守 git 档: 不 commit/push/dolt sync,除非明确授权。
+
+rules:
+  proposal:
+    - 必含 Non-goals 段(明确 v1 不做什么)。
+    - 明确"复用 ai_srt2md 现有能力"与"新增/改造"的边界。
+  tasks:
+    - 按流水线阶段分组(骨架/下载/ASR/笔记/导图/PDF/前端/设置)。
+    - 每个任务可独立验证。

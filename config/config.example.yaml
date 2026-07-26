@@ -1,0 +1,50 @@
+# vid2note 基底(ai_srt2md)配置模板 —— 凭证已置空,真实值勿提交。
+# 注:v1 运行时主要用 SQLite settings(经 Web「设置」页),本文件为基底兼容保留。
+advanced:
+  chunk_size: 4000
+  max_retries: 3
+  temperature: 0.3
+baidu:
+  api_key: ''
+  base_url: https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop
+  model: ernie-bot-4
+  secret_key: ''
+deepseek:
+  api_key: ''
+  base_url: https://api.deepseek.com/v1
+  model: deepseek-chat
+default_models:
+  glm: glm-4-flash
+  qwen: qwen-plus
+doubao:
+  api_key: ''
+  base_url: https://ark.cn-beijing.volces.com/api/v3
+  model: doubao-pro-4k
+glm:
+  api_key: ''
+  base_url: https://open.bigmodel.cn/api/paas/v4/
+  model: glm-4-flash
+llm_provider: deepseek
+minimax:
+  api_key: ''
+  base_url: https://api.minimax.chat/v1
+  group_id: ''
+  model: abab6.5-chat
+moonshot:
+  api_key: ''
+  base_url: https://api.moonshot.cn/v1
+  model: moonshot-v1-8k
+processing:
+  extract_images: false
+  image_quality: medium
+  language: zh
+  output_format: markdown
+qwen:
+  api_key: ''
+  base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  model: qwen-plus
+server:
+  debug: false
+  host: 0.0.0.0
+  port: 8765
+version: '1.0'
