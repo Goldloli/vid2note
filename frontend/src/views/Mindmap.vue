@@ -68,7 +68,7 @@ async function renderMap() {
   } catch (e) { errMsg.value = i18n.global.t('mindmap.renderFail') + e.message }
 }
 function zoomBy(d) { scale.value = Math.min(3, Math.max(0.2, +(scale.value + d).toFixed(2))) }
-function onWheel(e) { zoomBy(e.deltaY < 0 ? 0.1 : -0.1) }
+function onWheel(e) { const f = Math.exp(-e.deltaY * 0.001); scale.value = Math.min(3, Math.max(0.2, +(scale.value * f).toFixed(3))) }
 function pan(dx, dy) { tx.value += dx; ty.value += dy }
 function fit() { scale.value = 1; tx.value = 0; ty.value = 0; mm && mm.fit() }
 function center() { scale.value = 1; tx.value = 0; ty.value = 0; mm && mm.rescale() }
