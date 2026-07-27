@@ -22,7 +22,7 @@
         </div>
       </div>
 
-      <div class="pdf-row">
+      <div class="pdf-row" v-if="tab==='file'">
         <span class="kicker">{{ $t('console.pdfLecture') }}</span>
         <div class="row gap-s" style="align-items:center;margin-top:6px">
           <label class="btn btn-sm file-pick">
