@@ -55,8 +55,7 @@ function exportLabel(fmt) { return { xmind: 'mindmap.exportXmind', png: 'mindmap
 async function loadTask() { try { task.value = await getTask(id) } catch (e) {} }
 async function loadNote() { const res = await fetch(getProductUrl(id, 'note')); if (!res.ok) throw new Error(i18n.global.t('mindmap.noteNotReady')); return await res.text() }
 async function loadOutline() {
-  const mdIdx = formats.value.indexOf('md')
-  if (mdIdx >= 0) { try { const res = await fetch(getProductUrl(id, 'mindmap') + `?index=${mdIdx}`); if (res.ok) { outline.value = await res.text(); return } } catch (e) {} }
+  // 大纲从笔记标题层级解析(mindmap.md 是笔记完整副本,不是大纲,会导致显示错误)
   try { outline.value = outlineFromNote(await loadNote()) } catch (e) { outline.value = '' }
 }
 function outlineFromNote(md) { const out = []; for (const ln of md.split('\n')) { const m = ln.match(/^(#{1,4})\s+(.*)$/); if (m) { out.push('  '.repeat(m[1].length - 1) + '- ' + m[2].trim()) } } return out.join('\n') }

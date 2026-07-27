@@ -82,8 +82,7 @@ async function renderMap(id) {
   } catch (e) { errMsg.value = i18n.global.t('mindmap.renderFail') + e.message }
 }
 async function loadOutline(id) {
-  const mdIdx = (task.value?.mindmap_formats || []).indexOf('md')
-  if (mdIdx >= 0) { try { const res = await fetch(mmUrl(mdIdx)); if (res.ok) { outline.value = await res.text(); return } } catch (e) {} }
+  // 大纲从笔记标题层级解析(mindmap.md 是笔记完整副本,不是大纲)
   try { outline.value = outlineFromNote(await fetchNote(id)) } catch (e) { outline.value = '' }
 }
 function outlineFromNote(md) { const out = []; for (const ln of md.split('\n')) { const m = ln.match(/^(#{1,4})\s+(.*)$/); if (m) { out.push('  '.repeat(m[1].length - 1) + '- ' + m[2].trim()) } } return out.join('\n') }
