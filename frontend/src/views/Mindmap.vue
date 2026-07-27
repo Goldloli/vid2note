@@ -1,10 +1,14 @@
 <template>
   <div class="page">
-    <div class="spread" style="margin-bottom:14px">
+    <div class="spread" style="margin-bottom:14px;flex-wrap:wrap;gap:8px">
       <strong>{{ $t('mindmap.title') }}</strong>
       <div class="row gap-s">
         <button class="btn btn-sm" @click="zoomBy(0.2)">{{ $t('mindmap.zoomIn') }}</button>
         <button class="btn btn-sm" @click="zoomBy(-0.2)">{{ $t('mindmap.zoomOut') }}</button>
+        <button class="btn btn-sm" @click="pan(0,-60)" title="上">↑</button>
+        <button class="btn btn-sm" @click="pan(0,60)" title="下">↓</button>
+        <button class="btn btn-sm" @click="pan(-60,0)" title="左">←</button>
+        <button class="btn btn-sm" @click="pan(60,0)" title="右">→</button>
         <button class="btn btn-sm" @click="fit">{{ $t('mindmap.fit') }}</button>
         <button class="btn btn-sm" @click="center">{{ $t('mindmap.center') }}</button>
         <span class="muted mono-sm">{{ Math.round(scale * 100) }}%</span>
@@ -16,7 +20,7 @@
     </div>
     <div :class="['mm-layout', view]">
       <div v-if="view !== 'text'" class="card mm-viewport">
-        <div class="mm-scaler" :style="{ transform: `scale(${scale})` }"><svg ref="svgRef" class="markmap"></svg></div>
+        <div class="mm-scaler" :style="{ transform: `translate(${tx}px, ${ty}px) scale(${scale})` }"><svg ref="svgRef" class="markmap"></svg></div>
         <div v-if="!ready" class="muted mono-sm" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">{{ errMsg || $t('mindmap.rendering') }}</div>
       </div>
       <aside v-if="view !== 'map'" class="card mm-outline">
@@ -39,7 +43,9 @@ import { useRoute } from 'vue-router'
 import { getProductUrl, getTask } from '@/api'
 import { i18n } from '@/i18n'
 const id = useRoute().params.id
-const svgRef = ref(null); const ready = ref(false); const errMsg = ref(''); const scale = ref(1); const outline = ref(''); const task = ref({}); const view = ref('split')
+const svgRef = ref(null); const ready = ref(false); const errMsg = ref('')
+const scale = ref(1); const tx = ref(0); const ty = ref(0)
+const outline = ref(''); const task = ref({}); const view = ref('split')
 let mm = null
 const formats = computed(() => task.value?.mindmap_formats || [])
 const exportEntries = computed(() => formats.value.map((fmt, i) => ({ fmt, i })))
@@ -51,19 +57,20 @@ async function loadOutline() {
   if (mdIdx >= 0) { try { const res = await fetch(getProductUrl(id, 'mindmap') + `?index=${mdIdx}`); if (res.ok) { outline.value = await res.text(); return } } catch (e) {} }
   try { outline.value = outlineFromNote(await loadNote()) } catch (e) { outline.value = '' }
 }
-function outlineFromNote(md) { const out = []; for (const ln of md.split('\n')) { const m = ln.match(/^(#{1,4})\s+(.*)$/); if (m) { const d = m[1].length; out.push('  '.repeat(d - 1) + '- ' + m[2].trim()) } } return out.join('\n') }
+function outlineFromNote(md) { const out = []; for (const ln of md.split('\n')) { const m = ln.match(/^(#{1,4})\s+(.*)$/); if (m) { out.push('  '.repeat(m[1].length - 1) + '- ' + m[2].trim()) } } return out.join('\n') }
 async function renderMap() {
   try {
     const md = await loadNote()
     const [{ Transformer }, { Markmap }] = await Promise.all([import('markmap-lib'), import('markmap-view')])
     const { root } = new Transformer().transform(md)
-    mm = Markmap.create(svgRef.value, { initialExpandLevel: 2, zoom: false, duration: 300, padding: 16 }, root)
+    mm = Markmap.create(svgRef.value, { initialExpandLevel: -1, zoom: false, duration: 300, padding: 16 }, root)
     ready.value = true
   } catch (e) { errMsg.value = i18n.global.t('mindmap.renderFail') + e.message }
 }
-function zoomBy(delta) { scale.value = Math.min(2, Math.max(0.4, +(scale.value + delta).toFixed(2))) }
-function fit() { scale.value = 1; mm && mm.fit() }
-function center() { scale.value = 1; mm && mm.rescale() }
+function zoomBy(d) { scale.value = Math.min(2, Math.max(0.4, +(scale.value + d).toFixed(2))) }
+function pan(dx, dy) { tx.value += dx; ty.value += dy }
+function fit() { scale.value = 1; tx.value = 0; ty.value = 0; mm && mm.fit() }
+function center() { scale.value = 1; tx.value = 0; ty.value = 0; mm && mm.rescale() }
 onMounted(async () => { await loadTask(); await Promise.all([renderMap(), loadOutline()]) })
 onBeforeUnmount(() => mm && mm.destroy())
 </script>

@@ -238,6 +238,14 @@ def _make_executors(
             download_video(ctx_ext, source_url, source_type, cookies)
         except IngestCancelled as exc:
             raise PipelineCancelled() from exc
+        # 视频标题存 task.title(列表统一命名用;openspec change frontend-fix-naming-mindmap)
+        _vt = getattr(ctx_ext, "_video_title", None)
+        if _vt and repo is not None:
+            try:
+                repo.update(task_id, title=_vt)
+                task.title = _vt
+            except Exception:  # noqa: BLE001
+                logger.debug("更新视频标题失败 task=%s", task_id, exc_info=True)
 
     # ---------------- extract_audio ----------------
     def _extract_audio(ctx: Any) -> None:
