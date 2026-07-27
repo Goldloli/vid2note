@@ -20,7 +20,7 @@
         <button class="btn btn-sm" @click="fit">{{ $t('mindmap.fit') }}</button>
         <span class="muted mono-sm">{{ Math.round(scale * 100) }}%</span>
       </div>
-      <div class="card mm-viewport" @mousedown.middle.prevent="startPan">
+      <div class="card mm-viewport" @mousedown.middle.prevent="startPan" @wheel.prevent="onWheel">
         <div class="mm-scaler" :style="{ transform: `translate(${tx}px, ${ty}px) scale(${scale})` }"><svg ref="svgRef" class="markmap"></svg></div>
         <div v-if="!ready" class="muted mono-sm" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">{{ errMsg || $t('mindmap.rendering') }}</div>
       </div>
@@ -85,7 +85,8 @@ async function loadOutline(id) {
   try { outline.value = outlineFromNote(await fetchNote(id)) } catch (e) { outline.value = '' }
 }
 function outlineFromNote(md) { const out = []; for (const ln of md.split('\n')) { const m = ln.match(/^(#{1,4})\s+(.*)$/); if (m) { out.push('  '.repeat(m[1].length - 1) + '- ' + m[2].trim()) } } return out.join('\n') }
-function zoomBy(d) { scale.value = Math.min(2, Math.max(0.4, +(scale.value + d).toFixed(2))) }
+function zoomBy(d) { scale.value = Math.min(3, Math.max(0.2, +(scale.value + d).toFixed(2))) }
+function onWheel(e) { zoomBy(e.deltaY < 0 ? 0.1 : -0.1) }
 function pan(dx, dy) { tx.value += dx; ty.value += dy }
 function fit() { scale.value = 1; tx.value = 0; ty.value = 0; mm && mm.fit() }
 // 鼠标中键按下拖动平移
@@ -110,8 +111,8 @@ onBeforeUnmount(() => { mm && mm.destroy(); clearTimeout(dt) })
 .br-mid { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .mm-toolbar { margin-bottom: 8px; }
 .mm-viewport { flex: 1; position: relative; overflow: hidden; }
-.mm-scaler { width: 100%; height: 100%; transform-origin: center center; transition: transform .2s; }
-.markmap { width: 100%; height: 100%; display: block; }
+.mm-scaler { width: 100%; height: 100%; transform-origin: center center; transition: transform .2s; overflow: visible; }
+.markmap { width: 100%; height: 100%; display: block; overflow: visible; }
 .br-right { width: 280px; flex: none; display: flex; flex-direction: column; }
 .br-tabs { display: flex; gap: 6px; margin-bottom: 10px; }
 .br-tab-body { flex: 1; overflow: auto; }
