@@ -86,7 +86,7 @@ async function loadOutline(id) {
 }
 function outlineFromNote(md) { const out = []; for (const ln of md.split('\n')) { const m = ln.match(/^(#{1,4})\s+(.*)$/); if (m) { out.push('  '.repeat(m[1].length - 1) + '- ' + m[2].trim()) } } return out.join('\n') }
 function zoomBy(d) { scale.value = Math.min(3, Math.max(0.2, +(scale.value + d).toFixed(2))) }
-function onWheel(e) { zoomBy(e.deltaY < 0 ? 0.1 : -0.1) }
+function onWheel(e) { const f = Math.exp(-e.deltaY * 0.001); scale.value = Math.min(3, Math.max(0.2, +(scale.value * f).toFixed(3))) }
 function pan(dx, dy) { tx.value += dx; ty.value += dy }
 function fit() { scale.value = 1; tx.value = 0; ty.value = 0; mm && mm.fit() }
 // 鼠标中键按下拖动平移
