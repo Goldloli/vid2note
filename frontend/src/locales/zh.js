@@ -58,7 +58,7 @@ export default {
     title: 'ASR 引擎', current: '当前默认', setDefault: '设为默认',
     test: '测试连通性', testing: '测试中…',
     strategy: '引擎策略',
-    strategyHint: '在线优先:必剪云接口失败时自动降级 Whisper 本地;指定单一:只用默认引擎,不降级。',
+    strategyHint: '在线优先:线上免费接口失败时自动降级 Whisper 本地;指定单一:只用默认引擎,不降级。',
     externalTitle: '外部 ASR endpoint(选「外部 ASR」或在线优先降级时使用)',
     endpointPh: 'https://my-asr.example.com/asr', apiKeyPh: 'API Key(可选)',
     maskedHint: '已保存的配置因含密钥已脱敏,留空保存则不修改原值;如需改动请重新填写。',

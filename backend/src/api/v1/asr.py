@@ -1,7 +1,7 @@
 """``GET/POST /api/v1/asr`` —— ASR 引擎状态与连通性测试(openspec change asr-management-page)。
 
 - ``GET /asr/status``:三引擎就绪态(读 settings + 文件系统检查,无副作用,秒回)。
-- ``POST /asr/test {engine}``:连通性测试——必剪云接口探活签名服务 / whisper 检查模型 / external
+- ``POST /asr/test {engine}``:连通性测试——线上免费接口探活签名服务 / whisper 检查模型 / external
   探活 endpoint,统一返回 ``{ok, latency_ms, message}``。**不做真实音频转录**(v1 边界)。
 
 端点用同步 ``def``(非 async):内部用同步 ``requests``,FastAPI 自动放线程池执行,不阻塞事件循环。
@@ -71,7 +71,7 @@ def asr_test(req: AsrTestRequest) -> Dict[str, Any]:
     start = time.perf_counter()
     try:
         if engine == "asrtools":
-            ok, msg = _probe_asrtools(cfg)
+            ok, msg = _probe_online(cfg)
         elif engine == "whisper_cpp":
             ok, msg = _probe_whisper(cfg)
         else:
@@ -86,22 +86,22 @@ def asr_test(req: AsrTestRequest) -> Dict[str, Any]:
     }
 
 
-def _probe_asrtools(cfg: AsrConfig) -> Tuple[bool, str]:
-    """对必剪云接口签名服务发轻量 POST 探活(不传音频)。"""
+def _probe_online(cfg: AsrConfig) -> Tuple[bool, str]:
+    """对线上免费接口签名服务发轻量 POST 探活(不传音频)。"""
     data = {"url": "/", "current_time": str(int(time.time())), "pf": "4", "appvr": "4.0.0", "tdid": "0" * 12}
     try:
         resp = requests.post(cfg.asrtools_sign_endpoint, json=data, timeout=_PROBE_TIMEOUT)
     except requests.exceptions.Timeout:
-        return False, "必剪云接口签名服务超时(>8s)"
+        return False, "线上免费接口签名服务超时(>8s)"
     except requests.exceptions.RequestException as e:
-        return False, f"必剪云接口签名服务不可达:{e}"
+        return False, f"线上免费接口签名服务不可达:{e}"
     if resp.status_code != 200:
         return False, f"签名服务返回 HTTP {resp.status_code}"
     try:
         has_sign = bool(resp.json().get("sign"))
     except ValueError:
         return False, "签名服务响应非 JSON"
-    return (True, "必剪云接口可达") if has_sign else (False, "签名服务未返回 sign")
+    return (True, "线上免费接口可达") if has_sign else (False, "签名服务未返回 sign")
 
 
 def _probe_whisper(cfg: AsrConfig) -> Tuple[bool, str]:
