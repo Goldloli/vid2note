@@ -180,7 +180,7 @@ class TestCreateTask:
         assert task.status == TaskStatus.PENDING
         assert task.llm_provider == "deepseek"
         assert task.llm_model == "deepseek-v4-flash"
-        assert task.mindmap_formats == ["xmind"]
+        assert task.mindmap_formats == ["xmind", "png", "md"]
         assert called["task_id"] == task.id
         # 已入库
         assert service.get_task(task.id).id == task.id
