@@ -31,7 +31,8 @@
     <div class="card" style="margin-top:14px">
       <div class="kicker" style="margin-bottom:10px">{{ $t('mindmap.exportTitle') }}</div>
       <div class="row gap-s">
-        <a v-for="f in exportEntries" :key="f.fmt" class="btn btn-sm" :href="getProductUrl(id,'mindmap') + `?index=${f.i}`" :download="`mindmap.${f.fmt}`">{{ $t(exportLabel(f.fmt)) }}</a>
+        <a v-for="f in hrefEntries" :key="f.fmt" class="btn btn-sm" :href="getProductUrl(id,'mindmap') + `?index=${f.i}`" :download="`mindmap.${f.fmt}`">{{ $t(exportLabel(f.fmt)) }}</a>
+        <button class="btn btn-sm" :disabled="!ready" @click="exportPng">{{ $t('mindmap.exportPng') }}</button>
         <span v-if="!exportEntries.length" class="muted mono-sm">{{ $t('mindmap.noMap') }}</span>
       </div>
     </div>
@@ -49,6 +50,7 @@ const outline = ref(''); const task = ref({}); const view = ref('split')
 let mm = null
 const formats = computed(() => task.value?.mindmap_formats || [])
 const exportEntries = computed(() => formats.value.map((fmt, i) => ({ fmt, i })))
+const hrefEntries = computed(() => exportEntries.value.filter(f => f.fmt !== 'png'))
 function exportLabel(fmt) { return { xmind: 'mindmap.exportXmind', png: 'mindmap.exportPng', md: 'mindmap.exportMd' }[fmt] || fmt }
 async function loadTask() { try { task.value = await getTask(id) } catch (e) {} }
 async function loadNote() { const res = await fetch(getProductUrl(id, 'note')); if (!res.ok) throw new Error(i18n.global.t('mindmap.noteNotReady')); return await res.text() }
@@ -72,6 +74,29 @@ function onWheel(e) { const f = Math.exp(-e.deltaY * 0.001); scale.value = Math.
 function pan(dx, dy) { tx.value += dx; ty.value += dy }
 function fit() { scale.value = 1; tx.value = 0; ty.value = 0; mm && mm.fit() }
 function center() { scale.value = 1; tx.value = 0; ty.value = 0; mm && mm.rescale() }
+// 导出 PNG:把 markmap SVG 序列化转 canvas 高清下载(不依赖后端 mermaid.ink/Playwright)
+function exportPng() {
+  const svg = svgRef.value
+  if (!svg) return
+  const vb = svg.viewBox.baseVal
+  const w = (vb && vb.width) || svg.clientWidth || 1200
+  const h = (vb && vb.height) || svg.clientHeight || 800
+  const clone = svg.cloneNode(true)
+  clone.setAttribute('width', w); clone.setAttribute('height', h)
+  clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+  const xml = new XMLSerializer().serializeToString(clone)
+  const img = new Image()
+  img.onload = () => {
+    const c = document.createElement('canvas')
+    c.width = w * 2; c.height = h * 2
+    const ctx = c.getContext('2d')
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height)
+    ctx.drawImage(img, 0, 0, c.width, c.height)
+    c.toBlob(b => { const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = (task.value?.title || 'mindmap') + '.png'; a.click() }, 'image/png')
+  }
+  img.onerror = () => alert(i18n.global.t('mindmap.renderFail') + 'SVG -> PNG')
+  img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(xml)))
+}
 // 鼠标中键按下拖动平移
 function startPan(e) {
   let lx = e.clientX, ly = e.clientY

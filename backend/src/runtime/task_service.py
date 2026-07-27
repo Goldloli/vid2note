@@ -122,7 +122,7 @@ class TaskService:
         if extract_images is None:
             extract_images = _as_bool(snapshot.get("note.extract_images"))
         output_language = (output_language or snapshot.get("note.output_language") or "zh").strip().lower()
-        mindmap_formats = list(mindmap_formats) if mindmap_formats else ["xmind"]
+        mindmap_formats = list(mindmap_formats) if mindmap_formats else ["xmind", "png", "md"]
 
         resolved_title = title
         if uploaded is not None and not resolved_title:
@@ -389,7 +389,7 @@ class TaskService:
             pdf_mode=src.pdf_mode or "pypdf",
             extract_images=bool(src.extract_images),
             output_language=src.output_language or "zh",
-            mindmap_formats=list(src.mindmap_formats or ["xmind"]),
+            mindmap_formats=list(src.mindmap_formats or ["xmind", "png", "md"]),
             pdf_path=src.pdf_path,
         )
         # 本地来源:复用源任务的音视频产物文件(复制到新任务产物目录)
