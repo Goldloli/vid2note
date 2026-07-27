@@ -58,7 +58,7 @@ export default {
     title: 'ASR Engine', current: 'Current default', setDefault: 'Set as default',
     test: 'Test connectivity', testing: 'Testing…',
     strategy: 'Engine strategy',
-    strategyHint: 'Online first: falls back to Whisper local when Bcut cloud fails; Single: uses only the default engine, no fallback.',
+    strategyHint: 'Online first: falls back to Whisper local when the online free engine fails; Single: uses only the default engine, no fallback.',
     externalTitle: 'External ASR endpoint (used when "External ASR" is selected or online-first falls back)',
     endpointPh: 'https://my-asr.example.com/asr', apiKeyPh: 'API Key (optional)',
     maskedHint: 'Saved config is masked because it contains secrets; leave blank to keep current value; refill to change.',

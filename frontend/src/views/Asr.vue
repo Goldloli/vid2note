@@ -10,7 +10,6 @@
           <div class="row gap-s" style="align-items:center;flex-wrap:wrap">
             <strong>{{ $t(e.l) }}</strong>
             <span v-if="s['asr.engine']===e.v" class="badge completed"><span class="d"></span>{{ $t('asr.current') }}</span>
-            <span class="muted mono-sm">{{ e.v }}</span>
           </div>
           <div class="muted" style="margin-top:4px">{{ $t(e.desc) }}</div>
           <div class="muted mono-sm" style="margin-top:4px">

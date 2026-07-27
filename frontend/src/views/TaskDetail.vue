@@ -78,7 +78,7 @@ const nodeDetail = computed(() => NODES.map(([k, label, kind]) => {
 const metaRows = computed(() => {
   const t = task.value || {}
   return [
-    {k:'task.metaId', v:t.id}, {k:'task.metaSource', v:t.source_url || t.source_type}, {k:'task.metaAsr', v:t.asr_engine},
+    {k:'task.metaId', v:t.id}, {k:'task.metaSource', v:t.source_url || t.source_type}, {k:'task.metaAsr', v: i18n.global.t('engine.short.' + (t.asr_engine || 'asrtools'))},
     {k:'task.metaLlm', v:`${t.llm_provider || ''}/${t.llm_model || ''}`}, {k:'task.metaLang', v:t.output_language},
     {k:'task.metaShot', v:t.extract_images ? i18n.global.t('task.shotOn') : i18n.global.t('task.shotOff')}, {k:'task.metaCreated', v:fmt(t.created_at)}, {k:'task.metaFinished', v:fmt(t.finished_at)},
     {k:'task.metaError', v:t.error || ''},
