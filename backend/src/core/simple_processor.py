@@ -34,6 +34,15 @@ except Exception as e:
 # Maximum file size: 100MB
 MAX_FILE_SIZE = 100 * 1024 * 1024
 
+# 截图嵌入 prompt 指令(extract_images=True 时追加到笔记 prompt;openspec 截图 bug 修复)
+SCREENSHOT_INSTRUCTION = """
+【关键帧截图(已开启)】
+字幕已带 [HH:MM:SS] 时间戳。请在重点画面 / 图表 / 演示 / 需图解处,在笔记中插入标记 [IMG:HH:MM:SS](使用该处字幕的时间戳),后端会自动截取视频该时刻的帧替换为图片。
+- 全篇 3-6 处即可,选最有信息量的画面,不要每段都加
+- 标记单独成行,格式严格 [IMG:HH:MM:SS]
+- 只用字幕中出现过的真实时间戳,不要编造
+"""
+
 
 class SimpleProcessor:
     """简化处理器"""
@@ -66,7 +75,7 @@ class SimpleProcessor:
             self.logger.error(f"{operation_name}失败: {error_msg}")
             raise
 
-    def process(self, subtitle_file: str, pdf_file: Optional[str] = None) -> str:
+    def process(self, subtitle_file: str, pdf_file: Optional[str] = None, extract_images: bool = False) -> str:
         """
         处理文件生成Markdown
 
@@ -93,7 +102,7 @@ class SimpleProcessor:
         # Step 2: 提取字幕文本
         self.logger.info(f"提取字幕: {subtitle_file}")
         try:
-            subtitle_text = self._extract_subtitle_text(subtitle_file)
+            subtitle_text = self._extract_subtitle_text(subtitle_file, keep_timestamp=extract_images)
             self.logger.info(f"字幕提取完成，共 {len(subtitle_text)} 字符")
         except Exception as e:
             self.logger.error(f"字幕提取失败: {e}")
@@ -103,7 +112,7 @@ class SimpleProcessor:
         if pdf_structure:
             self.logger.info("使用PDF参考生成笔记")
             try:
-                result = self._generate_with_pdf_reference(subtitle_text, pdf_structure)
+                result = self._generate_with_pdf_reference(subtitle_text, pdf_structure, extract_images)
                 self.logger.info(f"笔记生成完成，共 {len(result)} 字符")
                 return result
             except Exception as e:
@@ -112,7 +121,7 @@ class SimpleProcessor:
         else:
             self.logger.info("直接生成笔记")
             try:
-                result = self._generate_directly(subtitle_text)
+                result = self._generate_directly(subtitle_text, extract_images)
                 self.logger.info(f"笔记生成完成，共 {len(result)} 字符")
                 return result
             except Exception as e:
@@ -589,8 +598,8 @@ class SimpleProcessor:
             "page_count": len(reader.pages)
         }
 
-    def _extract_subtitle_text(self, file_path: str) -> str:
-        """提取字幕/文本内容"""
+    def _extract_subtitle_text(self, file_path: str, keep_timestamp: bool = False) -> str:
+        """提取字幕/文本内容(keep_timestamp 透传 SRT 提取,截图嵌入用)"""
         # 验证文件大小
         self._validate_file_size(file_path)
         
@@ -606,38 +615,45 @@ class SimpleProcessor:
                 self.logger.warning(f"SRT文件警告: {'; '.join(validation_result.warnings)}")
             
             self.logger.info(f"SRT验证通过: {validation_result.entry_count} 个字幕条目")
-            return self._extract_srt_text(file_path)
+            return self._extract_srt_text(file_path, keep_timestamp=keep_timestamp)
         else:
             with open(file_path, 'r', encoding='utf-8') as f:
                 return f.read()
 
-    def _extract_srt_text(self, srt_file: str) -> str:
-        """提取SRT纯文本"""
+    def _extract_srt_text(self, srt_file: str, keep_timestamp: bool = False) -> str:
+        """提取SRT纯文本(keep_timestamp=True 时每条字幕前缀 [HH:MM:SS],供截图嵌入用)"""
         with open(srt_file, 'r', encoding='utf-8') as f:
             content = f.read()
 
-        # 去除时间戳和序号
+        # 去除时间戳和序号(keep_timestamp 时保留时间戳供截图嵌入)
         lines = content.split('\n')
         text_lines = []
+        current_ts = None
 
         for line in lines:
             line = line.strip()
             # 跳过序号
             if line.isdigit():
                 continue
-            # 跳过时间戳行
+            # 时间戳行:keep_timestamp 时记起始 HH:MM:SS(去毫秒)
             if '-->' in line:
+                if keep_timestamp:
+                    current_ts = line.split('-->')[0].strip().split(',')[0]
                 continue
             # 跳过空行
             if not line:
                 continue
             # 去除HTML标签
             line = re.sub(r'<[^\u003e]+>', '', line)
-            text_lines.append(line)
+            if keep_timestamp and current_ts:
+                text_lines.append(f'[{current_ts}] {line}')
+                current_ts = None
+            else:
+                text_lines.append(line)
 
         return ' '.join(text_lines)
 
-    def _generate_with_pdf_reference(self, subtitle_text: str, pdf_structure: Dict) -> str:
+    def _generate_with_pdf_reference(self, subtitle_text: str, pdf_structure: Dict, extract_images: bool = False) -> str:
         """用PDF参考生成笔记"""
         # 使用外部提示词模板，并对所有用户内容进行清理
         prompt = GENERATE_WITH_PDF_REFERENCE.format(
@@ -645,6 +661,8 @@ class SimpleProcessor:
             pdf_content=self._sanitize_content(pdf_structure['full_text'][:40000]),
             subtitle_text=self._sanitize_content(subtitle_text)
         )
+        if extract_images:
+            prompt += SCREENSHOT_INSTRUCTION
 
         result = self._call_llm([
             {"role": "system", "content": "你是一个专业的课程笔记整理专家"},
@@ -653,12 +671,14 @@ class SimpleProcessor:
 
         return self._clean_markdown_output(result)
 
-    def _generate_directly(self, subtitle_text: str) -> str:
+    def _generate_directly(self, subtitle_text: str, extract_images: bool = False) -> str:
         """直接生成笔记（无PDF参考）"""
         # 使用外部提示词模板，并对用户内容进行清理
         prompt = GENERATE_DIRECTLY.format(
             subtitle_text=self._sanitize_content(subtitle_text)
         )
+        if extract_images:
+            prompt += SCREENSHOT_INSTRUCTION
 
         result = self._call_llm([
             {"role": "system", "content": "你是一个专业的课程笔记整理专家"},

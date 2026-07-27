@@ -298,7 +298,7 @@ def _make_executors(
         ctx.emit_progress(30, "调用 LLM 生成笔记")
         # 无 PDF 走 generate_directly 分支;有 PDF 走 generate_with_pdf_reference 分支
         # (SimpleProcessor.process 内部据 pdf_file 是否为空自动分流)
-        markdown = processor.process(str(srt_abs), str(pdf_abs) if pdf_abs else None)
+        markdown = processor.process(str(srt_abs), str(pdf_abs) if pdf_abs else None, extract_images=bool(getattr(task, "extract_images", False)))
         markdown = _strip_code_fence(markdown)
         ctx.emit_progress(75, "笔记生成完成,准备落盘")
 
