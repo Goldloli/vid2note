@@ -30,6 +30,6 @@ function sourceName(st) {
 
 export function displayName(t) {
   const title = (t.title || '').trim().replace(VIDEO_EXTS, '').trim()
-  const name = title || videoId(t) || i18n.global.t('source.unnamed')
+  const name = title || i18n.global.t('source.unnamed')
   return `${mmdd(t.finished_at || t.created_at)} ${name} · ${sourceName(t.source_type)}`
 }

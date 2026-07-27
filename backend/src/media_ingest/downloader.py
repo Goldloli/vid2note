@@ -257,8 +257,8 @@ def _is_cancelled(ctx) -> bool:
     return False
 
 
-def _make_progress_hook(ctx) -> Callable[[dict], None]:
-    """构造 yt-dlp ``progress_hooks`` 回调：推 SSE 进度 + 响应取消。"""
+def _make_progress_hook(ctx, title_holder: Optional[list] = None) -> Callable[[dict], None]:
+    """构造 yt-dlp ``progress_hooks`` 回调：推 SSE 进度 + 响应取消 + 提取视频标题。"""
 
     def _hook(d: dict) -> None:
         # 周期性取消检查（CONTRACT §0.6：被取消尽快抛、丢弃半成品）
@@ -274,6 +274,12 @@ def _make_progress_hook(ctx) -> Callable[[dict], None]:
         elif status == "finished":
             # 单文件下载完成（可能还需合并）；推进度，留余量给合并 / 校验
             ctx.emit_progress(95, "下载完成，准备合并 / 校验")
+            # 提取视频标题供列表命名(openspec change frontend-fix-naming-mindmap)
+            if title_holder is not None and not title_holder:
+                info = d.get("info_dict") or {}
+                _t = info.get("title") or d.get("title")
+                if _t:
+                    title_holder.append(str(_t).strip())
         elif status == "error":
             ctx.emit_log("error", "yt-dlp 子任务出错")
 
@@ -329,6 +335,7 @@ def download_video(ctx, source_url: str, source_type: SourceType,
     yt_dlp = _require_yt_dlp()
     _require_ffmpeg()
 
+    title_holder: list = []  # 经 progress hook 收集 yt-dlp 视频标题
     ctx.emit_log("info", f"开始下载：{source_url}")
     ctx.emit_progress(1, "初始化下载")
 
@@ -352,7 +359,7 @@ def download_video(ctx, source_url: str, source_type: SourceType,
         "noprogress": True,
         "retries": 5,                # 可恢复网络错误由 yt-dlp 内部重试
         "fragment_retries": 5,
-        "progress_hooks": [_make_progress_hook(ctx)],
+        "progress_hooks": [_make_progress_hook(ctx, title_holder)],
         # 字幕一律走 ASR（spec speech-to-text）：MUST NOT 抓取官方字幕
         "writesubtitles": False,
         "writeautomaticsub": False,
@@ -441,5 +448,10 @@ def download_video(ctx, source_url: str, source_type: SourceType,
     rel = _to_rel(ctx, out_path)
     ctx.emit_progress(100, "下载完成")
     ctx.emit_log("ok", f"视频产物已登记：{rel}（{duration:.1f}s，{size} 字节）")
+    if title_holder:
+        try:
+            setattr(ctx, "_video_title", title_holder[0])
+        except Exception:  # noqa: BLE001
+            pass
     ctx.register_product("video", rel, size)
     return rel
