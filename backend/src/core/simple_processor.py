@@ -321,9 +321,9 @@ class SimpleProcessor:
         将大纲转换为 Mermaid 思维导图格式
         """
         if not outline:
-            return "mindmap\n  root((思维导图))"
+            return "%%{init: {'themeVariables': {'fontSize': '18px'}}}%%\nmindmap\n  root((思维导图))"
 
-        lines = ["mindmap"]
+        lines = ["%%{init: {'themeVariables': {'fontSize': '18px'}}}%%", "mindmap"]
         root_text = outline[0][1] if outline else "思维导图"
         lines.append(f'  root(({root_text}))')
 
@@ -390,7 +390,7 @@ class SimpleProcessor:
 
         mermaid_code = self._outline_to_mermaid(outline)
         encoded = base64.b64encode(mermaid_code.encode('utf-8')).decode('ascii')
-        url = f"https://mermaid.ink/img/{encoded}?type=png"
+        url = f"https://mermaid.ink/img/{encoded}?type=png&scale=2"
 
         output_path = output_path.with_suffix('.png')
 
