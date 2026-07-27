@@ -17,7 +17,7 @@
         <router-link class="nav-item" to="/asr" active-class="active">{{ $t('nav.asr') }}</router-link>
         <router-link class="nav-item" to="/settings" active-class="active">{{ $t('nav.settings') }}</router-link>
         <div class="sidebar-foot"><div class="engine-card">
-          <div class="row"><span class="lbl">ASR</span><span class="val">{{ config.health?.engines?.asr_engine || '-' }}</span></div>
+          <div class="row"><span class="lbl">ASR</span><span class="val">{{ $t('engine.short.' + (config.health?.engines?.asr_engine || 'asrtools')) }}</span></div>
           <div class="row"><span class="lbl">LLM</span><span class="val">{{ config.health?.engines?.llm_model || '-' }}</span></div>
         </div></div>
       </aside>

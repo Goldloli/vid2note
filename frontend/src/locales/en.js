@@ -84,6 +84,7 @@ export default {
     options: 'Options', concurrency: 'Concurrency', pdf: 'PDF', lang: 'Language', zh: '中', en: 'En', shot: 'Shots',
     bg: 'Background', bgMesh: 'Animated mesh', bgStatic: 'Static', bgPlain: 'Plain',
     retention: 'Retention',
+    pdfSimple: 'Simple', pdfComplex: 'Advanced (may take longer)',
     uiLang: 'UI language',
   },
   task: {
@@ -100,10 +101,11 @@ export default {
   browser: { action: 'Actions' },
   source: { youtube: 'YouTube', bilibili: 'Bilibili', direct: 'Direct', localVideo: 'Local video', localAudio: 'Local audio', unnamed: 'Unnamed' },
   engine: {
-    asrtools: { l: 'Bcut Cloud ASR', desc: 'Online · Free · No GPU, default' },
+    asrtools: { l: 'Online free (bcut)', desc: 'Online · Free · No GPU, default' },
     whisper_cpp: { l: 'Whisper Local', desc: 'Offline · CPU int8 · Private, needs model' },
     external: { l: 'External ASR', desc: 'Self-hosted HTTP endpoint · Extensible' },
     online_first: { l: 'Online first · fallback to local' },
     single: { l: 'Single engine (no fallback)' },
+  short: { asrtools: 'Online free', whisper_cpp: 'Whisper', external: 'External' },
   },
 }
