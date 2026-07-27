@@ -123,7 +123,7 @@ onUnmounted(() => clearInterval(timer))
 /* 新建任务区 */
 .create { padding: 20px 22px; }
 .create-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 16px; }
-.src-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.src-row { display: grid; grid-template-columns: 1fr; gap: 12px; }
 .src-block { padding: 12px 14px; background: var(--card-2); border-radius: 8px; }
 .src-label { font-size: 12px; color: var(--text-2); font-weight: 600; margin-bottom: 8px; letter-spacing: 0.02em; }
 .file-pick { position: relative; overflow: hidden; cursor: pointer; }
@@ -154,7 +154,6 @@ onUnmounted(() => clearInterval(timer))
 .empty-cell { padding: 24px; text-align: center; }
 
 @media (max-width: 760px) {
-  .src-row { grid-template-columns: 1fr; }
   .stats { grid-template-columns: repeat(2, 1fr); }
 }
 </style>
