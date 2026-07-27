@@ -84,6 +84,7 @@ export default {
     options: '处理选项', concurrency: '并发', pdf: 'PDF', lang: '语言', zh: '中', en: 'En', shot: '截图',
     bg: '界面背景', bgMesh: '动态 mesh', bgStatic: '静态', bgPlain: '纯色',
     retention: '产物保留',
+    pdfSimple: '简单识别', pdfComplex: '复杂识别(时间可能较长)',
     uiLang: '界面语言',
   },
   task: {
@@ -100,10 +101,11 @@ export default {
   browser: { action: '操作' },
   source: { youtube: 'YouTube', bilibili: 'Bilibili', direct: '直链', localVideo: '本地视频', localAudio: '本地音频', unnamed: '未命名' },
   engine: {
-    asrtools: { l: '必剪云接口', desc: '在线 · 免费 · 无需 GPU,默认首选' },
+    asrtools: { l: '线上免费接口（bcut）', desc: '在线 · 免费 · 无需 GPU,默认首选' },
     whisper_cpp: { l: 'Whisper 本地', desc: '离线 · CPU int8 · 隐私好,需自备模型' },
     external: { l: '外部 ASR', desc: '自建 HTTP endpoint · 可扩展' },
     online_first: { l: '在线优先 · 失败转本地' },
     single: { l: '指定单一(不降级)' },
+  short: { asrtools: '线上免费', whisper_cpp: 'Whisper 本地', external: '外部' },
   },
 }

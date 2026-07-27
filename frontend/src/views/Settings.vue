@@ -33,7 +33,7 @@
       <div class="kicker" style="margin-bottom:10px">{{ $t('settings.options') }}</div>
       <div class="row wrap">
         <span class="kicker">{{ $t('settings.concurrency') }}</span><input class="input" style="width:70px" type="number" min="1" max="3" v-model.number="s['concurrency.max']">
-        <span class="kicker">{{ $t('settings.pdf') }}</span><button v-for="m in ['pypdf','mineru']" :key="m" class="chip" :class="{active:s['pdf.mode']===m}" @click="s['pdf.mode']=m">{{ m }}</button>
+        <span class="kicker">{{ $t('settings.pdf') }}</span><button v-for="m in ['pypdf','mineru']" :key="m" class="chip" :class="{active:s['pdf.mode']===m}" @click="s['pdf.mode']=m">{{ m === 'pypdf' ? $t('settings.pdfSimple') : $t('settings.pdfComplex') }}</button>
         <span class="kicker">{{ $t('settings.lang') }}</span><button v-for="l in ['zh','en']" :key="l" class="chip" :class="{active:s['note.output_language']===l}" @click="s['note.output_language']=l">{{ l==='zh'?$t('settings.zh'):$t('settings.en') }}</button>
       </div>
     </div>
