@@ -39,7 +39,7 @@ export default {
     noCompleted: '暂无已完成任务',
   },
   note: {
-    title: '笔记', copyMd: '复制 md', exportMd: '导出 .md', mindmap: '思维导图',
+    title: '笔记', copyMd: '复制 md', exportMd: '导出 .md', exportPdf: '导出 PDF', mindmap: '思维导图',
     pdfToggle: 'PDF 对照', noPdf: '本任务无讲义 PDF', outline: '章节大纲',
   },
   mindmap: {

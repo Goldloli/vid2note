@@ -22,6 +22,7 @@
       <div v-else class="br-tab-body">
         <a class="btn btn-sm block" :href="noteUrl" download>{{ $t('note.exportMd') }}</a>
         <button class="btn btn-sm block" @click="copy">{{ $t('note.copyMd') }}</button>
+        <button class="btn btn-sm block" @click="exportPdf">{{ $t('note.exportPdf') }}</button>
         <router-link class="btn btn-sm block" :to="`/mindmaps?id=${selectedId}`">{{ $t('note.mindmap') }}</router-link>
         <div class="muted mono-sm meta" v-if="task">
           <div>{{ $t('task.metaAsr') }}: {{ task.asr_engine }}</div>
@@ -69,6 +70,12 @@ function buildToc() {
 }
 function scrollTo(hid) { const el = document.getElementById(hid); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }) }
 async function copy() { try { const res = await fetch(noteUrl.value); navigator.clipboard.writeText(await res.text()); alert(i18n.global.t('common.copied')) } catch (e) { alert(e.message) } }
+async function exportPdf() {
+  try {
+    const html2pdf = (await import('html2pdf.js')).default
+    html2pdf().set({ margin: 10, filename: (task.value?.title || 'note') + '.pdf', html2canvas: { scale: 2 }, jsPDF: { unit: 'mm', format: 'a4' } }).from(mdRef.value).save()
+  } catch(e) { alert(e.message) }
+}
 onMounted(() => { const id = route.query.id; reload().then(() => { if (id) select(String(id)) }) })
 onUnmounted(() => clearTimeout(dt))
 </script>
@@ -88,6 +95,6 @@ onUnmounted(() => clearTimeout(dt))
 .toc-item { display: block; font-size: 13px; color: var(--text-2); cursor: pointer; padding: 4px 8px; border-radius: 6px; border-left: 2px solid transparent; }
 .toc-l2 { padding-left: 20px; } .toc-l3 { padding-left: 32px; font-size: 12px; }
 .toc-item:hover { background: var(--card-2); }
-.block { display: block; margin-bottom: 6px; }
+.block { display: block; width: 100%; margin-bottom: 6px; box-sizing: border-box; text-align: center; }
 .meta { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
 </style>
