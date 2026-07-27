@@ -19,7 +19,7 @@
       </div>
     </div>
     <div :class="['mm-layout', view]">
-      <div v-if="view !== 'text'" class="card mm-viewport" @mousedown.middle.prevent="startPan">
+      <div v-if="view !== 'text'" class="card mm-viewport" @mousedown.middle.prevent="startPan" @wheel.prevent="onWheel">
         <div class="mm-scaler" :style="{ transform: `translate(${tx}px, ${ty}px) scale(${scale})` }"><svg ref="svgRef" class="markmap"></svg></div>
         <div v-if="!ready" class="muted mono-sm" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">{{ errMsg || $t('mindmap.rendering') }}</div>
       </div>
@@ -67,7 +67,8 @@ async function renderMap() {
     ready.value = true
   } catch (e) { errMsg.value = i18n.global.t('mindmap.renderFail') + e.message }
 }
-function zoomBy(d) { scale.value = Math.min(2, Math.max(0.4, +(scale.value + d).toFixed(2))) }
+function zoomBy(d) { scale.value = Math.min(3, Math.max(0.2, +(scale.value + d).toFixed(2))) }
+function onWheel(e) { zoomBy(e.deltaY < 0 ? 0.1 : -0.1) }
 function pan(dx, dy) { tx.value += dx; ty.value += dy }
 function fit() { scale.value = 1; tx.value = 0; ty.value = 0; mm && mm.fit() }
 function center() { scale.value = 1; tx.value = 0; ty.value = 0; mm && mm.rescale() }
@@ -86,8 +87,8 @@ onBeforeUnmount(() => mm && mm.destroy())
 .mm-layout { display: flex; gap: 14px; align-items: stretch; }
 .mm-layout.map .mm-viewport { flex: 1; } .mm-layout.text .mm-outline { flex: 1; width: auto; }
 .mm-viewport { flex: 1; min-width: 0; height: calc(100vh - 250px); overflow: hidden; position: relative; }
-.mm-scaler { width: 100%; height: 100%; transform-origin: center center; transition: transform .2s; }
-.markmap { width: 100%; height: 100%; display: block; }
+.mm-scaler { width: 100%; height: 100%; transform-origin: center center; transition: transform .2s; overflow: visible; }
+.markmap { width: 100%; height: 100%; display: block; overflow: visible; }
 .mm-outline { width: 300px; flex: none; overflow: auto; max-height: calc(100vh - 250px); padding: 14px; }
 .outline-pre { white-space: pre-wrap; word-break: break-word; font-family: var(--mono); font-size: 12px; color: var(--text-2); margin: 0; line-height: 1.7; }
 </style>
