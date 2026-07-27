@@ -20,7 +20,7 @@
         <button class="btn btn-sm" @click="fit">{{ $t('mindmap.fit') }}</button>
         <span class="muted mono-sm">{{ Math.round(scale * 100) }}%</span>
       </div>
-      <div class="card mm-viewport">
+      <div class="card mm-viewport" @mousedown.middle.prevent="startPan">
         <div class="mm-scaler" :style="{ transform: `translate(${tx}px, ${ty}px) scale(${scale})` }"><svg ref="svgRef" class="markmap"></svg></div>
         <div v-if="!ready" class="muted mono-sm" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">{{ errMsg || $t('mindmap.rendering') }}</div>
       </div>
@@ -88,6 +88,14 @@ function outlineFromNote(md) { const out = []; for (const ln of md.split('\n')) 
 function zoomBy(d) { scale.value = Math.min(2, Math.max(0.4, +(scale.value + d).toFixed(2))) }
 function pan(dx, dy) { tx.value += dx; ty.value += dy }
 function fit() { scale.value = 1; tx.value = 0; ty.value = 0; mm && mm.fit() }
+// 鼠标中键按下拖动平移
+function startPan(e) {
+  let lx = e.clientX, ly = e.clientY
+  const move = (ev) => { tx.value += ev.clientX - lx; ty.value += ev.clientY - ly; lx = ev.clientX; ly = ev.clientY }
+  const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up) }
+  window.addEventListener('mousemove', move)
+  window.addEventListener('mouseup', up)
+}
 onMounted(() => { const id = route.query.id; reload().then(() => { if (id) select(String(id)) }) })
 onBeforeUnmount(() => { mm && mm.destroy(); clearTimeout(dt) })
 </script>
