@@ -38,6 +38,7 @@ export default {
     thSource: '来源', thStatus: '状态', thProduct: '产物', srt: 'SRT',
     noCompleted: '暂无已完成任务',
     onlineVideo: '网络视频', localFile: '本地文件', selectFile: '选择文件…', needSource: '请填写视频链接或选择本地文件',
+    pdfLecture: 'PDF 讲义(可选,笔记补充)', pdfSelect: '选择 PDF…',
   },
   note: {
     title: '笔记', copyMd: '复制 md', exportMd: '导出 .md', exportPdf: '导出 PDF', mindmap: '思维导图',

@@ -15,10 +15,21 @@
         <input v-if="tab==='url'" class="input" v-model="url" :placeholder="$t('console.urlPh')">
         <div v-else class="row gap-s" style="align-items:center">
           <label class="btn btn-sm file-pick">
-            <span>{{ fileName || $t('console.selectFile') }}</span>
-            <input type="file" accept="video/*,audio/*" @change="onFile">
+            <span>{{ fileNames.length ? fileNames.join(', ').slice(0, 48) : $t('console.selectFile') }}</span>
+            <input type="file" accept="video/*,audio/*" multiple @change="onFile">
           </label>
-          <button v-if="fileName" class="btn btn-ghost btn-sm" @click="clearFile">✕</button>
+          <button v-if="fileNames.length" class="btn btn-ghost btn-sm" @click="clearFile">✕</button>
+        </div>
+      </div>
+
+      <div class="pdf-row">
+        <span class="kicker">{{ $t('console.pdfLecture') }}</span>
+        <div class="row gap-s" style="align-items:center;margin-top:6px">
+          <label class="btn btn-sm file-pick">
+            <span>{{ pdfName || $t('console.pdfSelect') }}</span>
+            <input type="file" accept="application/pdf" @change="onPdf">
+          </label>
+          <button v-if="pdfName" class="btn btn-ghost btn-sm" @click="clearPdf">✕</button>
         </div>
       </div>
 
@@ -85,7 +96,8 @@ import { ASR_ENGINES } from '@/asr'
 import { i18n } from '@/i18n'
 import PipelineRail from '@/components/PipelineRail.vue'
 const router = useRouter(); const tasks = useTaskStore()
-const url = ref(''); const fileName = ref(''); const fileObj = ref(null)
+const url = ref(''); const fileNames = ref([]); const files = ref([])
+const pdfFile = ref(null); const pdfName = ref('')
 const tab = ref('url')  // 'url' | 'file'  二选一
 const loading = ref(false); const stats = ref(null)
 const llmProviders = ['deepseek','qwen','glm','moonshot','minimax','doubao','baidu','ollama']
@@ -94,24 +106,24 @@ const asrEngines = ASR_ENGINES
 let timer
 const statusText = s => i18n.global.t('status.' + s)
 async function refresh() { await Promise.all([tasks.fetchRecent(), taskStats().then(s => stats.value = s).catch(() => {})]) }
-function onFile(e) { const f = e.target.files?.[0]; if (!f) return; fileObj.value = f; fileName.value = f.name }
-function clearFile() { fileObj.value = null; fileName.value = ''; document.querySelectorAll('input[type=file]').forEach(i => { i.value = '' }) }
+function onFile(e) { const list = Array.from(e.target.files || []); if (!list.length) return; files.value = list; fileNames.value = list.map(f => f.name) }
+function clearFile() { files.value = []; fileNames.value = []; document.querySelectorAll('input[type=file][accept="video/*"]').forEach(i => { i.value = '' }) }
+function onPdf(e) { const f = e.target.files?.[0]; if (!f) return; pdfFile.value = f; pdfName.value = f.name }
+function clearPdf() { pdfFile.value = null; pdfName.value = ''; document.querySelectorAll('input[type=file][accept="application/pdf"]').forEach(i => { i.value = '' }) }
 function baseFields(fd) { fd.append('asr_engine', form.asr_engine); fd.append('llm_provider', form.llm_provider); fd.append('output_language', form.output_language); if (form.extract_images) fd.append('extract_images', 'true') }
 async function start() {
   loading.value = true
   try {
-    const fd = new FormData()
+    const mkFd = () => { const fd = new FormData(); baseFields(fd); if (pdfFile.value) fd.append('pdf', pdfFile.value); return fd }
     if (tab.value === 'url') {
       const u = url.value.trim()
       if (!u) { alert(i18n.global.t('console.needSource')); loading.value = false; return }
-      fd.append('source_url', u)
+      const fd = mkFd(); fd.append('source_url', u); await tasks.create(fd)
     } else {
-      if (!fileObj.value) { alert(i18n.global.t('console.needSource')); loading.value = false; return }
-      fd.append('file', fileObj.value)
+      if (!files.value.length) { alert(i18n.global.t('console.needSource')); loading.value = false; return }
+      for (const f of files.value) { const fd = mkFd(); fd.append('file', f); await tasks.create(fd) }
     }
-    baseFields(fd)
-    const t = await tasks.create(fd)
-    url.value = ''; clearFile(); router.push(`/task/${t.id}`)
+    url.value = ''; clearFile(); clearPdf(); await refresh()  // 不跳转,留主控台
   } catch (e) { alert(e.message) } finally { loading.value = false }
 }
 onMounted(() => { refresh(); timer = setInterval(refresh, 2000) })
