@@ -39,7 +39,7 @@ export default {
     noCompleted: 'No completed tasks',
   },
   note: {
-    title: 'Note', copyMd: 'Copy md', exportMd: 'Export .md', mindmap: 'Mindmap',
+    title: 'Note', copyMd: 'Copy md', exportMd: 'Export .md', exportPdf: 'Export PDF', mindmap: 'Mindmap',
     pdfToggle: 'PDF side-by-side', noPdf: 'No lecture PDF for this task', outline: 'Outline',
   },
   mindmap: {

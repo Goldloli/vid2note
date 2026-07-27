@@ -88,7 +88,7 @@ function exportPng() {
   const img = new Image()
   img.onload = () => {
     const c = document.createElement('canvas')
-    c.width = w * 2; c.height = h * 2
+    c.width = w * 4; c.height = h * 4
     const ctx = c.getContext('2d')
     ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height)
     ctx.drawImage(img, 0, 0, c.width, c.height)

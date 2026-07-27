@@ -105,7 +105,7 @@ function exportPng() {
   const img = new Image()
   img.onload = () => {
     const c = document.createElement('canvas')
-    c.width = w * 2; c.height = h * 2
+    c.width = w * 4; c.height = h * 4
     const ctx = c.getContext('2d')
     ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height)
     ctx.drawImage(img, 0, 0, c.width, c.height)
@@ -142,5 +142,5 @@ onBeforeUnmount(() => { mm && mm.destroy(); clearTimeout(dt) })
 .br-tabs { display: flex; gap: 6px; margin-bottom: 10px; }
 .br-tab-body { flex: 1; overflow: auto; }
 .outline-pre { white-space: pre-wrap; word-break: break-word; font-family: var(--mono); font-size: 12px; color: var(--text-2); margin: 0; line-height: 1.7; }
-.block { display: block; margin-bottom: 6px; }
+.block { display: block; width: 100%; margin-bottom: 6px; box-sizing: border-box; text-align: center; }
 </style>

@@ -5,6 +5,7 @@
       <div class="row gap-s">
         <button class="btn btn-sm" @click="copy">{{ $t('note.copyMd') }}</button>
         <a class="btn btn-sm" :href="noteUrl" download>{{ $t('note.exportMd') }}</a>
+        <button class="btn btn-sm" @click="exportPdf">{{ $t('note.exportPdf') }}</button>
         <router-link class="btn btn-sm" :to="`/mindmap/${id}`">{{ $t('note.mindmap') }}</router-link>
         <template v-if="taskLoaded">
           <button v-if="hasPdf" class="chip" :class="{active: pdfOn}" @click="pdfOn=!pdfOn">{{ $t('note.pdfToggle') }}</button>
@@ -57,6 +58,12 @@ function buildToc() {
 }
 function scrollTo(hid) { const el = document.getElementById(hid); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); activeId.value = hid }
 async function copy() { try { navigator.clipboard.writeText(mdText || await fetchMd()); alert(i18n.global.t('common.copied')) } catch(e){ alert(e.message) } }
+async function exportPdf() {
+  try {
+    const html2pdf = (await import('html2pdf.js')).default
+    html2pdf().set({ margin: 10, filename: (task.value?.title || 'note') + '.pdf', html2canvas: { scale: 2 }, jsPDF: { unit: 'mm', format: 'a4' } }).from(mdRef.value).save()
+  } catch(e) { alert(e.message) }
+}
 onMounted(() => { loadTask(); load() })
 onUnmounted(() => io && io.disconnect())
 </script>
