@@ -7,20 +7,18 @@
         <span class="muted mono-sm">{{ $t('console.onlineVideo') }} / {{ $t('console.localFile') }}</span>
       </div>
 
-      <div class="src-row">
-        <div class="src-block">
-          <div class="src-label">{{ $t('console.onlineVideo') }}</div>
-          <input class="input" v-model="url" :placeholder="$t('console.urlPh')">
-        </div>
-        <div class="src-block">
-          <div class="src-label">{{ $t('console.localFile') }}</div>
-          <div class="row gap-s" style="align-items:center">
-            <label class="btn btn-sm file-pick">
-              <span>{{ fileName || $t('console.selectFile') }}</span>
-              <input type="file" accept="video/*,audio/*" @change="onFile">
-            </label>
-            <button v-if="fileName" class="btn btn-ghost btn-sm" @click="clearFile">✕</button>
-          </div>
+      <div class="src-tabs">
+        <button class="src-tab" :class="{active: tab==='url'}" @click="tab='url'">{{ $t('console.onlineVideo') }}</button>
+        <button class="src-tab" :class="{active: tab==='file'}" @click="tab='file'">{{ $t('console.localFile') }}</button>
+      </div>
+      <div class="src-block">
+        <input v-if="tab==='url'" class="input" v-model="url" :placeholder="$t('console.urlPh')">
+        <div v-else class="row gap-s" style="align-items:center">
+          <label class="btn btn-sm file-pick">
+            <span>{{ fileName || $t('console.selectFile') }}</span>
+            <input type="file" accept="video/*,audio/*" @change="onFile">
+          </label>
+          <button v-if="fileName" class="btn btn-ghost btn-sm" @click="clearFile">✕</button>
         </div>
       </div>
 
@@ -88,6 +86,7 @@ import { i18n } from '@/i18n'
 import PipelineRail from '@/components/PipelineRail.vue'
 const router = useRouter(); const tasks = useTaskStore()
 const url = ref(''); const fileName = ref(''); const fileObj = ref(null)
+const tab = ref('url')  // 'url' | 'file'  二选一
 const loading = ref(false); const stats = ref(null)
 const llmProviders = ['deepseek','qwen','glm','moonshot','minimax','doubao','baidu','ollama']
 const form = reactive({ asr_engine: 'asrtools', llm_provider: 'deepseek', output_language: 'zh', extract_images: false })
@@ -99,13 +98,17 @@ function onFile(e) { const f = e.target.files?.[0]; if (!f) return; fileObj.valu
 function clearFile() { fileObj.value = null; fileName.value = ''; document.querySelectorAll('input[type=file]').forEach(i => { i.value = '' }) }
 function baseFields(fd) { fd.append('asr_engine', form.asr_engine); fd.append('llm_provider', form.llm_provider); fd.append('output_language', form.output_language); if (form.extract_images) fd.append('extract_images', 'true') }
 async function start() {
-  const u = url.value.trim()
-  if (!u && !fileObj.value) { alert(i18n.global.t('console.needSource')); return }
   loading.value = true
   try {
     const fd = new FormData()
-    if (u) fd.append('source_url', u)
-    else fd.append('file', fileObj.value)
+    if (tab.value === 'url') {
+      const u = url.value.trim()
+      if (!u) { alert(i18n.global.t('console.needSource')); loading.value = false; return }
+      fd.append('source_url', u)
+    } else {
+      if (!fileObj.value) { alert(i18n.global.t('console.needSource')); loading.value = false; return }
+      fd.append('file', fileObj.value)
+    }
     baseFields(fd)
     const t = await tasks.create(fd)
     url.value = ''; clearFile(); router.push(`/task/${t.id}`)
@@ -124,6 +127,9 @@ onUnmounted(() => clearInterval(timer))
 .create { padding: 20px 22px; }
 .create-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 16px; }
 .src-row { display: grid; grid-template-columns: 1fr; gap: 12px; }
+.src-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+.src-tab { padding: 8px 18px; border: 1px solid var(--border); background: var(--card); border-radius: 8px; cursor: pointer; font-size: 13px; color: var(--text-2); transition: all .15s; }
+.src-tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
 .src-block { padding: 12px 14px; background: var(--card-2); border-radius: 8px; }
 .src-label { font-size: 12px; color: var(--text-2); font-weight: 600; margin-bottom: 8px; letter-spacing: 0.02em; }
 .file-pick { position: relative; overflow: hidden; cursor: pointer; }
