@@ -1,18 +1,24 @@
 <template>
   <div class="page">
     <section class="card card-pad reveal in" style="margin-bottom:18px">
-      <div class="eyebrow" style="margin-bottom:10px">{{ $t('console.newTask') }}</div>
-      <form class="input-affix" @submit.prevent="submitUrl" style="height:48px">
-        <span class="lead">🔗</span>
+      <div class="eyebrow" style="margin-bottom:12px">{{ $t('console.newTask') }}</div>
+
+      <div class="src-block">
+        <div class="kicker" style="margin-bottom:6px">{{ $t('console.onlineVideo') }}</div>
         <input class="input" v-model="url" :placeholder="$t('console.urlPh')">
-        <span class="append"><button type="submit" class="btn btn-primary" :disabled="loading">{{ loading ? $t('console.submitting') : $t('console.start') }} →</button></span>
-      </form>
-      <div class="row gap-s wrap" style="margin-top:12px;align-items:center">
-        <label class="btn btn-sm" style="cursor:pointer;position:relative;display:inline-flex;align-items:center">{{ $t('console.upload') }}
-          <input type="file" accept="video/*,audio/*" @change="onFile" style="position:absolute;inset:0;opacity:0;cursor:pointer">
-        </label>
-        <span class="muted mono-sm" v-if="fileName">{{ $t('console.selected') }} {{ fileName }}</span>
       </div>
+
+      <div class="src-block" style="margin-top:12px">
+        <div class="kicker" style="margin-bottom:6px">{{ $t('console.localFile') }}</div>
+        <div class="row gap-s" style="align-items:center">
+          <label class="btn btn-sm" style="cursor:pointer;position:relative;display:inline-flex;align-items:center;overflow:hidden">
+            {{ fileName || $t('console.selectFile') }}
+            <input type="file" accept="video/*,audio/*" @change="onFile" style="position:absolute;inset:0;opacity:0;cursor:pointer">
+          </label>
+          <button v-if="fileName" class="btn btn-ghost btn-sm" @click="clearFile">✕</button>
+        </div>
+      </div>
+
       <div class="row gap-s wrap" style="margin-top:14px">
         <span class="kicker">{{ $t('console.asr') }}</span>
         <button v-for="e in asrEngines" :key="e.v" class="chip" :class="{active: form.asr_engine===e.v}" @click="form.asr_engine=e.v">{{ $t(e.l) }}</button>
@@ -24,13 +30,19 @@
         <span class="kicker" style="margin-left:12px">{{ $t('console.shot') }}</span>
         <button class="chip" :class="{active: form.extract_images}" @click="form.extract_images=!form.extract_images">{{ form.extract_images ? $t('console.on') : $t('console.off') }}</button>
       </div>
+
+      <div style="margin-top:14px">
+        <button class="btn btn-primary" :disabled="loading" @click="start">{{ loading ? $t('console.submitting') : $t('console.start') }} →</button>
+      </div>
     </section>
+
     <div class="row gap-s" style="margin-bottom:18px">
       <div class="card stat"><div class="muted mono-sm">{{ $t('console.sRunning') }}</div><div class="stat-num">{{ stats?.running ?? 0 }}</div></div>
       <div class="card stat"><div class="muted mono-sm">{{ $t('console.sToday') }}</div><div class="stat-num">{{ stats?.today_completed ?? 0 }}</div></div>
       <div class="card stat"><div class="muted mono-sm">{{ $t('console.sTotal') }}</div><div class="stat-num">{{ stats?.total ?? 0 }}</div></div>
       <div class="card stat"><div class="muted mono-sm">{{ $t('console.sCompleted') }}</div><div class="stat-num">{{ stats?.completed ?? 0 }}</div></div>
     </div>
+
     <div class="section-title"><h2>{{ $t('console.sRunning') }} <span class="muted mono-sm">· {{ tasks.running.length }}</span></h2></div>
     <div v-for="t in tasks.running" :key="t.id" class="card card-pad" style="margin-bottom:12px">
       <div class="spread">
@@ -62,30 +74,37 @@ import { ASR_ENGINES } from '@/asr'
 import { i18n } from '@/i18n'
 import PipelineRail from '@/components/PipelineRail.vue'
 const router = useRouter(); const tasks = useTaskStore()
-const url = ref(''); const loading = ref(false); const fileName = ref(''); const stats = ref(null)
+const url = ref(''); const fileName = ref(''); const fileObj = ref(null)
+const loading = ref(false); const stats = ref(null)
 const llmProviders = ['deepseek','qwen','glm','moonshot','minimax','doubao','baidu','ollama']
 const form = reactive({ asr_engine: 'asrtools', llm_provider: 'deepseek', output_language: 'zh', extract_images: false })
 const asrEngines = ASR_ENGINES
 let timer
 const statusText = s => i18n.global.t('status.' + s)
 async function refresh() { await Promise.all([tasks.fetchRecent(), taskStats().then(s => stats.value = s).catch(() => {})]) }
+// 选文件只暂存,不自动开始(openspec change frontend-console-redesign)
+function onFile(e) { const f = e.target.files?.[0]; if (!f) return; fileObj.value = f; fileName.value = f.name }
+function clearFile() { fileObj.value = null; fileName.value = ''; document.querySelectorAll('input[type=file]').forEach(i => { i.value = '' }) }
 function baseFields(fd) { fd.append('asr_engine', form.asr_engine); fd.append('llm_provider', form.llm_provider); fd.append('output_language', form.output_language); if (form.extract_images) fd.append('extract_images', 'true') }
-async function submitUrl() {
-  if (!url.value.trim()) return
+// 手动「开始」:URL 非空用 URL,否则用已选文件,都空提示
+async function start() {
+  const u = url.value.trim()
+  if (!u && !fileObj.value) { alert(i18n.global.t('console.needSource')); return }
   loading.value = true
-  try { const fd = new FormData(); fd.append('source_url', url.value.trim()); baseFields(fd); const t = await tasks.create(fd); url.value = ''; router.push(`/task/${t.id}`) }
-  catch (e) { alert(e.message) } finally { loading.value = false }
-}
-async function onFile(e) {
-  const f = e.target.files?.[0]; if (!f) return
-  fileName.value = f.name; loading.value = true
-  try { const fd = new FormData(); fd.append('file', f); baseFields(fd); const t = await tasks.create(fd); router.push(`/task/${t.id}`) }
-  catch (err) { alert(err.message) } finally { loading.value = false; fileName.value = ''; e.target.value = '' }
+  try {
+    const fd = new FormData()
+    if (u) fd.append('source_url', u)
+    else fd.append('file', fileObj.value)
+    baseFields(fd)
+    const t = await tasks.create(fd)
+    url.value = ''; clearFile(); router.push(`/task/${t.id}`)
+  } catch (e) { alert(e.message) } finally { loading.value = false }
 }
 onMounted(() => { refresh(); timer = setInterval(refresh, 2000) })
 onUnmounted(() => clearInterval(timer))
 </script>
 <style scoped>
+.src-block { padding: 10px 12px; background: var(--card-2); border-radius: 8px; }
 .stat { flex: 1; padding: 14px 16px; }
 .stat-num { font-size: 26px; font-weight: 700; margin-top: 4px; color: var(--text); }
 </style>
