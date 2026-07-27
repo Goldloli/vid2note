@@ -38,6 +38,7 @@ export default {
     thSource: 'Source', thStatus: 'Status', thProduct: 'Products', srt: 'SRT',
     noCompleted: 'No completed tasks',
     onlineVideo: 'Online video', localFile: 'Local file', selectFile: 'Choose file…', needSource: 'Please enter a URL or choose a local file',
+    pdfLecture: 'PDF lecture (optional, note supplement)', pdfSelect: 'Choose PDF…',
   },
   note: {
     title: 'Note', copyMd: 'Copy md', exportMd: 'Export .md', exportPdf: 'Export PDF', mindmap: 'Mindmap',
