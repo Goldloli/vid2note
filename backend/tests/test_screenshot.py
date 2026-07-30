@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from src.screenshot import embed_screenshots, capture_frame, parse_img_marks
 from src.screenshot import embedder
+from src.runtime import runner as runner_mod
 
 
 # ----------------------------- parse_img_marks ----------------------------- #
@@ -153,6 +154,58 @@ def test_embed_relative_path_via_image_rel_from(monkeypatch, video_file, tmp_pat
     # 相对笔记目录：../../screenshots/task_abc/shot_5.png
     assert srcs == ["../../screenshots/task_abc/shot_5.png"]
     assert "![截图](../../screenshots/task_abc/shot_5.png)" in cleaned
+
+
+def test_runtime_registers_normalized_screenshot_product_path(
+    monkeypatch, video_file, tmp_path
+):
+    task_id = "task_path_normal"
+    note_dir = tmp_path / "notes" / task_id
+    shots_dir = tmp_path / "screenshots" / task_id
+    note_dir.mkdir(parents=True)
+    shots_dir.mkdir(parents=True)
+    produced = shots_dir / "shot_5.png"
+    produced.write_bytes(b"\x89PNG")
+
+    def fake_embed(**kwargs):
+        return (
+            "![截图](../../screenshots/task_path_normal/shot_5.png)",
+            ["../../screenshots/task_path_normal/shot_5.png"],
+        )
+
+    monkeypatch.setattr("src.screenshot.embed_screenshots", fake_embed)
+
+    class State:
+        @staticmethod
+        def artifact(kind):
+            return f"videos/{task_id}/clip.mp4" if kind == "video" else None
+
+    class Context:
+        _state = State()
+
+        def __init__(self):
+            self.products = []
+
+        def product_path(self, kind, ext):
+            return tmp_path / "screenshots" / task_id / f"screenshot.{ext}"
+
+        def register_product(self, kind, rel, size):
+            self.products.append((kind, rel, size))
+
+    task = type("Task", (), {"id": task_id, "video_path": None})()
+    ctx = Context()
+    result = runner_mod._embed_screenshots(
+        ctx,
+        task,
+        "[IMG:5]",
+        tmp_path,
+    )
+
+    assert "shot_5.png" in result
+    assert ctx.products == [
+        ("screenshot", f"screenshots/{task_id}/shot_5.png", produced.stat().st_size)
+    ]
+    assert ".." not in ctx.products[0][1]
 
 
 def test_embed_invalid_mark_removed_no_residue(monkeypatch, video_file, tmp_path):

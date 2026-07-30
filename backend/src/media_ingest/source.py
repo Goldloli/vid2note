@@ -10,6 +10,8 @@
 """
 from __future__ import annotations
 
+import ipaddress
+import os
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -89,6 +91,32 @@ def _looks_like_url(text: str) -> bool:
     return text.lower().startswith(("http://", "https://"))
 
 
+def _validate_public_url(url: str) -> None:
+    """Reject credentials and obvious local-network SSRF targets by default."""
+    try:
+        parsed = urlparse(url)
+    except ValueError as exc:
+        raise ValueError("无法识别的媒体来源：链接格式无效") from exc
+    if parsed.username or parsed.password:
+        raise ValueError("无法识别的媒体来源：链接不能包含用户名或密码")
+    host = (parsed.hostname or "").strip().lower()
+    if not host:
+        raise ValueError("无法识别的媒体来源：链接缺少主机名")
+    allow_private = os.environ.get("ALLOW_PRIVATE_URLS", "").strip().lower() in {
+        "1", "true", "yes", "on"
+    }
+    if allow_private:
+        return
+    if host == "localhost" or host.endswith(".localhost"):
+        raise ValueError("出于安全原因，默认不允许下载本机地址")
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return
+    if not address.is_global:
+        raise ValueError("出于安全原因，默认不允许下载内网或保留地址")
+
+
 def identify_source(source_url: Optional[str],
                     uploaded: Optional[UploadedFile]) -> SourceType:
     """识别五类媒体来源，无法识别时抛中文 ``ValueError``。
@@ -132,6 +160,9 @@ def identify_source(source_url: Optional[str],
             raise ValueError(
                 "无法识别的媒体来源：仅支持 http/https 视频链接或本地音视频文件"
             )
+        if len(url) > 4096:
+            raise ValueError("无法识别的媒体来源：链接过长")
+        _validate_public_url(url)
         host = _host_of(url)
         if host in _YOUTUBE_HOSTS:
             return SourceType.YOUTUBE

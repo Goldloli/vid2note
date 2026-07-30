@@ -1,0 +1,11 @@
+vid2note
+Copyright (c) 2026 小卡塔克 (Goldloli)
+
+vid2note incorporates and evolves code from ai_srt2md, an earlier project by
+the same author. The imported kernel covers subtitle parsing, prompt handling,
+LLM adapters, note generation, task persistence, and mind-map export. vid2note
+adds media ingestion, speech-to-text, the six-stage pipeline, retention,
+screenshot embedding, the Vue web application, and container deployment.
+
+Third-party packages remain subject to their respective licenses. See the
+Python and Node dependency manifests for the complete dependency set.

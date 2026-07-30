@@ -27,7 +27,7 @@
 | 视频源 | YouTube + 国内平台（B站/抖音/西瓜/小红书）+ 直链 + 本地文件 |
 | 下载工具 | yt-dlp + BBDown（B站首选）+ you-get（兜底） |
 | 音频提取 | ffmpeg |
-| ASR 云端 | AsrTools b 接口（默认，零配置） |
+| ASR 在线 | bcut（默认、实验性、零配置） |
 | ASR 本地 | FunASR + Qwen3-ASR（多档可选，按需下载） |
 | LLM | 沿用现有 7 家 + 新增 Ollama |
 | 客户端 | Electron + Vue3 + 完全内置 Python（PyInstaller） |
@@ -77,7 +77,7 @@ vid2note/
 │   │   ├── asr/
 │   │   │   ├── base.py                # IASR 接口
 │   │   │   ├── cloud/
-│   │   │   │   └── asrtools.py        # b 接口
+│   │   │   │   └── bcut.py            # bcut 在线 ASR
 │   │   │   ├── local/
 │   │   │   │   ├── funasr.py
 │   │   │   │   ├── qwen_asr.py
@@ -218,7 +218,7 @@ download       ← ytdlp/bbdown/youget/direct/local_file
 extract_audio  ← ffmpeg
   produces: audio.wav (16kHz mono pcm_s16le)
     ↓
-transcribe     ← asrtools-b / funasr / qwen-asr
+transcribe     ← bcut / funasr / qwen-asr
   produces: subtitle.srt (+ subtitle.txt 可选)
     ↓
 organize       ← llm（7家 + ollama），可选 PDF 课件参考
@@ -392,20 +392,20 @@ class IASR(ABC):
     def is_available(self) -> bool: ...
 ```
 
-### 云端：AsrTools b 接口
+### 在线：bcut
 
 ```python
-class AsrToolsBLLM(IASR):
-    """AsrTools 项目的 b 接口方案（非官方接口，免费、无需 Key）"""
-    name = "asrtools-b"
+class BcutASR(IASR):
+    """bcut 实验性在线 ASR 兼容方案（无需 Key）"""
+    name = "bcut"
     is_cloud = True
     requires_local_gpu = False
 ```
 
 **流程**：分块（60s）→ 上传 → 轮询 → 合并时间戳。
 
-**风险**：b 接口随时可能改。
-- 适配层隔离：所有调用细节集中在 `asrtools.py` 一个文件
+**风险**：外部服务或协议随时可能变化。
+- 适配层隔离：所有调用细节集中在 `bcut.py` 一个文件
 - 失败时明确错误码 `ASRTOOL_B_CHANGED`
 - 后续可切换到官方 API
 
@@ -460,7 +460,7 @@ def detect_device() -> Literal["cuda", "mps", "cpu"]:
 
 ### 默认行为
 
-**默认走云端 AsrTools b 接口**（你的要求）。本地 ASR 作为可选。
+**默认走实验性在线 bcut**（你的要求）。本地 ASR 作为可选。
 - 首次启动检测设备，推荐对应档位
 - 切换本地 ASR 时，如模型未下载，弹下载对话框
 
@@ -501,7 +501,7 @@ class AppConfig(BaseModel):
     version: str
     run_mode: Literal["electron", "docker", "cli", "dev"]
 
-    asr_provider: str = "asrtools-b"
+    asr_provider: str = "bcut"
     llm_provider: str = "qwen"
 
     asr: ASRConfig
@@ -665,7 +665,7 @@ core/tests/unit/
 ├── audio/
 │   └── test_extractor.py          # ffmpeg 命令拼装、错误处理
 ├── asr/
-│   ├── test_asrtools.py           # b 接口分块/合并/轮询
+│   ├── test_bcut.py               # bcut 分块/合并/轮询
 │   ├── test_funasr.py
 │   ├── test_qwen_asr.py
 │   ├── test_output.py             # SRT/TXT 格式化（纯函数）
@@ -725,7 +725,7 @@ core/tests/unit/
   - `reserve_pending_task` 原子性（多线程并发只 reserve 一次）
   - 状态机非法转换拒绝（completed → pending）
   - 数据库迁移幂等
-- **asr/test_asrtools.py**：
+- **asr/test_bcut.py**：
   - 超长音频自动分块（>60s）
   - 分块时间戳拼接正确
   - b 接口返回错误结构 → 错误码 `ASRTOOL_B_CHANGED`
@@ -842,7 +842,7 @@ golden/
 |---------|----------|------|
 | yt-dlp（Python import） | monkeypatch `yt_dlp.YoutubeDL.download` | pytest monkeypatch |
 | BBDown / you-get / ffmpeg | mock `subprocess.run`，返回 fixture 文件 | pytest monkeypatch |
-| ASR 云端（AsrTools） | mock `httpx.AsyncClient`，按场景返回 | respx |
+| ASR 在线（bcut） | mock `httpx.AsyncClient`，按场景返回 | respx |
 | ASR 本地（FunASR/Qwen3-ASR） | mock 模型类 `AutoModel.from_pretrained` | pytest monkeypatch |
 | LLM 云端 | mock `openai.OpenAI` client | unittest.mock |
 | Ollama | mock `httpx` | respx |
@@ -869,7 +869,7 @@ def mock_ffmpeg(monkeypatch):
 
 @pytest.fixture
 def mock_asr_cloud(monkeypatch):
-    """mock AsrTools b 接口，返回 fixture ASRResult"""
+    """mock bcut 在线 ASR，返回 fixture ASRResult"""
 
 @pytest.fixture
 def mock_llm(monkeypatch):
@@ -1017,7 +1017,7 @@ fixtures/
 ├── pdf/
 │   └── sample-course.pdf        # PDF 课件 sample
 └── mocks/
-    ├── asrtools-response-30s.json
+    ├── bcut-response-30s.json
     ├── ytdlp-output-youtube.txt
     └── bbdown-output-bilibili.txt
 ```
@@ -1135,7 +1135,7 @@ Phase 2:  迁移现有 LLM 模块到 core/llm/                    [1d]
 Phase 3:  迁移 SRT/PDF 解析 + prompts 到 core/             [0.5d]
 Phase 4:  实现 downloaders（含 router、fallback）          [2d]
 Phase 5:  实现 audio/extractor                             [0.5d]
-Phase 6:  实现 ASR cloud（asrtools-b）                     [1.5d]
+Phase 6:  实现在线 ASR（bcut）                             [1.5d]
 Phase 7:  实现 ASR local（FunASR + Qwen3-ASR + Manager）   [3d]
 Phase 8:  实现 pipeline DAG（node/dag/context + 6 节点）   [2d]
 Phase 9:  实现 server/ FastAPI 薄包装（api/workers/sse）   [2d]
@@ -1174,7 +1174,7 @@ Phase 18: E2E (Playwright) + 文档 + README                  [1d]
 
 | 风险 | 对策 |
 |------|------|
-| AsrTools b 接口随时改 | 适配层隔离；明确错误码；后续切官方 API |
+| bcut 外部服务或协议随时变化 | 适配层隔离；明确错误码；本地 ASR 兜底 |
 | PyInstaller + PyTorch 打包冲突 | 提前在 Phase 15 做最小打包验证；备选 pyoxidizer |
 | Electron 体积过大（>1GB） | 模型不入包，按需下载；ffmpeg/yt-dlp 等用预编译压缩版 |
 | FunASR 在 Apple Silicon 不稳 | MPS 兼容性提前测；fallback CPU |

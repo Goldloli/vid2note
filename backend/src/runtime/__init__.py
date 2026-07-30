@@ -27,10 +27,15 @@ from .adapters import (
 from .runner import run_task
 from .settings import (
     DEFAULT_CONCURRENCY,
+    DEFAULT_LLM_BASE_URLS,
+    DEFAULT_LLM_MODELS,
     DEFAULT_SETTINGS,
     MAX_CONCURRENCY,
     MIN_CONCURRENCY,
+    SUPPORTED_LLM_PROVIDERS,
     clamp_concurrency,
+    default_model_for,
+    get_bilibili_cookies,
     get_credentials,
     get_settings_snapshot,
 )
@@ -59,12 +64,17 @@ __all__ = [
     "stop_worker",
     # settings
     "DEFAULT_SETTINGS",
+    "DEFAULT_LLM_MODELS",
+    "DEFAULT_LLM_BASE_URLS",
+    "SUPPORTED_LLM_PROVIDERS",
     "DEFAULT_CONCURRENCY",
     "MIN_CONCURRENCY",
     "MAX_CONCURRENCY",
     "clamp_concurrency",
     "get_settings_snapshot",
+    "get_bilibili_cookies",
     "get_credentials",
+    "default_model_for",
     # adapters
     "RepoStateAdapter",
     "SSEBusAdapter",

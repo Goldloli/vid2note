@@ -18,10 +18,18 @@ node_modules/
 dist-electron-v*/
 frontend/dist/
 
-# 运行时数据
-data/
+# 运行时数据（保留空目录，确保非 root 容器可写 bind mount）
+data/*
+!data/.gitkeep
+# 文件化设置包含本机路径；凭证密文和本地主密钥不得进入版本库。
+data/config/settings.json
+data/config/settings.json.last-good
+data/config/credentials.enc
+data/config/master.key
 logs/
 .env
+.env.*
+!.env.example
 
 # Beads / Dolt files (added by bd init)
 .dolt/
@@ -32,8 +40,15 @@ logs/
 # 本地工具索引(codegraph)
 .codegraph/
 
-# 基底遗留配置(含真实 API key;v1 用 SQLite settings,不入 git)
+# 基底遗留配置(可能含真实 API key；稳定版使用 data/config 文件，不入 git)
 config/config.yaml
 
 # beads 任务数据(本地,不上传)
 .beads/
+
+# 测试与审计产物
+htmlcov/
+coverage.xml
+frontend/e2e-report/
+frontend/playwright-report/
+frontend/test-results/

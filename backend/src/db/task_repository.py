@@ -90,14 +90,15 @@ class TaskRepository:
                 video_path, audio_path, srt_path, note_path, pdf_path,
                 mindmap_paths, screenshot_paths, node_statuses,
                 llm_provider, llm_model, asr_engine,
-                pdf_mode, extract_images, output_language, mindmap_formats,
+                pdf_mode, extract_images, output_language, note_detail_level,
+                mindmap_formats,
                 queue_position, error, created_at, updated_at, finished_at
             ) VALUES (
                 ?, ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?,
                 ?, ?, ?,
                 ?, ?, ?,
-                ?, ?, ?, ?,
+                ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?
             )
         """
@@ -123,6 +124,7 @@ class TaskRepository:
             task.pdf_mode,
             1 if task.extract_images else 0,
             task.output_language,
+            task.note_detail_level,
             json.dumps(list(task.mindmap_formats), ensure_ascii=False),
             queue_position,
             task.error,
@@ -482,6 +484,10 @@ class TaskRepository:
         """读取全部设置项(key → value)。"""
         rows = self.db.fetchall("SELECT key, value FROM settings")
         return {row["key"]: row["value"] for row in rows}
+
+    def delete_setting(self, key: str) -> None:
+        """删除单个旧设置项（文件化设置迁移完成后清理敏感值）。"""
+        self.db.execute("DELETE FROM settings WHERE key = ?", (key,))
 
     # ------------------------------------------------------------------
     # 便捷状态变更(新字段语义)

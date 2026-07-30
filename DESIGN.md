@@ -1,179 +1,184 @@
-# vid2note 设计系统(清晰普通版)
+# vid2note 前端设计系统
 
-> 设计目标:**页面合理、排布清晰、内容可读**。不追求玻璃/渐变/炫技,回归标准现代 web UI。
-> 实现见 `frontend/src/styles/app.css`;后续页面开发遵循本规范,避免风格漂移。
+> 设计定位：安静、清晰、可信赖的本地生产力工作台。界面以内容和任务状态为中心，
+> 使用实色表面、细边框、克制阴影和统一图标；不使用玻璃、渐变背景、hover scale
+> 或装饰性大标题。
+
+实现入口：
+
+- 全局 token 与基础组件：`frontend/src/styles/app.css`
+- 应用骨架：`frontend/src/App.vue`
+- 语义图标：`frontend/src/components/AppIcon.vue`
+- 页面原语：`PageHeader`、`SectionHeader`、`EmptyState`、`LoadingState`
+- 资料库原语：`LibrarySidebar`
 
 ---
 
-## 0. 设计原则
+## 1. 设计原则
 
-1. **清晰优先** —— 层级(标题/正文/辅助)、对比、分隔线清晰,文字一眼可读
-2. **合理排布** —— 侧栏 + 主区 + 卡片,统一间距,对齐严谨
-3. **实用克制** —— 实色卡片 + 标准组件 + 基础 hover,无玻璃/渐变/多层阴影炫技
-4. **双主题** —— 亮(默认)/ 暗,token 切换,对比度达标
+1. **任务优先**：主操作、当前状态和下一步始终比装饰更醒目。
+2. **层级稳定**：相同层级的页面使用相同页头、表面、间距与操作位置。
+3. **信息紧凑**：高信息密度不等于拥挤；通过分组、细边框和留白组织内容。
+4. **状态完整**：加载、空白、错误、选中、禁用和进行中都有明确反馈。
+5. **双主题一致**：亮暗主题只改变 token，不改变信息结构或交互方式。
+6. **响应式重排**：窄屏重新组织内容，不依赖页面级横向滚动。
 
 ---
 
-## 1. 设计 Token
+## 2. 设计 Token
 
-### 1.1 颜色(亮 / 暗)
-| token | 亮 | 暗 |
-|---|---|---|
-| `--bg` | `#f6f7f9` | `#111418` |
-| `--card` | `#ffffff` | `#1a1d23` |
-| `--card-2` | `#f3f4f6` | `#21252c` |
-| `--text` | `#1f2937` | `#e5e7eb` |
-| `--text-2` | `#4b5563` | `#9ca3af` |
-| `--muted` | `#6b7280` | `#6b7280` |
-| `--border` | `#e5e7eb` | `#2a2e36` |
-| `--border-2` | `#d1d5db` | `#3a3f48` |
-| `--accent` | `#2563eb` | `#3b82f6` |
-| `--accent-soft` | `#eff6ff` | `#1e293b` |
-| `--success` | `#16a34a` | `#16a34a` |
-| `--danger` | `#dc2626` | `#dc2626` |
+### 2.1 颜色
 
-### 1.2 圆角 / 阴影 / 字体 / 间距
+| token | 亮色 | 暗色 | 用途 |
+|---|---|---|---|
+| `--bg` | `#f6f7fa` | `#0f1218` | 应用背景 |
+| `--card` | `#ffffff` | `#171b23` | 主表面 |
+| `--card-2` | `#f1f3f7` | `#1e2430` | 次级表面 |
+| `--card-3` | `#e9edf4` | `#262d3a` | 强调分区 |
+| `--text` | `#18202d` | `#edf0f5` | 标题与正文 |
+| `--text-2` | `#465266` | `#b8c0ce` | 次级正文 |
+| `--muted` | `#667085` | `#8a95a7` | 辅助信息 |
+| `--border` | `#e3e7ee` | `#29313e` | 常规边框 |
+| `--border-2` | `#cfd6e2` | `#3a4656` | 强边框 |
+| `--accent` | `#2864dc` | `#5b8def` | 主操作、焦点 |
+| `--success` | `#16834a` | `#44b979` | 成功与完成 |
+| `--warn` | `#b96008` | `#e4a24b` | 警告 |
+| `--danger` | `#c93636` | `#ee7373` | 失败与危险操作 |
+
+各语义色同时提供 `*-soft` 浅底 token。组件不得自行创建新的品牌主色。
+
+### 2.2 形状、阴影与字体
+
 | 类别 | token | 值 |
 |---|---|---|
-| 圆角 | `--r-sm` / `--r` / `--r-lg` | `6px` / `8px` / `12px`(胶囊按钮/徽章用 `999px`) |
-| 阴影 | `--shadow` | `0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.04)`(克制,仅浮起暗示) |
-| focus | `--ring` | `0 0 0 3px rgba(37,99,235,.15)` |
-| 字体 | `--font` | `-apple-system, "Segoe UI", "PingFang SC", system-ui, sans-serif` |
-| 衬线 | `--serif` | `Georgia, "Songti SC", serif`(笔记标题) |
-| 等宽 | `--mono` | `"SF Mono", ui-monospace, Menlo, monospace` |
-| 过渡 | `--ease` | `.2s` |
+| 圆角 | `--r-sm / --r / --r-lg / --r-xl` | `7 / 10 / 14 / 18px` |
+| 阴影 | `--shadow-sm` | 极轻的静态表面分离 |
+| 浮层阴影 | `--shadow` | 仅用于抽屉、浮层和显著状态 |
+| 焦点 | `--ring` | 3px 半透明品牌色 |
+| 过渡 | `--ease` | `180ms cubic-bezier(.2,.8,.2,1)` |
+| UI 字体 | `--font` | 系统无衬线字体栈 |
+| 阅读字体 | `--serif` | `Georgia / Songti SC` |
+| 数据字体 | `--mono` | `SF Mono / Menlo / Consolas` |
+
+圆角用于表达层级，不将所有容器做成胶囊。胶囊只用于状态徽章、筛选 chip 和少量元信息。
 
 ---
 
-## 2. 布局
+## 3. 应用骨架与容器
 
-```
-┌─ titlebar(48px,实色 #fff,底部 1px 边)─────────────────┐
-├─ sidebar(220px) ┬─ content(主区,卡片列表)─────────────┤
-│  品牌            │  ┌ card ──────────────────────┐    │
-│  导航(主控台/    │  │ 标题 + 内容                  │    │
-│   历史/设置)      │  └────────────────────────────┘    │
-│  引擎状态卡       │  ┌ card ─────────────────────┐    │
-│                  │  │ ...                        │    │
-└──────────────────┴──────────────────────────────┘
-```
+应用由 56px 顶栏、侧栏和可滚动内容区组成。
 
-- **titlebar**:48px 高,实色 `--card` 背景,底部 1px `--border` 分隔
-- **sidebar**:220px 宽,实色 `--card`,导航项 hover/active 高亮
-- **content**:flex 1,`.scroll` 内边距 `24px 28px`,`.page` 最大 `900px` 居中
-- **卡片**:垂直堆叠,`margin-bottom:14px`,清晰分隔
+| 范围 | 导航 | 内容行为 |
+|---|---|---|
+| `>= 1180px` | 232px 完整侧栏 | 标准页与三栏资料库 |
+| `900-1179px` | 76px 图标侧栏 | 上下文栏收窄或折叠 |
+| `<= 899px` | 顶栏菜单 + 抽屉 | 单栏重排，历史表格改卡片 |
+| `<= 767px` | 紧凑顶栏 | 操作换行、表单与卡片全宽 |
 
----
+容器分为两类：
 
-## 3. 组件库
+- `.page`：设置、ASR 等标准内容页，最大宽度约 900px。
+- `.page-wide`：主控台、资料库、历史和任务详情，使用更宽的工作区。
 
-### 3.1 卡片 `.card`
-```html
-<div class="card">…</div>
-<div class="card pad">…</div>  <!-- 内边距大 -->
-```
-实色 `--card` 背景 + 1px `--border` + 8px 圆角 + 微阴影。**不用玻璃/渐变**。
-
-### 3.2 按钮 `.btn`(实色,hover 色变,无 scale)
-```html
-<button class="btn">次级</button>
-<button class="btn btn-primary">主按钮</button>
-<button class="btn btn-ghost">幽灵</button>
-<button class="btn btn-sm">小</button>
-```
-- `.btn`:白底 + 边,hover 变 `--card-2`
-- `.btn-primary`:蓝实色,hover 加深
-- `.btn-ghost`:透明,hover 浅底
-- 全部 `white-space:nowrap`(不换行)
-
-### 3.3 输入 `.input` / `.input-affix`
-```html
-<input class="input" placeholder="…">
-<div class="input-affix"><span class="lead">🔗</span><input class="input"><span class="append"><button class="btn btn-primary">开始</button></span></div>
-```
-白底 + 边,focus 蓝光晕 `--ring`。
-
-### 3.4 徽章 / chip / progress
-- `.badge.running/.completed/.failed/.pending`:状态徽章,浅色底 + 状态色字,`nowrap`
-- `.chip`:可选项,active 蓝实色
-- `.progress > i`:进度条
-
-### 3.5 表格 `.table` + 产物列 `.td-actions`
-```html
-<td class="td-actions"><button class="btn btn-sm">笔记</button> <button class="btn btn-sm">导图</button></td>
-```
-`.td-actions` = `flex row + nowrap`(产物按钮一行不竖排)。
-
-### 3.6 流水线节点 `.pipeline-rail`
-```html
-<div class="pipeline-rail">
-  <div class="pr-node done"><div class="pr-dot"></div><div class="pr-label">下载</div></div>
-  <div class="pr-link done"></div>
-  <div class="pr-node running">…</div>
-</div>
-```
-节点状态:`pending`(灰)/ `running`(蓝 + pulse)/ `done`(绿)/ `failed`(红)。连接线 `done` 变绿。
-
-### 3.7 笔记 `.note-wrap` + `.note-md`
-```html
-<div class="note-wrap"><div class="note-md" v-html="…"></div></div>
-```
-限宽 720px 居中,标题衬线,正文 16px / 1.8 行距,清晰阅读。
-
-### 3.8 日志终端 `.log-term`
-深色 `#1e1e1e` 底,等宽字体,日志行按级别着色(`.lt-ok/.lt-info/.lt-warn/.lt-err`)。
+`.scroll` 是唯一页面级滚动容器。窄屏不允许出现页面级横向滚动；工具栏内部可在必要时局部滚动。
 
 ---
 
-## 4. 交互
+## 4. 页面原语
 
-| 状态 | 实现 |
-|---|---|
-| hover | 背景色变(`--card-2` / 加深),**不用 scale / glass** |
-| focus | 蓝光晕 `--ring`(输入/搜索) |
-| active | 背景再深一档(`--border`) |
-| disabled | `opacity:.5` + `not-allowed` |
-| nav active | `--accent-soft` 底 + `--accent` 字 |
+### 4.1 `PageHeader`
 
-**过渡统一 `.2s`**。无炫技动效。
+所有一级页面使用同一结构：
+
+- 语义图标和唯一的 `h1`
+- 一句描述页面目的的副标题
+- 可选状态/计数元信息
+- 右侧 1 个主操作与少量次操作
+
+窄屏下操作区自动换行，不遮挡标题。
+
+### 4.2 `SectionHeader`
+
+用于同一页面内的主要内容段，支持标题、说明、计数和右侧操作。不要用多个同权重卡片标题替代页面层级。
+
+### 4.3 表面与卡片
+
+- `.surface`：默认工作区表面，实色背景、1px 边框、克制阴影。
+- `.card`：兼容旧结构的标准卡片。
+- `EmptyState`：必须说明当前为何为空，并在有合理下一步时提供操作。
+- `LoadingState`：使用与目标布局接近的骨架，不使用整页 spinner。
+
+### 4.4 按钮与输入
+
+- `.btn`：次级操作。
+- `.btn-primary`：每个操作区最多一个主要动作。
+- `.btn-ghost`：轻量导航或低优先级动作。
+- `.btn-sm`：表格、工具栏和行内操作。
+- `.icon-btn`：必须同时提供 `title` 或 `aria-label`。
+- `.input / .select / .search`：统一高度、边框和 focus ring。
+
+禁止 hover scale。禁用状态使用 `opacity` 与 `not-allowed`，同时保留可读文本。
+
+### 4.5 图标
+
+统一使用 `@phosphor-icons/vue`，并通过 `AppIcon` 的语义名称访问。页面不直接放置 emoji、
+Unicode 状态符号或临时绘制 SVG。图标作为装饰时 `aria-hidden`，纯图标按钮必须有可访问名称。
 
 ---
 
-## 5. 暗主题
+## 5. 页面模式
 
-`[data-theme="dark"]` 切换 token(见 §1.1)。所有组件自动适配(用 token,不硬编码颜色)。切换持久化 `localStorage`。
+### 5.1 主控台
+
+采用“任务创建器 + 状态概览 + 运行任务 + 最近产物”顺序。网络视频与本地文件并列；
+ASR、LLM、语言保持可见，详细程度、截图与 PDF 放入高级选项。
+
+### 5.2 笔记与思维导图资料库
+
+宽屏使用三栏工作区：
+
+1. `LibrarySidebar`：搜索、状态与任务列表。
+2. 主内容：阅读器或导图画布。
+3. 上下文：章节大纲、文本大纲和导出操作。
+
+小桌面隐藏上下文栏并提供显式切换；平板和手机进一步隐藏资料列表。当前选中项通过
+URL query `id` 同步，使刷新和返回仍能恢复工作区。
+
+### 5.3 历史
+
+桌面使用自适应表格；`<= 899px` 改为任务卡片。筛选、搜索和计数置于同一分区；
+选择任务后才显示批量操作条。
+
+### 5.4 设置与 ASR
+
+使用标准页容器、统一页头和分区页签。字段说明与控件成对出现；保存操作固定在页头操作区，
+未保存状态放在页头元信息区。敏感凭证的显示、保存和清除规则不得因视觉调整而改变。
+
+### 5.5 任务、笔记与导图详情
+
+详情页保留清晰的返回/跨产物入口。任务详情突出流水线和进度；笔记详情突出正文与 PDF 对照；
+导图详情始终保留视图模式切换，避免进入单一视图后无法返回。
 
 ---
 
-## 6. do / don't
+## 6. 交互与可访问性
 
-**do**
-- ✅ 用 token(`var(--card)` 等),不硬编码颜色
-- ✅ 实色卡片 + 细边 + 微阴影(清晰分隔)
-- ✅ 文字层级清晰(text/text-2/muted/muted-2)
-- ✅ 胶囊/按钮 `white-space:nowrap`(不换行)
-- ✅ 产物/操作列用 `.td-actions`(flex row)
-- ✅ 间距统一(16/24/28)
-- ✅ 暗 用 token 自动适配
-
-**don't**
-- ❌ 玻璃(`backdrop-filter`)/ 渐变背景 / 多层 inset 阴影(已弃,违清晰原则)
-- ❌ hover scale / 炫技动效
-- ❌ 硬编码颜色(用 token)
-- ❌ 胶囊/按钮换行(必 nowrap)
-- ❌ 产物列竖排(用 `.td-actions` flex row)
+- 所有交互元素都必须有键盘可见焦点。
+- 导航、页签、工具栏使用对应的 ARIA role 与可访问名称。
+- 状态不能只靠颜色表达，需同时保留文本。
+- 搜索、筛选、视图切换和资料选择使用 180ms 以内的反馈。
+- 尊重 `prefers-reduced-motion`：关闭非必要动画与平滑滚动。
+- 错误状态保留原始可行动信息，并提供重试或返回入口。
 
 ---
 
-## 7. 新增页面/组件清单(后续开发对照)
+## 7. 禁止项
 
-新建页面时:
-1. 用 `.page` 包裹(最大 900px 居中)
-2. 内容用 `.card` 分区
-3. 表单用 `.input` / `.input-affix` + `.btn`
-4. 列表用 `.table` 或 `.card` 堆叠 + `.stagger`(进场)
-5. 状态用 `.badge` / `.chip`
-6. 颜色全用 token,暗 自动适配
-7. 胶囊/按钮 `nowrap`,操作列 `.td-actions`
+- 玻璃、`backdrop-filter`、渐变背景、多层 inset 阴影
+- hover scale、连续漂浮、装饰性大面积动效
+- 使用 emoji 或 Unicode 符号代替界面图标
+- 大量胶囊容器、每个卡片都成为独立“浮岛”
+- 只为视觉变化重写业务请求、路由或数据结构
+- 在平板/手机依赖页面级横向滚动
 
-新增组件时:遵循 token + 实色 + 细边 + 微阴影 + `.2s` 过渡,不引玻璃/渐变。
+新增页面应优先组合现有原语；只有出现稳定的新页面模式时，才新增共享组件或 token。

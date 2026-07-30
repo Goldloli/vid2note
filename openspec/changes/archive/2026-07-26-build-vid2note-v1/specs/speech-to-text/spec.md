@@ -21,12 +21,12 @@ speech-to-text capability 的核心契约是:接收一个上游流水线(音频�
 
 ### Requirement: 三种 ASR 引擎与统一配置
 
-该 capability SHALL 支持三种可切换的 ASR 引擎:① 在线 AsrTools(对接剪映/必剪引擎,作为默认优先引擎);② 本地 whisper.cpp(CPU 推理 + int8 量化模型);③ 外部 ASR endpoint(通过配置项指向用户自建的 HTTP ASR 服务,作为扩展位)。引擎来源 MUST 通过统一的配置项指定,且配置项 SHALL 能明确区分这三种来源。
+该 capability SHALL 支持三种可切换的 ASR 引擎:① 实验性在线 bcut(作为默认优先引擎,依赖外部服务且不保证持续可用);② 本地 whisper.cpp(CPU 推理 + int8 量化模型);③ 外部 ASR endpoint(通过配置项指向用户自建的 HTTP ASR 服务,作为扩展位)。引擎来源 MUST 通过统一的配置项指定,且配置项 SHALL 能明确区分这三种来源。
 
-#### Scenario: 配置在线 AsrTools 引擎
+#### Scenario: 配置在线 bcut 引擎
 
-- **WHEN** 引擎配置项设置为使用在线 AsrTools(剪映/必剪)引擎,且网络与 AsrTools 服务可用
-- **THEN** 该 capability MUST 使用在线 AsrTools 引擎完成转写,返回的 SRT 内容由 AsrTools 产出
+- **WHEN** 引擎配置项设置为使用实验性在线 bcut 引擎,且外部服务可用
+- **THEN** 该 capability MUST 使用在线 bcut 引擎完成转写,返回的 SRT 内容由该引擎产出
 
 #### Scenario: 配置本地 whisper.cpp 引擎
 
@@ -40,21 +40,21 @@ speech-to-text capability 的核心契约是:接收一个上游流水线(音频�
 
 ### Requirement: 引擎选择策略
 
-该 capability SHALL 支持两种引擎选择策略:「在线优先,失败转本地」(默认)与「指定单一引擎」。在「在线优先」策略下,在线 AsrTools 为首选,当其不可用时自动降级到本地 whisper.cpp;在「指定单一引擎」策略下,MUST 只使用配置中指定的那一种引擎,不进行任何降级。
+该 capability SHALL 支持两种引擎选择策略:「在线优先,失败转本地」(默认)与「指定单一引擎」。在「在线优先」策略下,在线 bcut 为首选,当其不可用时自动降级到本地 whisper.cpp;在「指定单一引擎」策略下,MUST 只使用配置中指定的那一种引擎,不进行任何降级。
 
 #### Scenario: 在线优先策略下在线引擎可用
 
-- **WHEN** 引擎策略配置为「在线优先,失败转本地」,且在线 AsrTools 引擎可用
-- **THEN** 该 capability MUST 使用在线 AsrTools 完成转写,MUST NOT 触发本地引擎
+- **WHEN** 引擎策略配置为「在线优先,失败转本地」,且在线 bcut 引擎可用
+- **THEN** 该 capability MUST 使用在线 bcut 完成转写,MUST NOT 触发本地引擎
 
 #### Scenario: 在线优先策略下在线引擎失败转本地
 
-- **WHEN** 引擎策略配置为「在线优先,失败转本地」,在线 AsrTools 引擎调用失败(如服务不可用或鉴权失败),且本地 whisper.cpp 可用
+- **WHEN** 引擎策略配置为「在线优先,失败转本地」,在线 bcut 引擎调用失败(如服务不可用或协议变化),且本地 whisper.cpp 可用
 - **THEN** 该 capability MUST 自动切换到本地 whisper.cpp 完成转写,最终仍产出完整 SRT,并记录一次降级事件
 
 #### Scenario: 指定单一引擎策略不降级
 
-- **WHEN** 引擎策略配置为「指定单一引擎」且指定为在线 AsrTools,而在线引擎调用失败
+- **WHEN** 引擎策略配置为「指定单一引擎」且指定为在线 bcut,而在线引擎调用失败
 - **THEN** 该 capability SHALL NOT 自动降级到本地引擎,MUST 直接以该引擎失败结束并返回错误
 
 ### Requirement: 长音频 VAD 分段并行转录
@@ -97,12 +97,12 @@ speech-to-text capability 的核心契约是:接收一个上游流水线(音频�
 
 ### Requirement: 在线引擎降级与日志记录
 
-当在线 ASR 引擎(在线 AsrTools 或外部 endpoint)出现服务不可用、超时、限流(HTTP 429)或鉴权失败等情形时,该 capability SHALL 自动降级到可用的备选引擎(在「在线优先」策略下降级到本地 whisper.cpp),并 MUST 在日志中记录每一次降级事件,日志内容 SHALL 包含触发降级的原因(失败类型或 HTTP 状态码)、原引擎、降级目标引擎与时间戳。
+当在线 ASR 引擎(在线 bcut 或外部 endpoint)出现服务不可用、超时、限流(HTTP 429)、协议变化或鉴权失败等情形时,该 capability SHALL 自动降级到可用的备选引擎(在「在线优先」策略下降级到本地 whisper.cpp),并 MUST 在日志中记录每一次降级事件,日志内容 SHALL 包含触发降级的原因(失败类型或 HTTP 状态码)、原引擎、降级目标引擎与时间戳。
 
 #### Scenario: 在线引擎限流时降级并记录
 
-- **WHEN** 在线 AsrTools 引擎返回限流(HTTP 429)或服务端错误,且引擎策略为「在线优先,失败转本地」
-- **THEN** 该 capability MUST 自动降级到本地 whisper.cpp 完成转写,且 MUST 在日志中记录一条降级事件,事件中包含触发原因(429/限流)、原引擎(AsrTools)、目标引擎(whisper.cpp)
+- **WHEN** 在线 bcut 引擎返回限流(HTTP 429)或服务端错误,且引擎策略为「在线优先,失败转本地」
+- **THEN** 该 capability MUST 自动降级到本地 whisper.cpp 完成转写,且 MUST 在日志中记录一条降级事件,事件中包含触发原因(429/限流)、原引擎(bcut)、目标引擎(whisper.cpp)
 
 #### Scenario: 在线引擎超时时降级并记录
 

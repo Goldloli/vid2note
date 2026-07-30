@@ -38,3 +38,15 @@ def test_facade_all_covers_v1_entry_points():
     for name in must_have:
         assert name in k.__all__, f"门面 __all__ 缺少 {name}"
         assert hasattr(k, name), f"门面未导出 {name}"
+
+
+def test_ollama_provider_is_registered():
+    assert "ollama" in LLMFactory.get_available_providers()
+    llm = LLMFactory.create(
+        "ollama",
+        {
+            "model": "qwen3.5",
+            "base_url": "http://localhost:11434/v1",
+        },
+    )
+    assert llm.model == "qwen3.5"

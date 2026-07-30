@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import os
 import uuid
 from pathlib import Path
 from typing import Any, AsyncIterator, Dict, List, Optional
@@ -29,6 +30,27 @@ from src.sse import get_bus
 from src.utils.security import is_safe_path, secure_filename
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
+
+_MEDIA_EXTENSIONS = frozenset(
+    {
+        ".mp4", ".mkv", ".mov", ".webm", ".avi", ".flv", ".wmv", ".m4v",
+        ".mpg", ".mpeg", ".ts", ".3gp", ".ogv",
+        ".mp3", ".wav", ".m4a", ".flac", ".aac", ".ogg", ".wma", ".opus",
+        ".weba", ".aiff",
+    }
+)
+
+
+def _upload_limit_bytes(env_name: str, default_mb: int) -> int:
+    try:
+        mb = int(os.environ.get(env_name, str(default_mb)))
+    except ValueError:
+        mb = default_mb
+    return max(1, mb) * 1024 * 1024
+
+
+MAX_MEDIA_UPLOAD_BYTES = _upload_limit_bytes("MAX_MEDIA_UPLOAD_MB", 2048)
+MAX_PDF_UPLOAD_BYTES = _upload_limit_bytes("MAX_PDF_UPLOAD_MB", 100)
 
 
 # --------------------------------------------------------------------------- #
@@ -60,22 +82,43 @@ def _queue_full(repo: Any, snapshot: Dict[str, str]) -> bool:
     return active >= cap
 
 
+def _write_upload_limited(upload: UploadFile, dst: Path, max_bytes: int) -> int:
+    """Stream an upload to disk and remove partial data if it exceeds the limit."""
+    size = 0
+    try:
+        with dst.open("wb") as fp:
+            while True:
+                chunk = upload.file.read(1 << 20)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > max_bytes:
+                    raise ValueError(f"上传文件超过大小限制（最大 {max_bytes // 1024 // 1024} MB）")
+                fp.write(chunk)
+    except Exception:
+        dst.unlink(missing_ok=True)
+        raise
+    return size
+
+
 def _persist_upload(upload: UploadFile, data_root: Path, subdir: str) -> tuple[str, str, str, int]:
     """把上传文件落到 ``data_root/temp/<subdir>/`` 暂存,返回
     (abs_path, original_name, mime, size_bytes)。"""
     original = secure_filename(upload.filename or "upload")
+    if Path(original).suffix.lower() not in _MEDIA_EXTENSIONS:
+        raise ValueError("不支持的媒体文件类型")
+    mime = (upload.content_type or "").lower()
+    if mime and not (
+        mime.startswith("video/")
+        or mime.startswith("audio/")
+        or mime == "application/octet-stream"
+    ):
+        raise ValueError("上传内容类型不是音频或视频")
     staging_dir = data_root / "temp" / subdir
     staging_dir.mkdir(parents=True, exist_ok=True)
     token = uuid.uuid4().hex[:8]
     dst = staging_dir / f"{token}_{original}"
-    size = 0
-    with dst.open("wb") as fp:
-        while True:
-            chunk = upload.file.read(1 << 20)
-            if not chunk:
-                break
-            fp.write(chunk)
-            size += len(chunk)
+    size = _write_upload_limited(upload, dst, MAX_MEDIA_UPLOAD_BYTES)
     return str(dst), upload.filename or original, upload.content_type or "", size
 
 
@@ -87,23 +130,29 @@ def _persist_pdf_upload(upload: UploadFile, data_root: Path) -> str:
     """
     original = secure_filename(upload.filename or "lecture.pdf")
     if not original.lower().endswith(".pdf"):
-        original = f"{original}.pdf"
+        raise ValueError("讲义文件必须是 PDF")
+    mime = (upload.content_type or "").lower()
+    if mime and mime not in {"application/pdf", "application/octet-stream"}:
+        raise ValueError("讲义内容类型不是 PDF")
     pending_dir = data_root / "pdf" / "_pending"
     pending_dir.mkdir(parents=True, exist_ok=True)
     token = uuid.uuid4().hex[:8]
     dst = pending_dir / f"{token}_{original}"
-    with dst.open("wb") as fp:
-        while True:
-            chunk = upload.file.read(1 << 20)
-            if not chunk:
-                break
-            fp.write(chunk)
+    _write_upload_limited(upload, dst, MAX_PDF_UPLOAD_BYTES)
+    with dst.open("rb") as fp:
+        if b"%PDF-" not in fp.read(1024):
+            dst.unlink(missing_ok=True)
+            raise ValueError("文件内容不是有效的 PDF")
     return dst.relative_to(data_root).as_posix()
 
 
 def _sse(payload: Dict[str, Any]) -> str:
-    """格式化一条 SSE 事件(data-only)。"""
-    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+    """格式化一条带命名事件的 SSE；浏览器可用 addEventListener 消费。"""
+    event_name = str(payload.get("event") or "message").replace("\n", "")
+    return (
+        f"event: {event_name}\n"
+        f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+    )
 
 
 async def _stream_events(task_id: str) -> AsyncIterator[str]:
@@ -180,6 +229,7 @@ async def create_task(
     pdf_mode: Optional[str] = Form(None),
     extract_images: Optional[str] = Form(None),
     output_language: Optional[str] = Form(None),
+    note_detail_level: Optional[str] = Form(None),
     mindmap_formats: Optional[List[str]] = Form(None),
 ):
     """创建任务(契约 §4.1 ``POST /tasks``)。
@@ -204,14 +254,28 @@ async def create_task(
     if pdf is not None and pdf.filename:
         try:
             pdf_rel = _persist_pdf_upload(pdf, svc.data_root)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
         except Exception as exc:  # noqa: BLE001
-            raise HTTPException(status_code=400, detail=f"PDF 保存失败:{exc}")
+            from src.core.kernel import logger
+
+            logger.exception("PDF 上传保存失败")
+            raise HTTPException(status_code=400, detail="PDF 保存失败") from exc
 
     if file is not None and file.filename:
         try:
             abs_path, original, mime, size = _persist_upload(file, svc.data_root, "_staging")
+        except ValueError as exc:
+            if pdf_rel:
+                (svc.data_root / pdf_rel).unlink(missing_ok=True)
+            raise HTTPException(status_code=400, detail=str(exc))
         except Exception as exc:  # noqa: BLE001
-            raise HTTPException(status_code=400, detail=f"上传文件保存失败:{exc}")
+            from src.core.kernel import logger
+
+            logger.exception("媒体上传保存失败")
+            if pdf_rel:
+                (svc.data_root / pdf_rel).unlink(missing_ok=True)
+            raise HTTPException(status_code=400, detail="上传文件保存失败") from exc
         uploaded = UploadedFile(
             abs_path=abs_path, original_name=original, mime=mime, size_bytes=size
         )
@@ -228,13 +292,20 @@ async def create_task(
             pdf_mode=pdf_mode,
             extract_images=_to_bool(extract_images),
             output_language=output_language,
+            note_detail_level=note_detail_level,
             mindmap_formats=mindmap_formats,
             pdf_path=pdf_rel,
         )
     except ValueError as exc:
+        if uploaded:
+            Path(uploaded.abs_path).unlink(missing_ok=True)
+        if pdf_rel:
+            (svc.data_root / pdf_rel).unlink(missing_ok=True)
         # 无法识别媒体来源(契约 §4.1 → 400)
         raise HTTPException(status_code=400, detail=str(exc) or "无法识别的媒体来源")
 
+    if uploaded:
+        Path(uploaded.abs_path).unlink(missing_ok=True)
     return task.to_dict()
 
 

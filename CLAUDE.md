@@ -68,11 +68,11 @@ beads 管理区块只是任务追踪指引，不构成对仓库、用户或编�
 - **部署**:Docker 单容器(`docker compose up`,FastAPI 同源托管 API + 前端静态)
 
 ### 六步流水线
-`下载(yt-dlp 整段高清,bilibili 带 cookie)→ 提取音频(ffmpeg)→ ASR(在线 AsrTools 优先 / 本地 whisper.cpp 兜底,长音频 VAD 切片并行)→ LLM 笔记(纯文本喂,默认 DeepSeek deepseek-v4-flash,8 家适配)→ 思维导图(xmind/png/md)→ 清理(按保留策略)`
+`下载(yt-dlp 整段高清,bilibili 带 cookie)→ 提取音频(ffmpeg)→ ASR(实验性在线 bcut 优先 / 本地 whisper.cpp 兜底,长音频 VAD 切片并行)→ LLM 笔记(纯文本喂,默认 DeepSeek deepseek-v4-flash,8 家适配)→ 思维导图(xmind/png/md)→ 清理(按保留策略)`
 
 ### 关键架构决策(摘自 design D1–D10)
 - **D1 单容器**:弃双容器,FastAPI 同源托管前后端,`:8761` 一端口
-- **D2 ASR 抽象**:`AsrEngine` 接口 + AsrTools(在线)/ whisper.cpp(本地 CPU int8)/ external(扩展位),在线优先降级
+- **D2 ASR 抽象**:`AsrEngine` 接口 + bcut(实验性在线)/ whisper.cpp(本地 CPU int8)/ external(扩展位),在线优先降级
 - **D3 VAD 切片并行**:长音频按静音切分并行转录 + 时间戳偏移拼回单调 SRT
 - **D4 截图嵌入**:LLM 标记 `[IMG:ts]`,后端 ffmpeg 截帧(默认关)
 - **D5 MinerU 可选**:PDF 拆解,默认 pypdf,MinerU 可选构建层(`ENABLE_MINERU`)

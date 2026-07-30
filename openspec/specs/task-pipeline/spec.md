@@ -1,7 +1,7 @@
 # task-pipeline Specification
 
 ## Purpose
-TBD - created by archiving change build-vid2note-v1. Update Purpose after archive.
+定义六步 DAG、队列、任务状态、SSE、取消、重跑和启动恢复行为。确保每个节点的状态、产物与失败恢复在并发执行和容器重启后仍保持一致。
 ## Requirements
 ### Requirement: 六步流水线 DAG 编排与产物契约
 
@@ -230,4 +230,3 @@ TBD - created by archiving change build-vid2note-v1. Update Purpose after archiv
 
 - **WHEN** 用户同时设置状态为「completed」、来源为「YouTube」、关键词为「机器学习」
 - **THEN** 系统 MUST 返回同时满足这三个条件的任务列表(三者取交集),MUST NOT 仅按其中任一条件过滤
-

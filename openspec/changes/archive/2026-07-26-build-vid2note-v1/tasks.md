@@ -31,7 +31,7 @@
 ## 3. ASR 转录
 
 - [x] 3.1 新建 `speech_to_text/` 与 `AsrEngine` 抽象接口:`transcribe(audio_path) -> List[Cue]`(Cue={start,end,text});输入输出契约(音频路径进、SRT 路径出);输入不存在报错不产空 SRT;SRT 时间戳单调递增且覆盖完整时长(验证:短音频产出合法 SRT、首末时间戳贴合时长、不存在文件报错)
-- [x] 3.2 `AsrToolsEngine` 实现:对接在线 AsrTools(剪映/必剪),默认首选(验证:配置在线引擎且网络可用,返回 AsrTools 产出的 SRT)
+- [x] 3.2 `BcutEngine` 实现:对接实验性在线 bcut,默认首选(验证:配置在线引擎且网络可用,返回在线引擎产出的 SRT)
 - [x] 3.3 `WhisperCppEngine` 实现:本地 whisper.cpp(CPU + int8 量化),不发起任何网络请求(验证:配置本地引擎且模型就绪,纯本地完成转写、无网络请求)
 - [x] 3.4 `ExternalAsrEngine` 实现:外部 HTTP ASR endpoint,地址来自配置项不硬编码(验证:配置外部 endpoint,音频发送至该地址、结果转 SRT)
 - [x] 3.5 引擎选择策略:在线优先失败转本地(默认)与指定单一引擎(不降级)两策略,配置驱动(验证:在线优先且在线可用→用在线不触发本地;在线失败→自动降级本地并记事件;指定单一在线失败→直接失败不降级)
@@ -99,7 +99,7 @@
 
 ## 9. Docker 部署
 
-- [x] 9.1 Dockerfile 基于 Python 官方镜像,内置 yt-dlp/ffmpeg/whisper.cpp/AsrTools;MinerU 作为可选构建层(构建 ARG `ENABLE_MINERU` 默认 `0` 不进镜像,启用后可运行 MinerU 入口)(验证:容器内 `yt-dlp --version`、`ffmpeg -version`、whisper.cpp、AsrTools 入口均可定位无 command not found;默认构建无 MinerU,启用构建有 MinerU)
+- [x] 9.1 Dockerfile 基于 Python 官方镜像,内置 yt-dlp/ffmpeg/whisper.cpp/bcut 在线 ASR 兼容层;MinerU 作为可选构建层(构建 ARG `ENABLE_MINERU` 默认 `0` 不进镜像,启用后可运行 MinerU 入口)(验证:容器内 `yt-dlp --version`、`ffmpeg -version`、whisper.cpp、在线 ASR 依赖均可定位无 command not found;默认构建无 MinerU,启用构建有 MinerU)
 - [x] 9.2 `docker-compose.yml` 单服务单容器:容器 8765→宿主 8765,FastAPI 同源托管 API + 前端静态资源(移除基底 CORSMiddleware 与 Nginx 双容器);声明命名 volume 持久化 SQLite 与产物(验证:`docker compose config` 含 8765 映射与命名 volume;`docker compose config --volumes` 列出持久化 volume)
 - [x] 9.3 单命令拉起:`docker compose up -d` 后服务 running/healthy,`GET /api/health` 返 2xx,前后端同源无 CORS/端口失败,无需手动启动前端开发服务器(验证:`docker compose ps` 全 running/healthy;健康检查 2xx;同源后端调用成功)
 - [x] 9.4 持久化验证:创建任务/产物后 `down`(不带 `-v`)再 `up`,任务/历史/配置/产物仍在;`down -v` 清空 volume(验证:重建后任务历史配置产物在;`-v` 后 volume 数据被删)

@@ -1,7 +1,7 @@
 # media-ingest Specification
 
 ## Purpose
-TBD - created by archiving change build-vid2note-v1. Update Purpose after archive.
+定义网络视频与本地音视频的识别、下载、音频提取、取消和错误分类行为。确保所有来源进入统一流水线前都经过安全校验并形成可追踪产物。
 ## Requirements
 ### Requirement: 输入接入与来源识别
 
@@ -171,4 +171,3 @@ TBD - created by archiving change build-vid2note-v1. Update Purpose after archiv
 
 - **WHEN** 某产物的存在时长超过其保留策略规定的天数(且策略非「永久」),流水线清理步骤执行
 - **THEN** 系统 MUST 删除该过期产物文件,并更新任务记录以反映产物已清理;策略为「永久」的产物 MUST NOT 被删除
-

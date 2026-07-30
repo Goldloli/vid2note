@@ -1,183 +1,340 @@
-"""
-runtime.settings —— 设置快照与合法默认值(契约 §3.2 / §0.8)
-============================================================
-
-把 SQLite ``settings`` 表的扁平 key/value 读出为一份**强类型快照**供运行栈使用;
-首次启动(settings 表为空或部分 key 缺失)MUST 给出合法默认值
-(spec storage-retention「首次启动写入合法默认」)。
-
-默认值(契约 §3.2):
-- LLM = deepseek / deepseek-v4-flash
-- ASR = asrtools(策略 online_first)
-- PDF = pypdf
-- 并发 = 1(范围 1~3,越界回落 1)
-- 五类保留:video/audio=7d、srt/screenshot=30d、note=permanent
-- 输出语言 = zh、截图嵌入 = 关
-
-本模块只做「读 + 补默认 + 校验回落」,不写库;写库由设置 API 负责。
-"""
+"""运行时设置快照、文件权威态与凭证解析。"""
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, Optional
+import os
+from typing import Any, Dict
 
 from src.core.kernel import logger
+from src.llm.provider_registry import PROVIDER_REGISTRY, provider_profiles
+from src.runtime.settings_store import (
+    CredentialStore,
+    SettingsFileError,
+    SettingsStore,
+    migrate_legacy_settings,
+)
 
-# --------------------------------------------------------------------------- #
-# 合法默认值(契约 §3.2)
-# --------------------------------------------------------------------------- #
+
+SUPPORTED_LLM_PROVIDERS = frozenset(PROVIDER_REGISTRY)
+DEFAULT_LLM_MODELS: Dict[str, str] = {
+    key: item.default_model for key, item in PROVIDER_REGISTRY.items()
+}
+DEFAULT_LLM_BASE_URLS: Dict[str, str] = {
+    key: item.default_base_url for key, item in PROVIDER_REGISTRY.items()
+}
+
 DEFAULT_SETTINGS: Dict[str, str] = {
-    # LLM
     "llm.provider": "deepseek",
     "llm.model": "deepseek-v4-flash",
+    "llm.providers": "{}",
+    # 兼容旧调用；新文件永不持久化该键。
     "llm.credentials": "{}",
-    # ASR
-    "asr.engine": "asrtools",
+    "asr.engine": "bcut",
     "asr.strategy": "online_first",
     "asr.config": "{}",
-    # PDF
     "pdf.mode": "pypdf",
-    "pdf.mineru_endpoint": "",
-    # Bilibili
+    # 兼容旧调用；新文件永不持久化该键。
     "bilibili.cookie": "{}",
-    # 并发(契约 §0.8:默认 1,范围 1~3)
     "concurrency.max": "1",
-    # 笔记
     "note.output_language": "zh",
+    "note.detail_level": "balanced",
     "note.extract_images": "false",
     "note.image_quality": "medium",
-    # 五类保留策略(契约 §3.2 建议)
+    "ui.language": "zh",
+    "ui.theme": "system",
+    "ui.background": "plain",
     "retention.video": "7d",
     "retention.audio": "7d",
     "retention.srt": "30d",
     "retention.note": "permanent",
     "retention.screenshot": "30d",
-    # 高级参数
     "advanced.chunk_size": "4000",
     "advanced.temperature": "0.3",
     "advanced.max_retries": "3",
 }
 
-# 并发合法范围(契约 §0.8)
 MIN_CONCURRENCY = 1
 MAX_CONCURRENCY = 3
 DEFAULT_CONCURRENCY = 1
-
-# 保留策略合法枚举
 _RETENTION_VALUES = frozenset({"permanent", "7d", "30d"})
-# 输出语言合法枚举
 _LANGUAGES = frozenset({"zh", "en"})
-# PDF 方案合法枚举
-_PDF_MODES = frozenset({"pypdf", "mineru"})
-# ASR 引擎合法枚举
-_ASR_ENGINES = frozenset({"asrtools", "whisper_cpp", "external"})
+_DETAIL_LEVELS = frozenset({"concise", "balanced", "detailed", "exhaustive"})
+_PDF_MODES = frozenset({"pypdf"})
+_ASR_ENGINES = frozenset({"bcut", "whisper_cpp", "external"})
 
 
 def clamp_concurrency(value: Any) -> int:
-    """把任意值归一为合法并发数(1~3);越界/非法回落默认 1(契约 §0.8)。"""
     try:
         n = int(value)
     except (TypeError, ValueError):
         return DEFAULT_CONCURRENCY
-    if n < MIN_CONCURRENCY:
-        return MIN_CONCURRENCY
-    if n > MAX_CONCURRENCY:
-        return MAX_CONCURRENCY
-    return n
+    return min(MAX_CONCURRENCY, max(MIN_CONCURRENCY, n))
 
 
 def _coerce_enum(value: Any, allowed: frozenset[str], default: str) -> str:
-    """枚举值校验:非法回落 default。"""
-    s = str(value).strip().lower() if value is not None else ""
-    return s if s in allowed else default
+    normalized = str(value).strip().lower() if value is not None else ""
+    return normalized if normalized in allowed else default
+
+
+def _as_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower() if value is not None else ""
+    return normalized in ("1", "true", "yes", "on")
+
+
+def _snapshot_value(value: Any) -> str:
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False)
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
+
+
+def _legacy_settings(repo: Any) -> dict[str, Any]:
+    if repo is None:
+        return {}
+    try:
+        return dict(repo.get_all_settings() or {})
+    except Exception:
+        logger.debug("读取 SQLite settings 失败", exc_info=True)
+        return {}
+
+
+def _read_authoritative_settings(repo: Any) -> dict[str, Any]:
+    store = SettingsStore()
+    files_enabled = bool(os.environ.get("DATA_ROOT")) or store.exists()
+    if not files_enabled:
+        return _legacy_settings(repo)
+
+    if not store.exists() and repo is not None:
+        legacy = _legacy_settings(repo)
+        if legacy:
+            try:
+                migrated = migrate_legacy_settings(repo, store, CredentialStore())
+            except Exception:
+                migrated = False
+                logger.exception("旧设置迁移失败，暂时回落 SQLite")
+            if not migrated:
+                return legacy
+        else:
+            public_defaults = {
+                key: value
+                for key, value in DEFAULT_SETTINGS.items()
+                if key not in {"llm.credentials", "bilibili.cookie"}
+            }
+            store.write(public_defaults)
+
+    try:
+        return store.read()
+    except SettingsFileError:
+        logger.exception("settings.json 损坏，尝试最后一次有效副本")
+        try:
+            backup = store.read_last_good()
+        except SettingsFileError:
+            backup = {}
+        return backup or _legacy_settings(repo)
 
 
 def get_settings_snapshot(repo: Any = None) -> Dict[str, str]:
-    """读取全部设置并以合法默认值补齐缺失项。
-
-    Args:
-        repo: ``TaskRepository``(或任何带 ``get_all_settings()`` 的对象);
-            ``None`` 时仅返回默认值(便于无库单测)。
-
-    Returns:
-        扁平 ``key→value`` 字符串快照(已补默认 + 枚举回落)。
-    """
-    raw: Dict[str, str] = {}
-    if repo is not None:
-        try:
-            raw = dict(repo.get_all_settings() or {})
-        except Exception:  # noqa: BLE001 - 读库失败不阻断运行
-            logger.debug("读取 settings 失败,回落默认值", exc_info=True)
-            raw = {}
-
+    """读取文件权威态并补齐合法默认值；迁移失败时回落旧 SQLite。"""
+    raw = _read_authoritative_settings(repo)
     snapshot: Dict[str, str] = dict(DEFAULT_SETTINGS)
-    # 用库中实际值覆盖默认(仅覆盖存在的 key)
-    for k, v in raw.items():
-        if v is None:
-            continue
-        snapshot[k] = str(v)
+    for key, value in raw.items():
+        if value is not None:
+            snapshot[key] = _snapshot_value(value)
 
-    # 枚举类 key 的合法性回落(非法取值不改库,仅本快照内回落)
-    snapshot["llm.provider"] = (snapshot.get("llm.provider") or "deepseek").strip().lower() or "deepseek"
-    snapshot["llm.model"] = (snapshot.get("llm.model") or "deepseek-v4-flash").strip() or "deepseek-v4-flash"
-    snapshot["asr.engine"] = _coerce_enum(snapshot.get("asr.engine"), _ASR_ENGINES, "asrtools")
-    snapshot["asr.strategy"] = _coerce_enum(
-        snapshot.get("asr.strategy"), frozenset({"online_first", "single"}), "online_first"
+    if "llm.provider" not in raw:
+        env_provider = (os.environ.get("LLM_PROVIDER") or "").strip().lower()
+        if env_provider in SUPPORTED_LLM_PROVIDERS:
+            snapshot["llm.provider"] = env_provider
+    provider = (snapshot.get("llm.provider") or "deepseek").strip().lower()
+    snapshot["llm.provider"] = (
+        provider if provider in SUPPORTED_LLM_PROVIDERS else "deepseek"
     )
-    snapshot["pdf.mode"] = _coerce_enum(snapshot.get("pdf.mode"), _PDF_MODES, "pypdf")
+
+    profile_overrides = parse_json_object(snapshot.get("llm.providers"))
+    profiles = provider_profiles(profile_overrides)
+    selected_profile = profiles[snapshot["llm.provider"]]
+    if "llm.model" not in raw:
+        prefix = snapshot["llm.provider"].upper()
+        snapshot["llm.model"] = (
+            os.environ.get(f"{prefix}_MODEL")
+            or selected_profile["model"]
+        )
+    snapshot["llm.model"] = str(
+        snapshot.get("llm.model") or selected_profile["model"]
+    ).strip()
+    snapshot["llm.providers"] = json.dumps(profiles, ensure_ascii=False)
+
+    snapshot["asr.engine"] = _coerce_enum(
+        snapshot.get("asr.engine"), _ASR_ENGINES, "bcut"
+    )
+    snapshot["asr.strategy"] = _coerce_enum(
+        snapshot.get("asr.strategy"),
+        frozenset({"online_first", "single"}),
+        "online_first",
+    )
+    snapshot["pdf.mode"] = _coerce_enum(
+        snapshot.get("pdf.mode"), _PDF_MODES, "pypdf"
+    )
     snapshot["note.output_language"] = _coerce_enum(
         snapshot.get("note.output_language"), _LANGUAGES, "zh"
     )
-    snapshot["note.extract_images"] = "true" if _as_bool(snapshot.get("note.extract_images")) else "false"
-    for k in (
+    snapshot["note.detail_level"] = _coerce_enum(
+        snapshot.get("note.detail_level"), _DETAIL_LEVELS, "balanced"
+    )
+    snapshot["note.extract_images"] = (
+        "true" if _as_bool(snapshot.get("note.extract_images")) else "false"
+    )
+    for key in (
         "retention.video",
         "retention.audio",
         "retention.srt",
         "retention.note",
         "retention.screenshot",
     ):
-        snapshot[k] = _coerce_enum(snapshot.get(k), _RETENTION_VALUES, DEFAULT_SETTINGS[k])
+        snapshot[key] = _coerce_enum(
+            snapshot.get(key), _RETENTION_VALUES, DEFAULT_SETTINGS[key]
+        )
     return snapshot
 
 
-def _as_bool(value: Any) -> bool:
-    """把字符串/布尔/数字归一为布尔;空/非法为 False。"""
-    if isinstance(value, bool):
-        return value
-    s = str(value).strip().lower() if value is not None else ""
-    return s in ("1", "true", "yes", "on")
+def parse_json_object(raw: Any) -> dict[str, Any]:
+    if isinstance(raw, dict):
+        return dict(raw)
+    try:
+        parsed = json.loads(raw or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return dict(parsed) if isinstance(parsed, dict) else {}
 
 
 def get_credentials(snapshot: Dict[str, str], provider: str) -> Dict[str, Any]:
-    """从快照解析指定 provider 的凭证字典。
+    """解析指定 provider 凭证，优先加密文件，其次旧快照和环境变量。"""
+    normalized = str(provider or "").strip().lower()
+    resolved: dict[str, Any] = {}
+    credential_store = CredentialStore()
+    if credential_store.path.exists():
+        try:
+            resolved.update(
+                credential_store.read_all().get("llm", {}).get(normalized, {})
+            )
+        except Exception:
+            logger.exception("读取加密 LLM 凭证失败")
 
-    ``llm.credentials`` 存 JSON,支持两种聚合形态:
-    - 按 provider 聚合:``{"deepseek": {"api_key":..., "base_url":..., "model":...}}``
-    - 扁平:``{"api_key":..., "base_url":...}``(视作当前 provider 的凭证)
+    legacy = parse_json_object(snapshot.get("llm.credentials"))
+    if normalized in legacy and isinstance(legacy[normalized], dict):
+        for key, value in legacy[normalized].items():
+            resolved.setdefault(key, value)
+    elif not any(isinstance(value, dict) for value in legacy.values()):
+        for key, value in legacy.items():
+            resolved.setdefault(key, value)
 
-    解析失败回落空字典,不抛错。
-    """
-    raw = snapshot.get("llm.credentials") or "{}"
-    try:
-        creds = json.loads(raw) if isinstance(raw, str) else dict(raw or {})
-    except (ValueError, TypeError):
-        logger.debug("llm.credentials 解析失败,回落空凭证", exc_info=True)
-        return {}
-    if not isinstance(creds, dict):
-        return {}
-    if provider in creds and isinstance(creds[provider], dict):
-        return dict(creds[provider])
-    # 扁平形态:去掉可能存在的 provider 子键后整体返回
-    flat = {k: v for k, v in creds.items() if k in creds and not isinstance(v, (dict, list))}
-    return flat
+    profile_overrides = parse_json_object(snapshot.get("llm.providers"))
+    profiles = provider_profiles(profile_overrides)
+    if normalized in profiles:
+        explicit_profile = profile_overrides.get(normalized)
+        explicit_profile = (
+            explicit_profile if isinstance(explicit_profile, dict) else {}
+        )
+        for field in ("base_url", "model", "timeout", "display_name"):
+            value = explicit_profile.get(field)
+            if value not in (None, ""):
+                resolved.setdefault(field, value)
+
+    prefix = normalized.upper()
+    for field, value in {
+        "api_key": os.environ.get(f"{prefix}_API_KEY"),
+        "base_url": os.environ.get(f"{prefix}_BASE_URL"),
+    }.items():
+        is_registry_default = (
+            field == "base_url"
+            and normalized in DEFAULT_LLM_BASE_URLS
+            and resolved.get(field) == DEFAULT_LLM_BASE_URLS[normalized]
+        )
+        if value and (not resolved.get(field) or is_registry_default):
+            resolved[field] = value
+    if normalized in profiles:
+        for field in ("base_url", "model", "timeout", "display_name"):
+            value = profiles[normalized].get(field)
+            if value not in (None, ""):
+                resolved.setdefault(field, value)
+    if normalized in DEFAULT_LLM_BASE_URLS and not resolved.get("base_url"):
+        resolved["base_url"] = DEFAULT_LLM_BASE_URLS[normalized]
+    if normalized == "ollama" and not resolved.get("api_key"):
+        resolved["api_key"] = "ollama"
+    return resolved
+
+
+def get_external_asr_api_key() -> str:
+    """读取加密的外部 ASR API Key，并兼容环境变量部署。"""
+    store = CredentialStore()
+    if store.path.exists():
+        try:
+            value = store.get("asr", "external", "api_key")
+            if value:
+                return str(value)
+        except Exception:
+            logger.exception("读取加密外部 ASR 凭证失败")
+    return os.environ.get("EXTERNAL_ASR_API_KEY", "")
+
+
+def get_bilibili_cookies(snapshot: Dict[str, str] | None = None) -> dict[str, str]:
+    """读取并解析加密的 Bilibili Cookie，仅返回下载器需要的三个字段。"""
+    raw: Any = ""
+    store = CredentialStore()
+    if store.path.exists():
+        try:
+            raw = store.get("media", "bilibili", "cookie", "")
+        except Exception:
+            logger.exception("读取加密 Bilibili Cookie 失败")
+    if not raw:
+        raw = os.environ.get("BILIBILI_COOKIE", "")
+    if not raw and snapshot:
+        # 仅用于迁移失败时的旧 SQLite 回落；新设置文件不会保存该键。
+        raw = snapshot.get("bilibili.cookie", "")
+
+    parsed: dict[str, Any] = {}
+    if isinstance(raw, dict):
+        parsed = dict(raw)
+    elif raw:
+        text = str(raw).strip()
+        parsed = parse_json_object(text)
+        if not parsed:
+            for item in text.split(";"):
+                name, separator, value = item.strip().partition("=")
+                if separator and name:
+                    parsed[name] = value
+
+    allowed = ("SESSDATA", "bili_jct", "DedeUserID")
+    return {
+        key: str(parsed[key]).strip()
+        for key in allowed
+        if str(parsed.get(key, "")).strip()
+    }
+
+
+def default_model_for(provider: str) -> str:
+    normalized = str(provider or "").strip().lower()
+    if normalized not in SUPPORTED_LLM_PROVIDERS:
+        raise ValueError(f"不支持的 LLM 提供商：{provider}")
+    return DEFAULT_LLM_MODELS[normalized]
 
 
 __all__ = [
-    "DEFAULT_SETTINGS",
-    "MIN_CONCURRENCY",
-    "MAX_CONCURRENCY",
     "DEFAULT_CONCURRENCY",
+    "DEFAULT_LLM_BASE_URLS",
+    "DEFAULT_LLM_MODELS",
+    "DEFAULT_SETTINGS",
+    "MAX_CONCURRENCY",
+    "MIN_CONCURRENCY",
+    "SUPPORTED_LLM_PROVIDERS",
     "clamp_concurrency",
-    "get_settings_snapshot",
+    "default_model_for",
+    "get_bilibili_cookies",
     "get_credentials",
+    "get_external_asr_api_key",
+    "get_settings_snapshot",
+    "parse_json_object",
 ]

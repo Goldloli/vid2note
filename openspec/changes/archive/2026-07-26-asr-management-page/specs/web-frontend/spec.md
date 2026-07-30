@@ -2,16 +2,16 @@
 
 ### Requirement: ASR 管理页
 
-系统 MUST 提供一个独立的「ASR」管理页（通过侧栏导航可达），集中承载 ASR 引擎的全部配置与诊断：三种引擎的说明与适用场景、默认引擎与引擎策略选择、外部 endpoint 配置、各引擎就绪态、以及连通性测试。在线 ASR 引擎在用户可见文案中 MUST 对外称作「必剪云接口」（不得出现 AsrTools / 剪映 / 必剪 等技术名词作为面向用户的引擎名）。
+系统 MUST 提供一个独立的「ASR」管理页（通过侧栏导航可达），集中承载 ASR 引擎的全部配置与诊断：三种引擎的说明与适用场景、默认引擎与引擎策略选择、外部 endpoint 配置、各引擎就绪态、以及连通性测试。实验性在线 ASR 在用户可见文案中 MUST 对外称作「bcut」，不得暗示其为官方、稳定或保证免费的公共服务。
 
 #### Scenario: 三引擎说明可见
 
 - **WHEN** 用户打开 ASR 管理页
-- **THEN** 页面 MUST 展示三张引擎卡片：必剪云接口（在线·免费）/ Whisper 本地（离线·CPU）/ 外部 ASR（自建 HTTP），每张 MUST 含一句适用场景说明
+- **THEN** 页面 MUST 展示三张引擎卡片：bcut（在线·实验性）/ Whisper 本地（离线·CPU）/ 外部 ASR（自建 HTTP），每张 MUST 含一句适用场景说明
 
 #### Scenario: 默认引擎与策略选择并持久化
 
-- **WHEN** 用户在 ASR 页选择默认引擎为「必剪云接口」并将策略切到「在线优先·失败转本地」，保存
+- **WHEN** 用户在 ASR 页选择默认引擎为「bcut」并将策略切到「在线优先·失败转本地」，保存
 - **THEN** 该选择 MUST 持久化到后端（`asr.engine` / `asr.strategy`），刷新或重启后保留，且主控台新建任务的默认引擎 MUST 同步
 
 #### Scenario: 外部 endpoint 可配置
@@ -22,7 +22,7 @@
 #### Scenario: 各引擎就绪态展示
 
 - **WHEN** 用户打开 ASR 页
-- **THEN** 页面 MUST 展示各引擎就绪态：必剪云接口的 provider、Whisper 本地的模型文件 / binary 是否就绪、外部 ASR 是否已配置 endpoint；数据 MUST 来自后端 `GET /asr/status` 而非前端臆测
+- **THEN** 页面 MUST 展示各引擎就绪态：bcut 的 provider、Whisper 本地的模型文件 / binary 是否就绪、外部 ASR 是否已配置 endpoint；数据 MUST 来自后端 `GET /asr/status` 而非前端臆测
 
 #### Scenario: 连通性测试反馈结果
 
@@ -57,11 +57,11 @@
 
 ### Requirement: 设置页 ASR 与 LLM 引擎配置
 
-设置页 MUST 提供 ASR 引擎选择（含云端 / 本地 / 外部三种可选引擎）与云端 API Key 填写及连通性测试入口；ASR 引擎选择 MUST 持久化到后端 `asr.engine`（修复 v1 早期 key 名不匹配导致存不进的问题）；MUST 提供引擎策略选择（在线优先·失败转本地 / 指定单一）；MUST 提供八家 LLM 提供商（通义千问 Qwen、DeepSeek、智谱 GLM、Moonshot/Kimi、百度文心、字节豆包 Doubao、MiniMax、Ollama 本地）的配置，每家 MUST 可填写其所需的凭证（API Key / Secret Key / Group ID / Host 之一或多项）、模型与 Base URL，并 MUST 提供连接测试。默认 LLM 提供商 MUST 为 DeepSeek（模型 `deepseek-v4-flash`）；默认在线 ASR provider MUST 为必剪（`bcut`）。
+设置页 MUST 提供 ASR 引擎选择（含在线 / 本地 / 外部三种可选引擎）与连通性测试入口；ASR 引擎选择 MUST 持久化到后端 `asr.engine`（修复 v1 早期 key 名不匹配导致存不进的问题）；MUST 提供引擎策略选择（在线优先·失败转本地 / 指定单一）；MUST 提供八家 LLM 提供商（通义千问 Qwen、DeepSeek、智谱 GLM、Moonshot/Kimi、百度文心、字节豆包 Doubao、MiniMax、Ollama 本地）的配置，每家 MUST 可填写其所需的凭证（API Key / Secret Key / Group ID / Host 之一或多项）、模型与 Base URL，并 MUST 提供连接测试。默认 LLM 提供商 MUST 为 DeepSeek（模型 `deepseek-v4-flash`）；默认在线 ASR provider MUST 为 `bcut`。
 
 #### Scenario: ASR 引擎可选且持久化
 
-- **WHEN** 用户在设置页的 ASR 区域选择某一 ASR 引擎（必剪云接口 / Whisper 本地 / 外部 ASR 三者之一）并保存
+- **WHEN** 用户在设置页的 ASR 区域选择某一 ASR 引擎（bcut / Whisper 本地 / 外部 ASR 三者之一）并保存
 - **THEN** 该选择 MUST 被持久化到 `asr.engine`，刷新或重启容器后 MUST 仍为该值，且主控台新建任务的 ASR 默认选中项 MUST 同步更新
 
 #### Scenario: ASR 引擎策略可选

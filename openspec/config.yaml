@@ -19,7 +19,7 @@ context: |
   ## 外部工具依赖
   - yt-dlp: 下载整段高清视频(最高画质);bilibili 需 cookie(SESSDATA / bili_jct / DedeUserID)。
   - ffmpeg: 提取音频;视频按时间点截图。
-  - AsrTools (bk_asr): 在线 ASR(剪映/必剪/快手),纯 HTTP,无需 GPU。
+  - bcut: 实验性在线 ASR 兼容能力,纯 HTTP,无需本地 GPU,不保证持续可用。
   - whisper.cpp: 本地 ASR(CPU + int8 量化);长音频 VAD 切片并行 + 时间戳偏移拼回。留"外部 ASR endpoint"扩展位。
   - MinerU: PDF 版面结构化拆解(公式 LaTeX / 表格 HTML / 版面还原),可选;CPU pipeline 模式,留 GPU 扩展位。
 

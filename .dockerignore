@@ -4,8 +4,16 @@
 **/node_modules
 frontend/dist
 .git
+.github
 data/
 logs/
+.env
+.env.*
+!.env.example
+**/*.db
+**/*.log
+**/.coverage
+**/.pytest_cache
 openspec/
 .beads/
 .codegraph/

@@ -44,6 +44,8 @@ class ConfigResponse(BaseModel):
     baidu: Optional[dict] = None
     doubao: Optional[dict] = None
     minimax: Optional[dict] = None
+    ollama: Optional[dict] = None
+    custom: Optional[dict] = None
     processing: dict
     advanced: dict
     pdf_watermarks: dict
@@ -80,6 +82,8 @@ async def get_config():
         baidu=config.baidu.model_dump() if config.baidu else None,
         doubao=config.doubao.model_dump() if config.doubao else None,
         minimax=config.minimax.model_dump() if config.minimax else None,
+        ollama=config.ollama.model_dump() if config.ollama else None,
+        custom=config.custom.model_dump() if config.custom else None,
         processing={
             "extract_images": config.processing.extract_images,
             "image_quality": config.processing.image_quality,
@@ -151,6 +155,14 @@ async def update_config(config_update: dict):
             from ..config import MiniMaxConfig
             config.minimax = MiniMaxConfig(**config_update['minimax'])
 
+        if 'ollama' in config_update:
+            from ..config import OllamaConfig
+            config.ollama = OllamaConfig(**config_update['ollama'])
+
+        if 'custom' in config_update:
+            from ..config import CustomConfig
+            config.custom = CustomConfig(**config_update['custom'])
+
         # 更新处理选项
         if 'processing' in config_update:
             for key, value in config_update['processing'].items():
@@ -210,47 +222,20 @@ async def verify_api_key(request: VerifyKeyRequest):
 
 @router.get("/models")
 async def get_available_models():
-    """
-    获取可用的模型列表
-    """
+    """遗留路由的只读模型提示；稳定 API 使用 Provider 注册表。"""
     return {
-        "qwen": [
-            {"id": "qwen-turbo", "name": "Qwen Turbo", "description": "快速处理，性价比高"},
-            {"id": "qwen-plus", "name": "Qwen Plus", "description": "标准处理，质量均衡"},
-            {"id": "qwen-max", "name": "Qwen Max", "description": "高质量，复杂内容"}
-        ],
-        "glm": [
-            {"id": "glm-4-flash", "name": "GLM-4-Flash", "description": "免费额度大"},
-            {"id": "glm-4-air", "name": "GLM-4-Air", "description": "质量与速度平衡"},
-            {"id": "glm-4", "name": "GLM-4", "description": "长文本支持好"},
-            {"id": "glm-5", "name": "GLM-5", "description": "综合能力最强"}
-        ],
-        "deepseek": [
-            {"id": "deepseek-chat", "name": "DeepSeek Chat", "description": "通用对话，性价比高"},
-            {"id": "deepseek-coder", "name": "DeepSeek Coder", "description": "代码专用模型"},
-            {"id": "deepseek-reasoner", "name": "DeepSeek Reasoner", "description": "推理能力强"}
-        ],
-        "moonshot": [
-            {"id": "moonshot-v1-8k", "name": "Kimi K1 8K", "description": "快速响应"},
-            {"id": "moonshot-v1-32k", "name": "Kimi K1 32K", "description": "长文档处理"},
-            {"id": "moonshot-v1-128k", "name": "Kimi K1 128K", "description": "超长上下文"}
-        ],
-        "baidu": [
-            {"id": "ernie-bot-4", "name": "文心一言4.0", "description": "高质量理解"},
-            {"id": "ernie-bot", "name": "文心一言", "description": "标准版"},
-            {"id": "ernie-bot-turbo", "name": "文心一言Turbo", "description": "快速响应"},
-            {"id": "ernie-speed", "name": "文心Speed", "description": "极速版"},
-            {"id": "ernie-lite", "name": "文心Lite", "description": "轻量版"}
-        ],
+        "deepseek": [{"id": "deepseek-v4-flash", "name": "DeepSeek V4 Flash"}],
+        "qwen": [{"id": "qwen3.7-plus", "name": "Qwen 3.7 Plus"}],
+        "glm": [{"id": "glm-5.2", "name": "GLM 5.2"}],
+        "moonshot": [{"id": "kimi-k2.6", "name": "Kimi K2.6"}],
+        "baidu": [{"id": "ernie-5.0", "name": "ERNIE 5.0"}],
         "doubao": [
-            {"id": "doubao-pro-4k", "name": "豆包Pro 4K", "description": "专业版短文本"},
-            {"id": "doubao-pro-32k", "name": "豆包Pro 32K", "description": "专业版长文本"},
-            {"id": "doubao-pro-128k", "name": "豆包Pro 128K", "description": "专业版超长文本"},
-            {"id": "doubao-lite-4k", "name": "豆包Lite 4K", "description": "轻量版"}
+            {
+                "id": "doubao-seed-2-0-lite-260215",
+                "name": "Doubao Seed 2.0 Lite",
+            }
         ],
-        "minimax": [
-            {"id": "abab6.5-chat", "name": "abab6.5", "description": "综合能力均衡"},
-            {"id": "abab6.5s-chat", "name": "abab6.5s", "description": "快速响应"},
-            {"id": "abab6-chat", "name": "abab6", "description": "长文本支持"}
-        ]
+        "minimax": [{"id": "MiniMax-M2.7", "name": "MiniMax M2.7"}],
+        "ollama": [{"id": "qwen3.5", "name": "Qwen 3.5"}],
+        "custom": [],
     }

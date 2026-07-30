@@ -32,12 +32,21 @@ from src.runtime import (
     RuntimeWorker,
     TaskService,
     clamp_concurrency,
+    get_credentials,
+    get_bilibili_cookies,
     get_cancel_registry,
     get_settings_snapshot,
 )
+from src.runtime.settings_store import CredentialStore
 from src.runtime import runner as runner_mod
 from src.runtime import worker as worker_mod
 from src.runtime.adapters import RepoStateAdapter
+
+
+@pytest.fixture(autouse=True)
+def isolate_runtime_settings(tmp_path, monkeypatch):
+    """运行时单测不得读取项目目录中的真实 settings.json。"""
+    monkeypatch.setenv("DATA_ROOT", str(tmp_path / "data"))
 
 
 # --------------------------------------------------------------------------- #
@@ -113,10 +122,11 @@ class TestSettings:
         snap = get_settings_snapshot(None)
         assert snap["llm.provider"] == "deepseek"
         assert snap["llm.model"] == "deepseek-v4-flash"
-        assert snap["asr.engine"] == "asrtools"
+        assert snap["asr.engine"] == "bcut"
         assert snap["pdf.mode"] == "pypdf"
         assert snap["concurrency.max"] == "1"
         assert snap["note.output_language"] == "zh"
+        assert snap["note.detail_level"] == "balanced"
         assert snap["note.extract_images"] == "false"
         # 五类保留默认
         assert snap["retention.video"] == "7d"
@@ -130,13 +140,13 @@ class TestSettings:
         snap = get_settings_snapshot(repo)
         assert snap["llm.provider"] == "glm"
         assert snap["concurrency.max"] == "3"
-        # 未覆盖的仍取默认
-        assert snap["llm.model"] == "deepseek-v4-flash"
+        # provider 已覆盖但 model 未覆盖时，使用该 provider 的匹配默认值
+        assert snap["llm.model"] == "glm-5.2"
 
     def test_illegal_enum_falls_back(self):
         repo = FakeRepo(settings={"asr.engine": "nonsense", "concurrency.max": "99"})
         snap = get_settings_snapshot(repo)
-        assert snap["asr.engine"] == "asrtools"
+        assert snap["asr.engine"] == "bcut"
         # concurrency.max 字面量原样保留(由 clamp_concurrency 在使用处回落)
         assert snap["concurrency.max"] == "99"
 
@@ -149,6 +159,74 @@ class TestSettings:
         assert clamp_concurrency("2") == 2
         assert clamp_concurrency("bad") == DEFAULT_CONCURRENCY == 1
         assert clamp_concurrency(None) == 1
+
+    @pytest.mark.parametrize(
+        ("phase", "completed", "total", "percent", "message"),
+        [
+            ("understand", 2, 4, 42, "正在理解字幕第 2/4 段"),
+            ("blueprint", 1, 1, 62, "正在构建课程知识结构"),
+            ("draft", 1, 1, 74, "正在撰写第 1/1 章"),
+            ("review", 1, 1, 84, "正在审校第 1/1 章"),
+        ],
+    )
+    def test_exhaustive_note_stage_progress_is_user_readable(
+        self,
+        phase,
+        completed,
+        total,
+        percent,
+        message,
+    ):
+        assert runner_mod._note_stage_progress(phase, completed, total) == (
+            percent,
+            message,
+        )
+
+    def test_environment_is_used_when_sqlite_has_no_override(self, monkeypatch):
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        monkeypatch.setenv("OLLAMA_MODEL", "qwen3:8b")
+        monkeypatch.setenv("OLLAMA_BASE_URL", "http://ollama.test/v1")
+        snap = get_settings_snapshot(None)
+        assert snap["llm.provider"] == "ollama"
+        assert snap["llm.model"] == "qwen3:8b"
+        credentials = get_credentials(snap, "ollama")
+        assert credentials["api_key"] == "ollama"
+        assert credentials["base_url"] == "http://ollama.test/v1"
+
+    def test_bilibili_cookie_reads_encrypted_header_and_filters_fields(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("DATA_ROOT", str(tmp_path))
+        CredentialStore(tmp_path).update_fields(
+            "media",
+            "bilibili",
+            {
+                "cookie": (
+                    "SESSDATA=session-value; bili_jct=csrf-value; "
+                    "DedeUserID=42; ignored=not-forwarded"
+                )
+            },
+        )
+
+        assert get_bilibili_cookies() == {
+            "SESSDATA": "session-value",
+            "bili_jct": "csrf-value",
+            "DedeUserID": "42",
+        }
+
+    def test_bilibili_cookie_supports_json_environment_fallback(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("DATA_ROOT", str(tmp_path))
+        monkeypatch.setenv(
+            "BILIBILI_COOKIE",
+            '{"SESSDATA":"session","bili_jct":"csrf","extra":"ignored"}',
+        )
+
+        assert get_bilibili_cookies() == {
+            "SESSDATA": "session",
+            "bili_jct": "csrf",
+        }
 
 
 # --------------------------------------------------------------------------- #
@@ -180,6 +258,7 @@ class TestCreateTask:
         assert task.status == TaskStatus.PENDING
         assert task.llm_provider == "deepseek"
         assert task.llm_model == "deepseek-v4-flash"
+        assert task.note_detail_level == "balanced"
         assert task.mindmap_formats == ["xmind", "png", "md"]
         assert called["task_id"] == task.id
         # 已入库
@@ -216,6 +295,7 @@ class TestCreateTask:
             asr_engine="whisper_cpp",
             extract_images=True,
             output_language="en",
+            note_detail_level="exhaustive",
             mindmap_formats=["xmind", "md"],
         )
         assert task.llm_provider == "qwen"
@@ -223,7 +303,35 @@ class TestCreateTask:
         assert task.asr_engine == "whisper_cpp"
         assert task.extract_images is True
         assert task.output_language == "en"
+        assert task.note_detail_level == "exhaustive"
         assert task.mindmap_formats == ["xmind", "md"]
+
+    def test_provider_override_uses_matching_default_model(self, service, monkeypatch):
+        monkeypatch.setattr("src.runtime.task_service.enqueue", lambda *a, **k: None)
+        task = service.create_task(
+            source_url="https://youtu.be/ollama",
+            llm_provider="ollama",
+        )
+        assert task.llm_provider == "ollama"
+        assert task.llm_model == "qwen3.5"
+
+    @pytest.mark.parametrize(
+        ("option", "value"),
+        [
+            ("llm_provider", "unknown"),
+            ("asr_engine", "unknown"),
+            ("pdf_mode", "mineru"),
+            ("output_language", "fr"),
+            ("note_detail_level", "encyclopedic"),
+            ("mindmap_formats", ["xmind", "exe"]),
+        ],
+    )
+    def test_invalid_engine_options_are_rejected(self, service, option, value):
+        with pytest.raises(ValueError):
+            service.create_task(
+                source_url="https://youtu.be/invalid-options",
+                **{option: value},
+            )
 
 
 class TestRerun:
@@ -298,7 +406,12 @@ class TestBatch:
     def test_batch_rerun_clones_local_video(self, service, monkeypatch):
         monkeypatch.setattr("src.runtime.task_service.enqueue", lambda *a, **k: None)
         up = _make_uploaded(service.data_root / "temp" / "up" / "a.mp4", "a.mp4", "video/mp4")
-        src = service.create_task(uploaded=up, llm_provider="glm", mindmap_formats=["md"])
+        src = service.create_task(
+            uploaded=up,
+            llm_provider="glm",
+            note_detail_level="exhaustive",
+            mindmap_formats=["md"],
+        )
         src.status = TaskStatus.COMPLETED
 
         result = service.batch([src.id], action="rerun")
@@ -309,6 +422,7 @@ class TestBatch:
         assert new_task.source_type == src.source_type
         # 复用了源任务的配置
         assert new_task.llm_provider == "glm"
+        assert new_task.note_detail_level == "exhaustive"
         assert new_task.mindmap_formats == ["md"]
         assert new_task.status == TaskStatus.PENDING
         # 复用了本地输入文件

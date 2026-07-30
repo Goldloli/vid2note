@@ -1,39 +1,42 @@
 # vid2note 基底(ai_srt2md)配置模板 —— 凭证已置空,真实值勿提交。
-# 注:v1 运行时主要用 SQLite settings(经 Web「设置」页),本文件为基底兼容保留。
+# 注:v1 运行时使用 data/config/settings.json + credentials.enc；
+# 本文件只供未挂载的基底兼容模块参考，真实凭证勿写入。
 advanced:
   chunk_size: 4000
   max_retries: 3
   temperature: 0.3
 baidu:
   api_key: ''
-  base_url: https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop
-  model: ernie-bot-4
-  secret_key: ''
+  base_url: https://qianfan.baidubce.com/v2
+  model: ernie-5.0
 deepseek:
   api_key: ''
   base_url: https://api.deepseek.com/v1
-  model: deepseek-chat
+  model: deepseek-v4-flash
 default_models:
-  glm: glm-4-flash
-  qwen: qwen-plus
+  glm: glm-5.2
+  qwen: qwen3.7-plus
 doubao:
   api_key: ''
   base_url: https://ark.cn-beijing.volces.com/api/v3
-  model: doubao-pro-4k
+  model: doubao-seed-2-0-lite-260215
 glm:
   api_key: ''
   base_url: https://open.bigmodel.cn/api/paas/v4/
-  model: glm-4-flash
+  model: glm-5.2
 llm_provider: deepseek
 minimax:
   api_key: ''
-  base_url: https://api.minimax.chat/v1
-  group_id: ''
-  model: abab6.5-chat
+  base_url: https://api.minimaxi.com/v1
+  model: MiniMax-M2.7
+ollama:
+  api_key: ollama
+  base_url: http://host.docker.internal:11434/v1
+  model: qwen3.5
 moonshot:
   api_key: ''
   base_url: https://api.moonshot.cn/v1
-  model: moonshot-v1-8k
+  model: kimi-k2.6
 processing:
   extract_images: false
   image_quality: medium
@@ -42,9 +45,13 @@ processing:
 qwen:
   api_key: ''
   base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
-  model: qwen-plus
+  model: qwen3.7-plus
+custom:
+  api_key: ''
+  base_url: ''
+  model: ''
 server:
   debug: false
-  host: 0.0.0.0
+  host: 127.0.0.1
   port: 8765
 version: '1.0'

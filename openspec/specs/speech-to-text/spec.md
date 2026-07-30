@@ -1,7 +1,7 @@
 # speech-to-text Specification
 
 ## Purpose
-TBD - created by archiving change build-vid2note-v1. Update Purpose after archive.
+定义在线、本地和外部 ASR 引擎、降级策略、VAD 分段与 SRT 输出行为。确保不同音频长度和故障条件下都能得到可追踪、时间戳单调的转录结果。
 ## Requirements
 ### Requirement: 输入输出契约
 
@@ -24,12 +24,12 @@ speech-to-text capability 的核心契约是:接收一个上游流水线(音频�
 
 ### Requirement: 三种 ASR 引擎与统一配置
 
-该 capability SHALL 支持三种可切换的 ASR 引擎：① 在线「必剪云接口」（对接必剪免费 ASR，作为默认优先引擎，默认 provider 为 `bcut`）；② 本地 whisper.cpp（CPU 推理 + int8 量化模型）；③ 外部 ASR endpoint（通过配置项指向用户自建的 HTTP ASR 服务，作为扩展位）。引擎来源 MUST 通过统一的配置项指定，且配置项 SHALL 能明确区分这三种来源。面向用户的文案 MUST 使用「必剪云接口」，MUST NOT 在 UI 中暴露 AsrTools / 剪映 等内部技术名词作为引擎名。
+该 capability SHALL 支持三种可切换的 ASR 引擎：① 实验性在线 `bcut`（作为默认优先引擎，默认 provider 为 `bcut`，依赖外部服务且不保证持续可用）；② 本地 whisper.cpp（CPU 推理 + int8 量化模型）；③ 外部 ASR endpoint（通过配置项指向用户自建的 HTTP ASR 服务，作为扩展位）。引擎来源 MUST 通过统一的配置项指定，且配置项 SHALL 能明确区分这三种来源。面向用户的文案 MUST 使用「bcut」，MUST NOT 把该能力描述为官方、稳定或保证免费的云服务，也不得暴露内部兼容实现名。
 
-#### Scenario: 配置在线 AsrTools 引擎
+#### Scenario: 配置在线 bcut 引擎
 
-- **WHEN** 引擎配置项设置为使用在线必剪云接口（默认 provider `bcut`），且网络与签名服务可用
-- **THEN** 该 capability MUST 使用在线必剪云接口引擎完成转写，返回的 SRT 内容由该引擎产出
+- **WHEN** 引擎配置项设置为使用在线 `bcut`（默认 provider `bcut`），且外部服务可用
+- **THEN** 该 capability MUST 使用在线 `bcut` 引擎完成转写，返回的 SRT 内容由该引擎产出
 
 #### Scenario: 配置本地 whisper.cpp 引擎
 
@@ -43,21 +43,21 @@ speech-to-text capability 的核心契约是:接收一个上游流水线(音频�
 
 ### Requirement: 引擎选择策略
 
-该 capability SHALL 支持两种引擎选择策略:「在线优先,失败转本地」(默认)与「指定单一引擎」。在「在线优先」策略下,在线 AsrTools 为首选,当其不可用时自动降级到本地 whisper.cpp;在「指定单一引擎」策略下,MUST 只使用配置中指定的那一种引擎,不进行任何降级。
+该 capability SHALL 支持两种引擎选择策略:「在线优先,失败转本地」(默认)与「指定单一引擎」。在「在线优先」策略下,在线 `bcut` 为首选,当其不可用时自动降级到本地 whisper.cpp;在「指定单一引擎」策略下,MUST 只使用配置中指定的那一种引擎,不进行任何降级。
 
 #### Scenario: 在线优先策略下在线引擎可用
 
-- **WHEN** 引擎策略配置为「在线优先,失败转本地」,且在线 AsrTools 引擎可用
-- **THEN** 该 capability MUST 使用在线 AsrTools 完成转写,MUST NOT 触发本地引擎
+- **WHEN** 引擎策略配置为「在线优先,失败转本地」,且在线 `bcut` 引擎可用
+- **THEN** 该 capability MUST 使用在线 `bcut` 完成转写,MUST NOT 触发本地引擎
 
 #### Scenario: 在线优先策略下在线引擎失败转本地
 
-- **WHEN** 引擎策略配置为「在线优先,失败转本地」,在线 AsrTools 引擎调用失败(如服务不可用或鉴权失败),且本地 whisper.cpp 可用
+- **WHEN** 引擎策略配置为「在线优先,失败转本地」,在线 `bcut` 引擎调用失败(如服务不可用或协议变化),且本地 whisper.cpp 可用
 - **THEN** 该 capability MUST 自动切换到本地 whisper.cpp 完成转写,最终仍产出完整 SRT,并记录一次降级事件
 
 #### Scenario: 指定单一引擎策略不降级
 
-- **WHEN** 引擎策略配置为「指定单一引擎」且指定为在线 AsrTools,而在线引擎调用失败
+- **WHEN** 引擎策略配置为「指定单一引擎」且指定为在线 `bcut`,而在线引擎调用失败
 - **THEN** 该 capability SHALL NOT 自动降级到本地引擎,MUST 直接以该引擎失败结束并返回错误
 
 ### Requirement: 长音频 VAD 分段并行转录
@@ -100,12 +100,12 @@ speech-to-text capability 的核心契约是:接收一个上游流水线(音频�
 
 ### Requirement: 在线引擎降级与日志记录
 
-当在线 ASR 引擎(在线 AsrTools 或外部 endpoint)出现服务不可用、超时、限流(HTTP 429)或鉴权失败等情形时,该 capability SHALL 自动降级到可用的备选引擎(在「在线优先」策略下降级到本地 whisper.cpp),并 MUST 在日志中记录每一次降级事件,日志内容 SHALL 包含触发降级的原因(失败类型或 HTTP 状态码)、原引擎、降级目标引擎与时间戳。
+当在线 ASR 引擎(`bcut` 或外部 endpoint)出现服务不可用、超时、限流(HTTP 429)、协议变化或鉴权失败等情形时,该 capability SHALL 自动降级到可用的备选引擎(在「在线优先」策略下降级到本地 whisper.cpp),并 MUST 在日志中记录每一次降级事件,日志内容 SHALL 包含触发降级的原因(失败类型或 HTTP 状态码)、原引擎、降级目标引擎与时间戳。
 
 #### Scenario: 在线引擎限流时降级并记录
 
-- **WHEN** 在线 AsrTools 引擎返回限流(HTTP 429)或服务端错误,且引擎策略为「在线优先,失败转本地」
-- **THEN** 该 capability MUST 自动降级到本地 whisper.cpp 完成转写,且 MUST 在日志中记录一条降级事件,事件中包含触发原因(429/限流)、原引擎(AsrTools)、目标引擎(whisper.cpp)
+- **WHEN** 在线 `bcut` 引擎返回限流(HTTP 429)或服务端错误,且引擎策略为「在线优先,失败转本地」
+- **THEN** 该 capability MUST 自动降级到本地 whisper.cpp 完成转写,且 MUST 在日志中记录一条降级事件,事件中包含触发原因(429/限流)、原引擎(`bcut`)、目标引擎(whisper.cpp)
 
 #### Scenario: 在线引擎超时时降级并记录
 
@@ -117,3 +117,26 @@ speech-to-text capability 的核心契约是:接收一个上游流水线(音频�
 - **WHEN** 在线引擎失败,且本地 whisper.cpp 同样不可用(如模型文件缺失),已无可用引擎
 - **THEN** 该 capability MUST 抛出明确的「无可用 ASR 引擎」错误并终止,MUST NOT 返回部分 SRT,且终止前 SHALL 在日志中记录已尝试的引擎与各自失败原因
 
+### Requirement: ASR 引擎参数可配置与校验
+
+独立 ASR 页面 SHALL 允许配置现有 `AsrConfig` 实际消费的参数：bcut 超时；Whisper 模型路径、可选 binary 与识别语言；外部 ASR endpoint、API Key 与超时；VAD 触发阈值、目标分段时长、分段并发和请求超时。后端 MUST 对 URL、数值范围和枚举做白名单校验，非法请求 MUST 整体拒绝且不得部分写入。`whisper_device=cpu` 与 `whisper_compute_type=int8` SHALL 作为当前实现约束展示，MUST NOT 伪装成可用的 GPU 选项。
+
+#### Scenario: Whisper 配置用于引擎构造
+
+- **WHEN** 用户保存模型路径、binary 和识别语言后选择 Whisper 本地
+- **THEN** 后续任务构造 `WhisperCppEngine` 时 MUST 使用这些值，且仍 MUST 使用 CPU / int8
+
+#### Scenario: 外部 ASR 凭证从加密存储解析
+
+- **WHEN** 用户保存外部 endpoint、API Key 和超时后创建外部 ASR 任务
+- **THEN** endpoint 与超时 MUST 来自非敏感设置，API Key MUST 在运行时从加密凭证存储解析并用于 Authorization，普通设置响应 MUST NOT 返回明文
+
+#### Scenario: VAD 数值非法时整体拒绝
+
+- **WHEN** 用户把 VAD 阈值设为负数或把分段并发设为 0
+- **THEN** 后端 MUST 返回校验错误，原 ASR 配置 MUST 保持完整不变
+
+#### Scenario: 本地固定能力如实展示
+
+- **WHEN** 用户打开 Whisper 本地页签
+- **THEN** 页面 MUST 明确展示当前固定为 CPU 与 int8，MUST NOT 提供实际不会生效的 GPU 或其他量化选择

@@ -15,7 +15,7 @@
 **新增能力:**
 - 视频下载层:yt-dlp 下载整段高清视频(YouTube/Bilibili/直链),bilibili 支持 cookie(设置页粘贴 `SESSDATA`/`bili_jct`/`DedeUserID`)
 - 音频提取:ffmpeg 从视频提取音轨
-- ASR 转录层(取代 ai_srt2md「用户上传字幕」的输入方式):在线 AsrTools(剪映/必剪)优先 + 本地 whisper.cpp(CPU + int8)兜底;长音频 VAD 切片并行 + 时间戳偏移拼回;留「外部 ASR endpoint」扩展位
+- ASR 转录层(取代 ai_srt2md「用户上传字幕」的输入方式):实验性在线 bcut 优先 + 本地 whisper.cpp(CPU + int8)兜底;长音频 VAD 切片并行 + 时间戳偏移拼回;留「外部 ASR endpoint」扩展位
 - 截图嵌入 md(可开关,默认关):开启时字幕带时间戳喂 LLM,LLM 标记 `[IMG:ts]`,后端截视频对应帧插入笔记
 - PDF 拆解增强:新增 MinerU 版面结构化拆解方案(与现有 pypdf 并列,设置可选)
 - 任务流水线可视化:6 步 DAG、SSE 实时进度、节点级失败重跑、并发队列(1~3 可配,默认 1)
@@ -38,7 +38,7 @@
 
 ### New Capabilities
 - `media-ingest`: 视频下载(yt-dlp,整段高清,bilibili cookie)+ 音频提取(ffmpeg)
-- `speech-to-text`: ASR 转录(在线 AsrTools 优先 / 本地 whisper.cpp 兜底 / 外部 endpoint 扩展;长音频 VAD 切片并行 + 时间戳偏移拼回)
+- `speech-to-text`: ASR 转录(实验性在线 bcut 优先 / 本地 whisper.cpp 兜底 / 外部 endpoint 扩展;长音频 VAD 切片并行 + 时间戳偏移拼回)
 - `note-generation`: 字幕 → 结构化 Markdown 笔记(LLM 整理,纯文本喂省 token,8 家适配);含可选截图嵌入(开关,LLM 驱动)
 - `pdf-reference`: PDF 讲义对照(简单 pypdf / MinerU 版面拆解两方案,设置可选)
 - `mindmap-export`: 思维导图导出(xmind / png / md 大纲)
@@ -53,7 +53,7 @@
 ## Impact
 
 - **代码**:fork ai_srt2md 为仓库基底;新增下载 / ASR / 截图 / MinerU 集成 / 流水线编排 / Docker 等模块;前端 Vue3 视觉重构
-- **依赖**:新增 yt-dlp、ffmpeg、AsrTools(bk_asr)、whisper.cpp(binary 或绑定)、MinerU(重,torch/opencv 等)
-- **外部系统**:bilibili / YouTube(经 yt-dlp)、剪映/必剪 ASR 接口、DeepSeek 等 LLM API
+- **依赖**:新增 yt-dlp、ffmpeg、bcut 在线 ASR 兼容层、whisper.cpp(binary 或绑定)、MinerU(重,torch/opencv 等)
+- **外部系统**:bilibili / YouTube(经 yt-dlp)、实验性 bcut 在线 ASR、DeepSeek 等 LLM API
 - **运行环境**:Docker(macOS arm64 优先,CPU);SQLite + 本地 volume
 - **API**:在 ai_srt2md 现有 HTTP API(:8765)上扩展(任务创建接受视频链接、流水线状态/日志 SSE、设置、历史等)

@@ -1,9 +1,10 @@
 """
 简化版处理器 - 优先处理PDF结构，再处理字幕
 """
+import json
 import re
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Callable
 
 from ..prompts import (
     PDF_STRUCTURE_ANALYSIS,
@@ -13,6 +14,7 @@ from ..prompts import (
 )
 from ..utils.logger import TaskLogger
 from ..utils.srt_validator import SRTValidator
+from ..prompts.detail_level import detail_instruction, normalize_detail_level
 from .security_constants import (
     PROMPT_INJECTION_PATTERNS,
     DANGEROUS_CHARACTERS,
@@ -34,6 +36,15 @@ except Exception as e:
 # Maximum file size: 100MB
 MAX_FILE_SIZE = 100 * 1024 * 1024
 
+# 超详细长笔记的单块目标字符数。显著低于全局 50k 安全清洗上限，给 prompt、
+# PDF 结构参考与模型输出预留足够上下文；只影响 exhaustive 长文本。
+EXHAUSTIVE_CHUNK_SIZE = 12000
+EXHAUSTIVE_BOUNDARY_CONTEXT = 600
+EXHAUSTIVE_EVIDENCE_MAX_TOKENS = 6000
+EXHAUSTIVE_BLUEPRINT_MAX_TOKENS = 24000
+EXHAUSTIVE_DRAFT_MAX_TOKENS = 32000
+EXHAUSTIVE_REVIEW_MAX_TOKENS = 32000
+
 # 截图嵌入 prompt 指令(extract_images=True 时追加到笔记 prompt;openspec 截图 bug 修复)
 SCREENSHOT_INSTRUCTION = """
 【关键帧截图(已开启)】
@@ -43,6 +54,49 @@ SCREENSHOT_INSTRUCTION = """
 - 只用字幕中出现过的真实时间戳,不要编造
 """
 
+# 仅作为长字幕 ASR 专名校对候选，不作为笔记事实来源。最终是否采用仍由全局证据
+# 上下文裁决；这组高频 AI 术语用于避免把概念、产品和音译相近的普通词混为一谈。
+EXHAUSTIVE_AI_TERM_HINTS = (
+    "Harness Engineering（驾驭工程，概念）",
+    "OpenClaw（产品）",
+    "Hermes Agent（产品）",
+    "Prompt Engineering",
+    "Context Engineering",
+    "Skill",
+    "Open Source",
+    "Sandbox",
+    "Shell",
+    "MCP",
+    "Agent",
+)
+
+EXHAUSTIVE_SUSPICIOUS_ASR_TERMS = re.compile(
+    r"死丢|FIS5|自我侵化|河曼斯|Harmance|Hailuo|"
+    r"哈尼斯工程|哈利斯工程|杀箱|Studio|CRI\s*库|"
+    r"神秘系统|平正过律|\bSIF\b|202[35]\s*年\s*2\s*月|"
+    r"OpenClow|杀乡|Hermes Agent（Harness Engineering）"
+)
+
+EXHAUSTIVE_HIGH_CONFIDENCE_TERM_REPLACEMENTS = (
+    ("Hermes Agent（Harness Engineering）", "Hermes Agent"),
+    ("沙箱（杀乡）", "沙箱（Sandbox）"),
+    ("OpenClow", "OpenClaw"),
+    ("死丢（Store）", "Skill"),
+    ("死丢（Studio）", "Skill"),
+    ("死丢(Store)", "Skill"),
+    ("死丢(Studio)", "Skill"),
+    ("死丢文件", "Skill 文件"),
+    ("死丢", "Skill"),
+    ("FIS5", "FTS5"),
+    ("自我侵化", "自我进化"),
+    ("河曼斯", "Hermes Agent"),
+    ("Harmance", "Hermes Agent"),
+    ("哈尼斯工程", "Harness Engineering"),
+    ("哈利斯工程", "Harness Engineering"),
+    ("杀箱", "Sandbox"),
+    ("杀乡", "Sandbox"),
+)
+
 
 class SimpleProcessor:
     """简化处理器"""
@@ -50,6 +104,13 @@ class SimpleProcessor:
     def __init__(self, llm, config: Optional[Dict[str, Any]] = None, logger: Optional[TaskLogger] = None):
         self.llm = llm
         self.config = config or {}
+        self.note_detail_level = normalize_detail_level(
+            self.config.get("note_detail_level", "balanced")
+        )
+        progress_callback = self.config.get("progress_callback")
+        self.progress_callback: Optional[Callable[..., None]] = (
+            progress_callback if callable(progress_callback) else None
+        )
         self.logger = logger or TaskLogger("default")
 
     def _call_llm(self, messages, max_tokens=4096, timeout=120, operation_name="LLM调用"):
@@ -112,7 +173,14 @@ class SimpleProcessor:
         if pdf_structure:
             self.logger.info("使用PDF参考生成笔记")
             try:
-                result = self._generate_with_pdf_reference(subtitle_text, pdf_structure, extract_images)
+                if self._requires_exhaustive_chunking(subtitle_text):
+                    result = self._generate_exhaustive_with_understanding(
+                        subtitle_text,
+                        pdf_structure=pdf_structure,
+                        extract_images=extract_images,
+                    )
+                else:
+                    result = self._generate_with_pdf_reference(subtitle_text, pdf_structure, extract_images)
                 self.logger.info(f"笔记生成完成，共 {len(result)} 字符")
                 return result
             except Exception as e:
@@ -121,7 +189,13 @@ class SimpleProcessor:
         else:
             self.logger.info("直接生成笔记")
             try:
-                result = self._generate_directly(subtitle_text, extract_images)
+                if self._requires_exhaustive_chunking(subtitle_text):
+                    result = self._generate_exhaustive_with_understanding(
+                        subtitle_text,
+                        extract_images=extract_images,
+                    )
+                else:
+                    result = self._generate_directly(subtitle_text, extract_images)
                 self.logger.info(f"笔记生成完成，共 {len(result)} 字符")
                 return result
             except Exception as e:
@@ -488,7 +562,12 @@ class SimpleProcessor:
                 f"文件大小超过限制: {file_size} bytes (最大允许: {MAX_FILE_SIZE} bytes)"
             )
 
-    def _sanitize_content(self, content: str) -> str:
+    def _sanitize_content(
+        self,
+        content: str,
+        *,
+        max_length: Optional[int] = MAX_CONTENT_LENGTH,
+    ) -> str:
         """
         清理用户内容，防止提示词注入攻击
         
@@ -525,12 +604,20 @@ class SimpleProcessor:
             if char not in ['<', '>']:  # 已经处理过了
                 content = content.replace(char, replacement)
         
-        # 移除其他控制字符 (0x00-0x1f 和 0x7f-0x9f)
-        content = ''.join(char for char in content if ord(char) > 31 and ord(char) not in range(127, 160))
+        # 移除其他控制字符；保留换行与制表符，使字幕、证据包和 Markdown
+        # 蓝图的结构不在提示词中坍缩成一条长文本。
+        content = "".join(
+            char
+            for char in content
+            if char in {"\n", "\r", "\t"}
+            or (ord(char) > 31 and ord(char) not in range(127, 160))
+        )
         
-        # 层级4: 限制内容长度（防止超大内容导致内存问题）
-        if len(content) > MAX_CONTENT_LENGTH:
-            content = content[:MAX_CONTENT_LENGTH] + CONTENT_TRUNCATED_MESSAGE
+        # 层级4: 普通调用继续使用原有长度保护。超详细分层流程已经先按安全块
+        # 完成语义理解，初稿 / 审校需要完整原文时显式传 max_length=None，
+        # 避免历史 50k 截断再次丢掉后半段课程。
+        if max_length is not None and len(content) > max_length:
+            content = content[:max_length] + CONTENT_TRUNCATED_MESSAGE
         
         return content
 
@@ -653,6 +740,1193 @@ class SimpleProcessor:
 
         return ' '.join(text_lines)
 
+    def _requires_exhaustive_chunking(self, subtitle_text: str) -> bool:
+        """仅对超过安全单块阈值的超详细任务启用多次 LLM 整理。"""
+        return (
+            self.note_detail_level == "exhaustive"
+            and len(subtitle_text or "") > EXHAUSTIVE_CHUNK_SIZE
+        )
+
+    def _split_exhaustive_chunks(
+        self,
+        subtitle_text: str,
+        target_chars: int = EXHAUSTIVE_CHUNK_SIZE,
+    ) -> list[str]:
+        """按字幕条目间空格切块，保证全部非空文本恰好进入一个 chunk。
+
+        :meth:`_extract_srt_text` 会用单个空格拼接字幕条目，因此空格就是天然边界；
+        对普通文本同样优先在词/段边界切分。极端超长单条字幕才按字符硬切。
+        """
+        text = str(subtitle_text or "").strip()
+        if not text:
+            return []
+        target = max(1000, min(int(target_chars or EXHAUSTIVE_CHUNK_SIZE), 30000))
+        units = text.split(" ")
+        chunks: list[str] = []
+        current: list[str] = []
+        current_len = 0
+
+        def flush() -> None:
+            nonlocal current, current_len
+            if current:
+                chunks.append(" ".join(current))
+                current = []
+                current_len = 0
+
+        for unit in units:
+            if not unit:
+                continue
+            # 单个条目异常超长时先结束当前块，再机械切开；不丢有效字符。
+            if len(unit) > target:
+                flush()
+                chunks.extend(
+                    unit[start:start + target]
+                    for start in range(0, len(unit), target)
+                    if unit[start:start + target]
+                )
+                continue
+            added_len = len(unit) + (1 if current else 0)
+            if current and current_len + added_len > target:
+                flush()
+                added_len = len(unit)
+            current.append(unit)
+            current_len += added_len
+        flush()
+        return chunks
+
+    def _generate_exhaustive_with_understanding(
+        self,
+        subtitle_text: str,
+        *,
+        pdf_structure: Optional[Dict[str, Any]] = None,
+        extract_images: bool = False,
+    ) -> str:
+        """以全量证据映射、逐章深写和逐章审校生成超详细笔记。
+
+        最终结果只做机械组装，不再交给 LLM 进行全篇重写，避免模型在最后一步
+        主动压缩已经覆盖的后半段主题、案例和机制细节。
+        """
+        chunks = self._split_exhaustive_chunks(subtitle_text)
+        if not chunks:
+            raise ValueError("超详细笔记生成失败：字幕正文为空")
+
+        total = len(chunks)
+        evidence_packets: list[str] = []
+        self.logger.info(
+            f"超详细笔记启用分层理解：{total} 个字幕段，输入 {len(subtitle_text)} 字符"
+        )
+
+        for index, chunk in enumerate(chunks):
+            previous_context = (
+                chunks[index - 1][-EXHAUSTIVE_BOUNDARY_CONTEXT:]
+                if index > 0
+                else ""
+            )
+            next_context = (
+                chunks[index + 1][:EXHAUSTIVE_BOUNDARY_CONTEXT]
+                if index + 1 < total
+                else ""
+            )
+            evidence_prompt = self._build_exhaustive_evidence_prompt(
+                chunk,
+                index=index,
+                total=total,
+                previous_context=previous_context,
+                next_context=next_context,
+            )
+            evidence = self._call_llm(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "你是严谨的课程内容分析师。只从给定字幕提取可追溯语义证据，"
+                            "不撰写最终笔记，不补充外部知识。"
+                        ),
+                    },
+                    {"role": "user", "content": evidence_prompt},
+                ],
+                max_tokens=EXHAUSTIVE_EVIDENCE_MAX_TOKENS,
+                timeout=300,
+                operation_name=f"超详细字幕理解({index + 1}/{total})",
+            ).strip()
+            if not evidence:
+                raise RuntimeError(
+                    f"超详细语义证据第 {index + 1}/{total} 段输出为空"
+                )
+            expected_namespace = rf"\bE{index + 1:02d}-\d{{3}}\b"
+            if not re.search(expected_namespace, evidence):
+                evidence_repair_prompt = (
+                    self._build_exhaustive_evidence_id_repair_prompt(
+                        evidence_prompt=evidence_prompt,
+                        evidence=evidence,
+                        index=index,
+                        total=total,
+                    )
+                )
+                repaired_evidence = self._call_llm(
+                    [
+                        {
+                            "role": "system",
+                            "content": (
+                                "你是语义证据结构校对员。只补齐稳定证据 ID 和结构，"
+                                "不得删除、概括或新增原材料事实。"
+                            ),
+                        },
+                        {"role": "user", "content": evidence_repair_prompt},
+                    ],
+                    max_tokens=EXHAUSTIVE_EVIDENCE_MAX_TOKENS,
+                    timeout=300,
+                    operation_name=(
+                        f"超详细语义证据 ID 修复({index + 1}/{total})"
+                    ),
+                ).strip()
+                if not repaired_evidence or not re.search(
+                    expected_namespace,
+                    repaired_evidence,
+                ):
+                    raise RuntimeError(
+                        f"超详细语义证据第 {index + 1}/{total} 段"
+                        "缺少稳定证据 ID"
+                    )
+                evidence = repaired_evidence
+            evidence_packets.append(evidence)
+            self._report_exhaustive_progress("understand", index + 1, total)
+
+        evidence_text = "\n\n".join(
+            f"<!-- SOURCE-CHUNK {index + 1}/{total} -->\n{packet}"
+            for index, packet in enumerate(evidence_packets)
+        )
+        blueprint_prompt = self._build_exhaustive_blueprint_prompt(evidence_text)
+        blueprint = self._call_llm(
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "你是资深课程架构师，负责把全部语义证据综合为一份全局知识蓝图。"
+                        "必须合并跨时段主题并保留证据映射。"
+                    ),
+                },
+                {"role": "user", "content": blueprint_prompt},
+            ],
+            max_tokens=EXHAUSTIVE_BLUEPRINT_MAX_TOKENS,
+            timeout=420,
+            operation_name="超详细课程知识蓝图",
+        ).strip()
+        if not blueprint:
+            raise RuntimeError("超详细全局知识蓝图输出为空")
+        expected_evidence_ids = set(
+            re.findall(r"\bE\d{2}-\d{3}\b", evidence_text)
+        )
+        try:
+            blueprint_data = self._parse_exhaustive_blueprint(blueprint, total)
+        except RuntimeError as parse_error:
+            json_repair_prompt = self._build_exhaustive_blueprint_json_repair_prompt(
+                evidence_text=evidence_text,
+                malformed_blueprint=blueprint,
+                parse_error=str(parse_error),
+            )
+            repaired_json = self._call_llm(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "你是严格的 JSON 结构修复员。依据全部证据补全蓝图，"
+                            "只返回可解析 JSON，不省略章节、术语或证据映射。"
+                        ),
+                    },
+                    {"role": "user", "content": json_repair_prompt},
+                ],
+                max_tokens=EXHAUSTIVE_BLUEPRINT_MAX_TOKENS,
+                timeout=420,
+                operation_name="超详细课程知识蓝图 JSON 修复",
+            ).strip()
+            if not repaired_json:
+                raise RuntimeError("超详细全局知识蓝图 JSON 修复输出为空")
+            blueprint_data = self._parse_exhaustive_blueprint(
+                repaired_json,
+                total,
+            )
+        missing_ids, unknown_ids = self._exhaustive_blueprint_coverage(
+            blueprint_data,
+            expected_evidence_ids,
+        )
+        if missing_ids or unknown_ids:
+            repair_prompt = self._build_exhaustive_blueprint_repair_prompt(
+                evidence_text=evidence_text,
+                blueprint=blueprint_data,
+                missing_ids=missing_ids,
+                unknown_ids=unknown_ids,
+            )
+            repaired_blueprint = self._call_llm(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "你是课程知识蓝图校验员。只修复证据映射和必要的章节规划，"
+                            "返回符合指定 schema 的严格 JSON，不写解释。"
+                        ),
+                    },
+                    {"role": "user", "content": repair_prompt},
+                ],
+                max_tokens=EXHAUSTIVE_BLUEPRINT_MAX_TOKENS,
+                timeout=420,
+                operation_name="超详细课程知识蓝图修复",
+            ).strip()
+            if not repaired_blueprint:
+                raise RuntimeError("超详细全局知识蓝图修复输出为空")
+            blueprint_data = self._parse_exhaustive_blueprint(
+                repaired_blueprint,
+                total,
+            )
+            missing_ids, unknown_ids = self._exhaustive_blueprint_coverage(
+                blueprint_data,
+                expected_evidence_ids,
+            )
+            if missing_ids or unknown_ids:
+                detail = []
+                if missing_ids:
+                    detail.append(f"遗漏 {', '.join(sorted(missing_ids))}")
+                if unknown_ids:
+                    detail.append(f"未知 {', '.join(sorted(unknown_ids))}")
+                raise RuntimeError(
+                    "超详细全局知识蓝图证据映射不完整：" + "；".join(detail)
+                )
+        self._report_exhaustive_progress("blueprint", 1, 1)
+
+        chapters = blueprint_data["chapters"]
+        chapter_total = len(chapters)
+        chapter_drafts: list[Dict[str, Any]] = []
+        for chapter_index, chapter in enumerate(chapters, start=1):
+            chapter_source, chapter_evidence = self._exhaustive_chapter_material(
+                chapter,
+                chunks=chunks,
+                evidence_packets=evidence_packets,
+            )
+            draft_prompt = self._build_exhaustive_chapter_prompt(
+                chapter,
+                blueprint=blueprint_data,
+                source_text=chapter_source,
+                evidence_text=chapter_evidence,
+                pdf_structure=pdf_structure,
+                extract_images=extract_images,
+            )
+            draft = self._clean_markdown_output(
+                self._call_llm(
+                    [
+                        {
+                            "role": "system",
+                            "content": (
+                                "你是资深课程作者。只写当前逻辑章节，充分使用分配给"
+                                "本章的原始字幕和语义证据，输出可直接进入终稿的 Markdown。"
+                            ),
+                        },
+                        {"role": "user", "content": draft_prompt},
+                    ],
+                    max_tokens=EXHAUSTIVE_DRAFT_MAX_TOKENS,
+                    timeout=600,
+                    operation_name=(
+                        f"超详细章节初稿({chapter_index}/{chapter_total})"
+                    ),
+                )
+            )
+            if not draft:
+                raise RuntimeError(
+                    f"超详细章节初稿 {chapter['chapter_id']} 输出为空"
+                )
+            chapter_drafts.append(
+                {
+                    "chapter": chapter,
+                    "source": chapter_source,
+                    "evidence": chapter_evidence,
+                    "draft": draft,
+                }
+            )
+            self._report_exhaustive_progress(
+                "draft",
+                chapter_index,
+                chapter_total,
+            )
+
+        reviewed_chapters: list[str] = []
+        for chapter_index, item in enumerate(chapter_drafts, start=1):
+            chapter = item["chapter"]
+            review_prompt = self._build_exhaustive_chapter_review_prompt(
+                chapter,
+                blueprint=blueprint_data,
+                source_text=item["source"],
+                evidence_text=item["evidence"],
+                draft=item["draft"],
+                pdf_structure=pdf_structure,
+                extract_images=extract_images,
+            )
+            reviewed = self._clean_markdown_output(
+                self._call_llm(
+                    [
+                        {
+                            "role": "system",
+                            "content": (
+                                "你是课程笔记章节编辑和事实审校员。对照本章全部"
+                                "原始材料完成最终章节，不能为了简短删除独立信息。"
+                            ),
+                        },
+                        {"role": "user", "content": review_prompt},
+                    ],
+                    max_tokens=EXHAUSTIVE_REVIEW_MAX_TOKENS,
+                    timeout=600,
+                    operation_name=(
+                        f"超详细章节审校({chapter_index}/{chapter_total})"
+                    ),
+                )
+            )
+            if not reviewed:
+                raise RuntimeError(
+                    f"超详细章节审校 {chapter['chapter_id']} 输出为空"
+                )
+            reviewed = self._normalize_exhaustive_chapter(reviewed)
+            reviewed = self._set_exhaustive_chapter_title(
+                reviewed,
+                chapter["title"],
+            )
+            try:
+                self._validate_exhaustive_chapter(
+                    reviewed,
+                    chapter_id=chapter["chapter_id"],
+                )
+            except RuntimeError as validation_error:
+                # 章节内容完整但模型偶发泄露 evidence ID 时，执行一次定向清理。
+                # 不对普通结构缺失自动“兜底”，避免把不合格章节悄悄发布。
+                if "包含内部分析模板" not in str(validation_error):
+                    raise
+                repair_prompt = self._build_exhaustive_chapter_format_repair_prompt(
+                    chapter,
+                    reviewed=reviewed,
+                )
+                repaired = self._clean_markdown_output(
+                    self._call_llm(
+                        [
+                            {
+                                "role": "system",
+                                "content": (
+                                    "你是 Markdown 无损校对员。只清除内部分析标记，"
+                                    "保持所有面向读者的事实、论证和结构不变。"
+                                ),
+                            },
+                            {"role": "user", "content": repair_prompt},
+                        ],
+                        max_tokens=EXHAUSTIVE_REVIEW_MAX_TOKENS,
+                        timeout=600,
+                        operation_name=(
+                            f"超详细章节格式修复"
+                            f"({chapter_index}/{chapter_total})"
+                        ),
+                    )
+                )
+                if not repaired:
+                    raise RuntimeError(
+                        f"超详细章节格式修复 {chapter['chapter_id']} 输出为空"
+                    )
+                reviewed = self._normalize_exhaustive_chapter(repaired)
+                reviewed = self._set_exhaustive_chapter_title(
+                    reviewed,
+                    chapter["title"],
+                )
+                self._validate_exhaustive_chapter(
+                    reviewed,
+                    chapter_id=chapter["chapter_id"],
+                )
+            if EXHAUSTIVE_SUSPICIOUS_ASR_TERMS.search(reviewed):
+                fidelity_prompt = (
+                    self._build_exhaustive_terminology_fidelity_prompt(
+                        chapter,
+                        blueprint=blueprint_data,
+                        source_text=item["source"],
+                        evidence_text=item["evidence"],
+                        reviewed=reviewed,
+                    )
+                )
+                terminology_checked = self._clean_markdown_output(
+                    self._call_llm(
+                        [
+                            {
+                                "role": "system",
+                                "content": (
+                                    "你是课程笔记实体与专名校对员。修复高置信 ASR "
+                                    "音译、概念/产品混淆及机制归属，正文信息必须无损。"
+                                ),
+                            },
+                            {"role": "user", "content": fidelity_prompt},
+                        ],
+                        max_tokens=EXHAUSTIVE_REVIEW_MAX_TOKENS,
+                        timeout=600,
+                        operation_name=(
+                            f"超详细章节术语保真"
+                            f"({chapter_index}/{chapter_total})"
+                        ),
+                    )
+                )
+                if not terminology_checked:
+                    raise RuntimeError(
+                        f"超详细章节术语保真 {chapter['chapter_id']} 输出为空"
+                    )
+                reviewed = self._normalize_exhaustive_chapter(
+                    terminology_checked
+                )
+                reviewed = self._set_exhaustive_chapter_title(
+                    reviewed,
+                    chapter["title"],
+                )
+                self._validate_exhaustive_chapter(
+                    reviewed,
+                    chapter_id=chapter["chapter_id"],
+                )
+            reviewed = self._apply_exhaustive_ai_term_safeguards(
+                reviewed,
+                chapter=chapter,
+            )
+            reviewed_chapters.append(reviewed)
+            self._report_exhaustive_progress(
+                "review",
+                chapter_index,
+                chapter_total,
+            )
+
+        final_markdown = self._assemble_exhaustive_note(
+            blueprint_data,
+            reviewed_chapters,
+        )
+        self._validate_exhaustive_final(final_markdown)
+        self.logger.info(
+            f"超详细笔记逐章审校完成：输入 {len(subtitle_text)} 字符，"
+            f"证据 {len(evidence_text)} 字符，章节 {chapter_total} 个，"
+            f"终稿 {len(final_markdown)} 字符"
+        )
+        return final_markdown
+
+    def _parse_exhaustive_blueprint(
+        self,
+        content: str,
+        total_chunks: int,
+    ) -> Dict[str, Any]:
+        """解析并规范全局蓝图 JSON，拒绝无法机械验证的自由文本。"""
+        raw = str(content or "").strip()
+        if raw.startswith("```"):
+            lines = raw.splitlines()
+            lines = lines[1:]
+            if lines and lines[-1].strip().startswith("```"):
+                lines.pop()
+            raw = "\n".join(lines).strip()
+        start = raw.find("{")
+        end = raw.rfind("}")
+        if start < 0 or end <= start:
+            raise RuntimeError("超详细全局知识蓝图不是有效 JSON")
+        try:
+            parsed = json.loads(raw[start:end + 1])
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(f"超详细全局知识蓝图 JSON 解析失败：{exc}") from exc
+        if not isinstance(parsed, dict):
+            raise RuntimeError("超详细全局知识蓝图必须是 JSON 对象")
+
+        title = str(parsed.get("title") or "").strip()
+        overview = str(parsed.get("course_overview") or "").strip()
+        learning_outcomes = [
+            str(item).strip()
+            for item in (parsed.get("learning_outcomes") or [])
+            if str(item).strip()
+        ]
+        raw_chapters = parsed.get("chapters")
+        if not title or not overview or not learning_outcomes:
+            raise RuntimeError("超详细全局知识蓝图缺少标题、课程主线或学习目标")
+        if not isinstance(raw_chapters, list) or len(raw_chapters) < 3:
+            raise RuntimeError("超详细全局知识蓝图至少需要三个逻辑章节")
+
+        terminology: list[Dict[str, Any]] = []
+        for raw_term in parsed.get("terminology") or []:
+            if not isinstance(raw_term, dict):
+                continue
+            canonical = str(raw_term.get("canonical") or "").strip()
+            variants = [
+                str(item).strip()
+                for item in (raw_term.get("variants") or [])
+                if str(item).strip()
+            ]
+            confidence = str(
+                raw_term.get("confidence") or "uncertain"
+            ).strip().lower()
+            if not canonical or not variants:
+                continue
+            terminology.append(
+                {
+                    "canonical": canonical,
+                    "variants": list(dict.fromkeys(variants)),
+                    "confidence": confidence,
+                    "kind": str(raw_term.get("kind") or "").strip(),
+                    "note": str(raw_term.get("note") or "").strip(),
+                }
+            )
+
+        chapters: list[Dict[str, Any]] = []
+        seen_chapter_ids: set[str] = set()
+        for index, raw_chapter in enumerate(raw_chapters, start=1):
+            if not isinstance(raw_chapter, dict):
+                raise RuntimeError("超详细全局知识蓝图包含无效章节")
+            chapter_id = str(
+                raw_chapter.get("chapter_id") or f"C{index:02d}"
+            ).strip()
+            chapter_title = str(raw_chapter.get("title") or "").strip()
+            purpose = str(raw_chapter.get("purpose") or "").strip()
+            if (
+                not re.fullmatch(r"C\d{2,}", chapter_id)
+                or chapter_id in seen_chapter_ids
+                or not chapter_title
+                or not purpose
+            ):
+                raise RuntimeError("超详细全局知识蓝图章节 ID、标题或目的无效")
+            seen_chapter_ids.add(chapter_id)
+
+            evidence_ids = list(dict.fromkeys(
+                evidence_id
+                for evidence_id in (
+                    str(item).strip()
+                    for item in (raw_chapter.get("evidence_ids") or [])
+                )
+                if re.fullmatch(r"E\d{2}-\d{3}", evidence_id)
+            ))
+            source_chunks: list[int] = []
+            for item in raw_chapter.get("source_chunks") or []:
+                try:
+                    source_index = int(item)
+                except (TypeError, ValueError):
+                    continue
+                if 1 <= source_index <= total_chunks:
+                    source_chunks.append(source_index)
+            # 证据 ID 的前缀就是来源 chunk，机械补全可防止蓝图漏传原始字幕。
+            source_chunks.extend(
+                int(evidence_id[1:3])
+                for evidence_id in evidence_ids
+                if 1 <= int(evidence_id[1:3]) <= total_chunks
+            )
+            source_chunks = sorted(set(source_chunks))
+            if not source_chunks:
+                raise RuntimeError(
+                    f"超详细全局知识蓝图章节 {chapter_id} 缺少原始字幕来源"
+                )
+            required_points = [
+                str(item).strip()
+                for item in (raw_chapter.get("required_points") or [])
+                if str(item).strip()
+            ]
+            chapters.append(
+                {
+                    "chapter_id": chapter_id,
+                    "title": chapter_title,
+                    "purpose": purpose,
+                    "evidence_ids": evidence_ids,
+                    "source_chunks": source_chunks,
+                    "required_points": required_points,
+                }
+            )
+        return {
+            "title": title,
+            "course_overview": overview,
+            "learning_outcomes": learning_outcomes,
+            "terminology": terminology,
+            "chapters": chapters,
+        }
+
+    def _exhaustive_blueprint_coverage(
+        self,
+        blueprint: Dict[str, Any],
+        expected_evidence_ids: set[str],
+    ) -> tuple[set[str], set[str]]:
+        mapped_ids = {
+            evidence_id
+            for chapter in blueprint["chapters"]
+            for evidence_id in chapter["evidence_ids"]
+        }
+        return (
+            expected_evidence_ids - mapped_ids,
+            mapped_ids - expected_evidence_ids,
+        )
+
+    def _build_exhaustive_blueprint_repair_prompt(
+        self,
+        *,
+        evidence_text: str,
+        blueprint: Dict[str, Any],
+        missing_ids: set[str],
+        unknown_ids: set[str],
+    ) -> str:
+        return f"""
+【阶段：全局知识蓝图】
+【阶段：修复知识蓝图】
+当前蓝图未通过机械证据覆盖校验。请修复章节规划并重新返回完整严格 JSON。
+
+必须补入的证据 ID：{", ".join(sorted(missing_ids)) or "无"}
+必须移除的未知证据 ID：{", ".join(sorted(unknown_ids)) or "无"}
+
+【当前蓝图 JSON】
+{json.dumps(blueprint, ensure_ascii=False, indent=2)}
+
+【全部语义证据】
+{self._sanitize_content(evidence_text, max_length=None)}
+
+沿用原 schema；每个真实证据 ID 恰好分配给最合适的章节，必要时可调整章节，
+并确保每章 source_chunks 覆盖其证据来源。只返回 JSON。
+""".strip()
+
+    def _build_exhaustive_blueprint_json_repair_prompt(
+        self,
+        *,
+        evidence_text: str,
+        malformed_blueprint: str,
+        parse_error: str,
+    ) -> str:
+        return f"""
+【阶段：全局知识蓝图】
+【阶段：修复蓝图 JSON】
+首次蓝图包含有价值的规划内容，但 JSON 语法或完整性未通过严格解析。
+请依据全部语义证据返回一份完整、可解析的蓝图 JSON。
+
+解析错误：{self._sanitize_content(parse_error, max_length=None)}
+
+修复要求：
+- 沿用首次蓝图 schema，必须包含 title、course_overview、learning_outcomes、
+  terminology 和至少三个 chapters
+- 不得遗漏任何真实证据 ID；每个 evidence ID 都要进入最合适章节
+- source_chunks 必须覆盖章节证据来源
+- 高置信术语只做拼写校对，概念与产品不得混淆；无法确认时标 uncertain
+- 如果首次输出在中途截断，必须根据全部证据补齐，而不是只闭合残缺括号
+- 只返回严格 JSON，不要 Markdown 围栏或说明文字
+
+【首次未通过解析的蓝图】
+{self._sanitize_content(malformed_blueprint, max_length=None)}
+
+【全部语义证据】
+{self._sanitize_content(evidence_text, max_length=None)}
+""".strip()
+
+    def _exhaustive_chapter_material(
+        self,
+        chapter: Dict[str, Any],
+        *,
+        chunks: list[str],
+        evidence_packets: list[str],
+    ) -> tuple[str, str]:
+        source_parts = []
+        evidence_parts = []
+        for source_index in chapter["source_chunks"]:
+            source_parts.append(
+                f"【原始字幕第 {source_index}/{len(chunks)} 段】\n"
+                f"{self._sanitize_content(chunks[source_index - 1], max_length=None)}"
+            )
+            evidence_parts.append(
+                f"【语义证据第 {source_index}/{len(chunks)} 段】\n"
+                f"{self._sanitize_content(evidence_packets[source_index - 1], max_length=None)}"
+            )
+        return "\n\n".join(source_parts), "\n\n".join(evidence_parts)
+
+    def _build_exhaustive_chapter_prompt(
+        self,
+        chapter: Dict[str, Any],
+        *,
+        blueprint: Dict[str, Any],
+        source_text: str,
+        evidence_text: str,
+        pdf_structure: Optional[Dict[str, Any]],
+        extract_images: bool,
+    ) -> str:
+        prompt = f"""
+【阶段：章节深写】
+章节 ID：{chapter["chapter_id"]}
+请只撰写蓝图中的当前章节，输出一个以 `##` 开头、可直接拼入终稿的完整章节。
+
+{detail_instruction("exhaustive")}
+
+章节写作要求：
+- 充分理解当前章节对应的全部原始字幕，而不是把证据列表逐项改写
+- 完成定义、结论、推导、因果 / 对比关系、案例证明作用、反例、限制和实践意义
+- 跨字幕段的同一主题要综合为一条连贯论证；不得遗漏 required_points
+- 严格使用全局蓝图 terminology 中的高置信 canonical 专名，不得重新猜测或混淆概念与产品
+- 只使用字幕和讲义可支持的内容；专名或数字无法确认时明确标记不确定
+- 不输出 H1，不展示 evidence ID、source chunk、蓝图字段或写作过程
+- 章节内部使用必要的 H3、列表、表格与时间戳，让读者能独立学习和复用
+
+【全局蓝图 JSON】
+{json.dumps(blueprint, ensure_ascii=False, indent=2)}
+
+【当前章节规划】
+{json.dumps(chapter, ensure_ascii=False, indent=2)}
+
+【当前章节语义证据】
+{self._sanitize_content(evidence_text, max_length=None)}
+
+{self._exhaustive_reference_context(pdf_structure)}
+
+【当前章节全部原始字幕】
+{self._sanitize_content(source_text, max_length=None)}
+
+直接返回当前章节的纯 Markdown，不要包裹代码块。
+""".strip()
+        if extract_images:
+            prompt += (
+                "\n\n"
+                + SCREENSHOT_INSTRUCTION.strip()
+                + "\n这是逐章写作：本章仅在确有高信息量画面时保留 0-1 个标记，"
+                "避免全篇截图过密。"
+            )
+        return prompt
+
+    def _build_exhaustive_chapter_review_prompt(
+        self,
+        chapter: Dict[str, Any],
+        *,
+        blueprint: Dict[str, Any],
+        source_text: str,
+        evidence_text: str,
+        draft: str,
+        pdf_structure: Optional[Dict[str, Any]],
+        extract_images: bool,
+    ) -> str:
+        prompt = f"""
+【阶段：章节编辑审校】
+章节 ID：{chapter["chapter_id"]}
+请对当前章节初稿执行最终事实核验和深度编辑，直接输出一个以 `##` 开头的终稿章节。
+
+内部逐项审查但不展示评分或过程：
+1. 事实忠实度：结论、数字、专名和因果是否有原始材料支持
+2. 主题覆盖：当前章节的每项证据和 required_points 是否得到有意义的表达
+3. 结构连贯：定义、机制、论证、案例、边界和行动启示是否自然衔接
+4. 信息价值：是否解释“为什么、如何成立、例子证明什么”，而非字幕复述
+5. 可读性：是否具体、清晰、深入且适合学习复用
+
+编辑规则：
+- 补回初稿遗漏的事实、论证、案例、反例、限制、注意事项和有效问答
+- 可以去除无信息重复，但不得为了简短删除任何具有独立信息价值的内容
+- 对照全局 terminology 统一高置信专名；不得把 Hermes Agent 写成 Claude / Hailuo，
+  不得把 Harness Engineering 概念写成产品名，也不得保留已裁决的 ASR 音译
+- 不得引入外部事实；ASR 无法确认的内容保留不确定性，不得擅自猜测映射
+- 只输出当前章节，恰好一个 H2，不输出 H1、证据 ID、source chunk 或内部指令
+
+【全局蓝图 JSON】
+{json.dumps(blueprint, ensure_ascii=False, indent=2)}
+
+【当前章节规划】
+{json.dumps(chapter, ensure_ascii=False, indent=2)}
+
+【当前章节语义证据】
+{self._sanitize_content(evidence_text, max_length=None)}
+
+【待审校章节初稿】
+{self._sanitize_content(draft, max_length=None)}
+
+{self._exhaustive_reference_context(pdf_structure)}
+
+【当前章节全部原始字幕】
+{self._sanitize_content(source_text, max_length=None)}
+
+直接返回当前章节的最终纯 Markdown，不要包裹代码块。
+""".strip()
+        if extract_images:
+            prompt += (
+                "\n\n"
+                + SCREENSHOT_INSTRUCTION.strip()
+                + "\n这是逐章审校：仅保留本章 0-1 个真正有教学价值且时间戳可靠的"
+                "截图标记，不得把已有有效标记全部删除。"
+            )
+        return prompt
+
+    def _normalize_exhaustive_chapter(self, content: str) -> str:
+        """把模型偶发的章节 H1 降为 H2，不改写章节正文。"""
+        normalized = re.sub(r"(?m)^#\s+", "## ", str(content or "").strip())
+        return normalized.strip()
+
+    def _set_exhaustive_chapter_title(
+        self,
+        content: str,
+        chapter_title: str,
+    ) -> str:
+        """用已校验蓝图标题替换首个 H2，避免 C06 等内部章节 ID 泄露。"""
+        title = re.sub(r"^#+\s*", "", str(chapter_title or "")).strip()
+        if not title or not re.match(r"^##\s+\S", content):
+            return content
+        return re.sub(
+            r"^##\s+.*$",
+            f"## {title}",
+            content,
+            count=1,
+            flags=re.MULTILINE,
+        )
+
+    def _apply_exhaustive_terminology(
+        self,
+        content: str,
+        terminology: list[Dict[str, Any]],
+    ) -> str:
+        """机械应用蓝图中高置信术语，只统一拼写，不生成新事实。"""
+        normalized = str(content or "")
+        for term in terminology:
+            confidence = str(term.get("confidence") or "").lower()
+            if confidence not in {"high", "confirmed", "高", "高置信"}:
+                continue
+            canonical = str(term.get("canonical") or "").strip()
+            if not canonical:
+                continue
+            variants = sorted(
+                {
+                    str(item).strip()
+                    for item in (term.get("variants") or [])
+                    if str(item).strip() and str(item).strip() != canonical
+                },
+                key=len,
+                reverse=True,
+            )
+            for variant in variants:
+                normalized = normalized.replace(variant, canonical)
+        return normalized
+
+    def _build_exhaustive_chapter_format_repair_prompt(
+        self,
+        chapter: Dict[str, Any],
+        *,
+        reviewed: str,
+    ) -> str:
+        return f"""
+【阶段：章节格式修复】
+章节 ID：{chapter["chapter_id"]}
+以下章节的内容已经完成事实审校，但混入了 evidence ID、source chunk、证据命名空间
+或内部阶段标签。请只删除这些内部分析标记及其无意义连接词。
+
+严格要求：
+- 不得概括、压缩或删除正文信息
+- 不得改写事实、专名、数字、论证、案例、边界、时间戳和截图标记
+- 保持原有 Markdown 层级，输出恰好一个 H2，不输出 H1
+- 不得保留 `E01-001` 这类证据 ID、source chunk 或内部阶段标签
+- 只返回清理后的完整章节，不解释修改过程
+
+【待无损清理章节】
+{self._sanitize_content(reviewed, max_length=None)}
+""".strip()
+
+    def _build_exhaustive_terminology_fidelity_prompt(
+        self,
+        chapter: Dict[str, Any],
+        *,
+        blueprint: Dict[str, Any],
+        source_text: str,
+        evidence_text: str,
+        reviewed: str,
+    ) -> str:
+        return f"""
+【阶段：术语保真审校】
+章节 ID：{chapter["chapter_id"]}
+当前章节内容和结构已经完成审校，但仍含疑似 ASR 音译、错拼、年份或概念 /
+产品 / 机制归属混淆。请对照全局术语表、原始字幕上下文和语义证据，执行实体保真。
+
+严格要求：
+- 不得概括、删减或扩写正文事实，不得改变论证、案例、可靠数字、时间戳和截图标记
+- 优先使用 terminology 中 confidence=high 的 canonical；uncertain 项必须保留不确定标记
+- Harness Engineering 是概念，OpenClaw 与 Hermes Agent 是产品，三者不得混淆
+- OpenClaw 的市场爆发、政策和资本类比与 Hermes Agent 的安装、SQLite/FTS5 记忆、
+  Memory、Skill 自我改进和安全机制必须归入各自产品，不能张冠李戴
+- Hermes Agent 的可持续学习流程使用 Memory 与 Skill；不得把 Skill 音译成 Store / Studio
+- 不得把 Hermes Agent 的机制改写成 Claude / Hailuo；但其他上下文真实提及 Claude 时保留
+- `FIS5` 等高置信错拼应按上下文校为 `FTS5`；无法确认的安全层名称不要强行猜测
+- 原字幕没有明确年份时不得编造；本课程与任务时间能确认的 OpenClaw 事件发生在 2026 年，
+  不得写成 2023 或 2025 年
+- 可以在当前章内移动直接归错产品的小节，但不得删除其中任何事实或改变原有论证作用
+- 只返回完整章节，恰好一个 H2，不输出 H1、证据 ID 或校对说明
+
+【全局蓝图与术语表】
+{json.dumps(blueprint, ensure_ascii=False, indent=2)}
+
+【当前章节规划】
+{json.dumps(chapter, ensure_ascii=False, indent=2)}
+
+【当前章节语义证据】
+{self._sanitize_content(evidence_text, max_length=None)}
+
+【当前章节原始字幕】
+{self._sanitize_content(source_text, max_length=None)}
+
+【待术语保真章节】
+{self._sanitize_content(reviewed, max_length=None)}
+""".strip()
+
+    def _validate_exhaustive_chapter(
+        self,
+        content: str,
+        *,
+        chapter_id: str,
+    ) -> None:
+        h1_count = len(re.findall(r"(?m)^#\s+\S", content))
+        h2_count = len(re.findall(r"(?m)^##\s+\S", content))
+        if h1_count or h2_count != 1 or not re.match(r"^##\s+\S", content):
+            raise RuntimeError(
+                f"超详细终稿章节结构不完整：{chapter_id} 必须恰好包含一个 H2"
+            )
+        if re.search(
+            r"(?i)\bE\d{2}-\d{3}\b|SOURCE-CHUNK|证据命名空间|【阶段：",
+            content,
+        ):
+            raise RuntimeError(
+                f"超详细终稿章节结构不完整：{chapter_id} 包含内部分析模板"
+            )
+
+    def _assemble_exhaustive_note(
+        self,
+        blueprint: Dict[str, Any],
+        reviewed_chapters: list[str],
+    ) -> str:
+        """按蓝图机械组装终稿；此处不再调用模型或压缩章节。"""
+        title = re.sub(r"^#+\s*", "", blueprint["title"]).strip()
+        overview = blueprint["course_overview"].strip()
+        outcomes = "\n".join(
+            f"- {item}" for item in blueprint["learning_outcomes"]
+        )
+        front_matter = (
+            f"# {title}\n\n"
+            "## 课程主线与学习目标\n\n"
+            f"{overview}\n\n"
+            "### 学完后你应该能够\n\n"
+            f"{outcomes}"
+        )
+        assembled = "\n\n".join([front_matter, *reviewed_chapters]).strip()
+        assembled = self._apply_exhaustive_terminology(
+            assembled,
+            blueprint.get("terminology") or [],
+        )
+        return self._apply_exhaustive_ai_term_safeguards(
+            assembled,
+            chapter={},
+        )
+
+    def _apply_exhaustive_ai_term_safeguards(
+        self,
+        content: str,
+        *,
+        chapter: Dict[str, Any],
+    ) -> str:
+        """对已审校章节应用极窄的高置信 AI 专名兜底。"""
+        normalized = str(content or "")
+        for variant, canonical in EXHAUSTIVE_HIGH_CONFIDENCE_TERM_REPLACEMENTS:
+            normalized = normalized.replace(variant, canonical)
+        chapter_title = str(chapter.get("title") or "")
+        if "Hermes Agent" in chapter_title:
+            normalized = re.sub(r"\bStudio\b", "Skill", normalized)
+            normalized = re.sub(
+                r"\bCRI\s*库",
+                "SQLite 数据库",
+                normalized,
+            )
+            normalized = normalized.replace(
+                "神秘系统",
+                "某系统安全层（ASR 名称不确定）",
+            )
+            normalized = normalized.replace(
+                "平正过律",
+                "某过滤安全层（ASR 名称不确定）",
+            )
+            normalized = re.sub(
+                r"\bSIF\b(?!（ASR 名称不确定）)",
+                "SIF（ASR 名称不确定）",
+                normalized,
+            )
+        if "OpenClaw" in chapter_title:
+            normalized = re.sub(
+                r"202[35]\s*年\s*2\s*月",
+                "2026 年 2 月",
+                normalized,
+            )
+            normalized = normalized.replace(
+                "OpenClaw 及 OpenClaw 发展的",
+                "OpenClaw 及 OPC 发展的",
+            )
+        if (
+            "Hermes Agent" in chapter_title
+            and "Claude" in normalized
+            and re.search(r"Skill|FTS5|自更新|安全防线", normalized)
+        ):
+            normalized = normalized.replace("Claude", "Hermes Agent")
+        return normalized
+
+    def _generate_exhaustive_in_chunks(
+        self,
+        subtitle_text: str,
+        *,
+        pdf_structure: Optional[Dict[str, Any]] = None,
+        extract_images: bool = False,
+    ) -> str:
+        """兼容旧内部调用名，实际执行理解驱动的超详细生成。"""
+        return self._generate_exhaustive_with_understanding(
+            subtitle_text,
+            pdf_structure=pdf_structure,
+            extract_images=extract_images,
+        )
+
+    def _build_exhaustive_evidence_prompt(
+        self,
+        chunk: str,
+        *,
+        index: int,
+        total: int,
+        previous_context: str = "",
+        next_context: str = "",
+    ) -> str:
+        namespace = f"E{index + 1:02d}-"
+        return f"""
+【阶段：语义证据提取】
+当前是完整课程字幕的第 {index + 1}/{total} 段。
+证据命名空间：{namespace}
+
+你的任务不是写笔记，而是充分理解本段，为后续全局建模提供可追溯证据。
+每个独立知识单元使用 `{namespace}001`、`{namespace}002` 递增编号，并记录：
+- 主题与中心结论
+- 定义、解释和完整论证链
+- 数据、步骤、案例、反例，以及它们证明或限制了什么
+- 适用边界、注意事项、术语、易错点和有价值问答
+- 与前后内容可能存在的跨段线索
+- 时间戳或时间范围（原文存在时）
+- ASR 不确定项：只做高置信纠正，无法确认的专名、数字或语句原样标记
+
+不要写课程总标题，不要把寒暄和逐字重复创建为证据，不要使用外部知识。
+边界上下文只用于理解衔接，不得重复提取为本段证据。
+
+【上一段结尾上下文】
+{self._sanitize_content(previous_context)}
+
+【本段完整正文】
+{self._sanitize_content(chunk)}
+
+【下一段开头上下文】
+{self._sanitize_content(next_context)}
+
+直接返回结构化 Markdown 证据包，不要解释工作过程。
+""".strip()
+
+    def _build_exhaustive_evidence_id_repair_prompt(
+        self,
+        *,
+        evidence_prompt: str,
+        evidence: str,
+        index: int,
+        total: int,
+    ) -> str:
+        namespace = f"E{index + 1:02d}-"
+        return f"""
+【阶段：语义证据提取】
+【阶段：修复语义证据 ID】
+第 {index + 1}/{total} 段的首次输出有内容，但没有使用规定的稳定证据 ID。
+
+修复要求：
+- 每个独立知识单元按 `{namespace}001`、`{namespace}002` 递增编号
+- 不得删除原输出中的事实、论证、案例、边界、时间戳或 ASR 不确定项
+- 不得概括原输出，不得补充原字幕没有的新事实
+- 只返回修复后的完整结构化 Markdown 证据包
+
+【原任务与完整原始字幕】
+{evidence_prompt}
+
+【首次输出】
+{self._sanitize_content(evidence, max_length=None)}
+""".strip()
+
+    def _build_exhaustive_blueprint_prompt(self, evidence_text: str) -> str:
+        return f"""
+【阶段：全局知识蓝图】
+以下是按完整课程字幕提取的全部语义证据包。请先形成全局理解，再设计最终笔记。
+
+只返回一个可解析的严格 JSON 对象，不要 Markdown 围栏或解释，schema 如下：
+{{
+  "title": "准确、具体的课程标题",
+  "course_overview": "课程中心问题、核心命题、主论证链与最终结论",
+  "learning_outcomes": ["可验证的学习目标"],
+  "terminology": [
+    {{
+      "canonical": "从全文上下文确认的规范专名",
+      "variants": ["字幕中的音译、错拼或简称"],
+      "confidence": "high 或 uncertain",
+      "kind": "概念 / 产品 / 组织 / 人名 / 技术",
+      "note": "裁决依据或仍不确定的原因"
+    }}
+  ],
+  "chapters": [
+    {{
+      "chapter_id": "C01",
+      "title": "逻辑章节标题",
+      "purpose": "本章在全局论证中的作用",
+      "evidence_ids": ["E01-001"],
+      "source_chunks": [1],
+      "required_points": ["必须深入表达的定义、机制、案例、边界或行动方法"]
+    }}
+  ]
+}}
+
+规划要求：
+- 先建立全局术语表：综合所有分段里的重复发音、功能描述和上下文，只统一拼写，
+  不得把候选词附带的外部事实写进笔记
+- 以下仅是本类课程的拼写候选清单（只用于拼写校对，证据不支持就忽略）：
+  {", ".join(EXHAUSTIVE_AI_TERM_HINTS)}
+- 必须区分 Harness Engineering（概念）、OpenClaw（产品）和 Hermes Agent（产品）；
+  不得把 Hermes Agent 猜成 Claude / Hailuo，不得把 Skill 的 ASR 音译猜成 Store / Studio
+- 只有跨段上下文足以确认时 confidence 才能为 high；否则保留原音译并标 uncertain，
+  禁止用熟悉但无证据的品牌名强行补全
+- 根据内容复杂度设计约 6-12 个逻辑章节；章节顺序服从理解和教学逻辑，不服从分块边界
+- 合并跨时段同一主题，但不能以合并为由删除后续新增的机制、案例、边界或反例
+- 每个真实证据 ID 必须分配给最合适的章节，不能遗漏，不能编造不存在的 ID
+- source_chunks 必须覆盖该章 evidence_ids 的来源段，确保写作时能回看完整原始字幕
+- required_points 要具体列出论证链、重要案例 / 反例作用、适用边界、行动方法和 ASR 不确定项
+
+这只是写作蓝图，不要撰写最终笔记，也不要按分块逐段摘要。
+
+【全部语义证据】
+{self._sanitize_content(evidence_text, max_length=None)}
+""".strip()
+
+    def _exhaustive_reference_context(
+        self,
+        pdf_structure: Optional[Dict[str, Any]],
+    ) -> str:
+        if not pdf_structure:
+            return "未提供 PDF 讲义。"
+        structure = self._sanitize_content(
+            str(pdf_structure.get("structure_analysis") or ""),
+            max_length=None,
+        )
+        full_text = self._sanitize_content(
+            str(pdf_structure.get("full_text") or ""),
+            max_length=None,
+        )
+        return f"【讲义结构参考】\n{structure}\n\n【讲义完整正文】\n{full_text}"
+
+    def _validate_exhaustive_final(self, content: str) -> None:
+        h1_count = len(re.findall(r"(?m)^#\s+\S", content))
+        h2_count = len(re.findall(r"(?m)^##\s+\S", content))
+        if h1_count != 1 or h2_count < 3:
+            raise RuntimeError(
+                "超详细终稿结构不完整：必须包含唯一 H1 和至少三个有效 H2 章节"
+            )
+        if re.search(r"(?i)SOURCE-CHUNK|证据命名空间|【阶段：", content):
+            raise RuntimeError("超详细终稿结构不完整：包含内部分析模板")
+
+    def _report_exhaustive_progress(
+        self,
+        phase: str,
+        completed: int,
+        total: int,
+    ) -> None:
+        if self.progress_callback is None:
+            return
+        try:
+            self.progress_callback(phase, completed, total)
+        except TypeError:
+            # 兼容旧的双参数回调，避免外部调用方因内部阶段升级而中断。
+            try:
+                self.progress_callback(completed, total)
+            except Exception as exc:  # noqa: BLE001
+                self.logger.warning(f"超详细阶段进度回调失败：{exc}")
+        except Exception as exc:  # noqa: BLE001 - 进度失败不得中断生成
+            self.logger.warning(f"超详细阶段进度回调失败：{exc}")
+
     def _generate_with_pdf_reference(self, subtitle_text: str, pdf_structure: Dict, extract_images: bool = False) -> str:
         """用PDF参考生成笔记"""
         # 使用外部提示词模板，并对所有用户内容进行清理
@@ -661,6 +1935,7 @@ class SimpleProcessor:
             pdf_content=self._sanitize_content(pdf_structure['full_text'][:40000]),
             subtitle_text=self._sanitize_content(subtitle_text)
         )
+        prompt += "\n\n" + detail_instruction(self.note_detail_level)
         if extract_images:
             prompt += SCREENSHOT_INSTRUCTION
 
@@ -677,6 +1952,7 @@ class SimpleProcessor:
         prompt = GENERATE_DIRECTLY.format(
             subtitle_text=self._sanitize_content(subtitle_text)
         )
+        prompt += "\n\n" + detail_instruction(self.note_detail_level)
         if extract_images:
             prompt += SCREENSHOT_INSTRUCTION
 
