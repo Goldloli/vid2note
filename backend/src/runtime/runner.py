@@ -123,6 +123,84 @@ def _note_stage_progress(
 
 
 # --------------------------------------------------------------------------- #
+# LLM 用量聚合(openspec change add-llm-usage-observability)
+# --------------------------------------------------------------------------- #
+# 用量桶数值字段(与 llm.openai_compatible.normalize_usage 产出一致,外加 calls)
+_USAGE_NUMERIC_FIELDS: tuple[str, ...] = (
+    "prompt_tokens",
+    "completion_tokens",
+    "cache_hit_tokens",
+    "cache_miss_tokens",
+)
+
+
+def classify_llm_operation(operation_name: str) -> str:
+    """把 LLM 操作名归类为用量阶段键。
+
+    understand(超详细字幕理解/语义证据)→ blueprint(蓝图及修复)→
+    draft(章节初稿)→ review(章节审校/格式修复/术语保真)→
+    mindmap(思维导图)→ other(PDF 结构分析、普通笔记生成等)。
+    判断顺序先精确后宽泛,命中即返回。
+    """
+    name = str(operation_name or "")
+    if "超详细字幕理解" in name or "语义证据" in name:
+        return "understand"
+    if "蓝图" in name:
+        return "blueprint"
+    if "章节初稿" in name:
+        return "draft"
+    if "章节审校" in name or "章节格式修复" in name or "术语保真" in name:
+        return "review"
+    if "思维导图" in name:
+        return "mindmap"
+    return "other"
+
+
+class LlmUsageAggregator:
+    """任务级 LLM 用量聚合器:total / by_stage / by_operation 两级累计。
+
+    当前全部 LLM 调用串行(``_call_llm`` 无并发),实例由 note / mindmap 两个
+    节点执行器共享,无需加锁;by_operation 每项额外带 ``stage`` 键。
+    """
+
+    def __init__(self) -> None:
+        self._total = self._new_bucket()
+        self._by_stage: Dict[str, Dict[str, int]] = {}
+        self._by_operation: Dict[str, Dict[str, Any]] = {}
+
+    @staticmethod
+    def _new_bucket() -> Dict[str, int]:
+        bucket = {field: 0 for field in _USAGE_NUMERIC_FIELDS}
+        bucket["calls"] = 0
+        return bucket
+
+    def record(self, operation_name: str, usage: Dict[str, Any]) -> None:
+        """累计一次调用(``usage`` 为 normalize_usage 产出的归一化 dict)。"""
+        stage = classify_llm_operation(operation_name)
+        operation_bucket = self._by_operation.setdefault(
+            str(operation_name), {"stage": stage, **self._new_bucket()}
+        )
+        for bucket in (
+            self._total,
+            self._by_stage.setdefault(stage, self._new_bucket()),
+            operation_bucket,
+        ):
+            bucket["calls"] += 1
+            for field in _USAGE_NUMERIC_FIELDS:
+                bucket[field] += int(usage.get(field, 0) or 0)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """产出落库结构 ``{"total": {...}, "by_stage": {...}, "by_operation": {...}}``。"""
+        return {
+            "total": dict(self._total),
+            "by_stage": {key: dict(value) for key, value in self._by_stage.items()},
+            "by_operation": {
+                key: dict(value) for key, value in self._by_operation.items()
+            },
+        }
+
+
+# --------------------------------------------------------------------------- #
 # LLM 构造
 # --------------------------------------------------------------------------- #
 def _build_llm(snapshot: Dict[str, str], task: Any) -> Any:
@@ -232,6 +310,18 @@ def _make_executors(
     """
     task_id = task.id
 
+    # note / mindmap 两节点共享的任务级 LLM 用量聚合器(全部调用串行)
+    llm_usage_aggregator = LlmUsageAggregator()
+
+    def _flush_llm_usage() -> None:
+        """把当前聚合快照落库到 tasks.llm_usage;失败只记日志不阻断节点。"""
+        if repo is None:
+            return
+        try:
+            repo.update(task_id, llm_usage=llm_usage_aggregator.to_dict())
+        except Exception:  # noqa: BLE001 - 用量落库失败不阻断任务
+            logger.debug("LLM 用量落库失败 task=%s", task_id, exc_info=True)
+
     # ---------------- download ----------------
     def _download(ctx: Any) -> None:
         from src.media_ingest import IngestCancelled, download_video
@@ -321,6 +411,7 @@ def _make_executors(
                     task, "note_detail_level", "balanced"
                 ),
                 "progress_callback": _report_note_stage,
+                "usage_callback": llm_usage_aggregator.record,
             },
             logger=TaskLogger(task_id),
         )
@@ -354,6 +445,8 @@ def _make_executors(
                 except Exception:  # noqa: BLE001 - 更新 title 失败不阻断笔记生成
                     logger.debug("提取笔记 H1 更新 title 失败 task=%s", task_id, exc_info=True)
         ctx.emit_log("ok", f"笔记已落盘({len(markdown)} 字符)")
+        # 笔记节点成功后落库当前用量快照(mindmap 可选,先写一次保证增量可见)
+        _flush_llm_usage()
 
     # ---------------- mindmap ----------------
     def _mindmap(ctx: Any) -> None:
@@ -371,7 +464,11 @@ def _make_executors(
         markdown = note_abs.read_text(encoding="utf-8")
 
         llm = _build_llm(snapshot, task)
-        processor = SimpleProcessor(llm, logger=TaskLogger(task_id))
+        processor = SimpleProcessor(
+            llm,
+            config={"usage_callback": llm_usage_aggregator.record},
+            logger=TaskLogger(task_id),
+        )
         ctx.emit_log("info", f"开始生成思维导图,格式:{','.join(formats)}")
         ctx.emit_progress(10, "调用 LLM 生成导图大纲")
 
@@ -396,6 +493,8 @@ def _make_executors(
             else:
                 logger.warning("任务 %s 思维导图格式 %s 未产出文件,跳过登记", task_id, fmt)
         ctx.emit_log("ok", f"思维导图已生成({len(formats)} 种格式)")
+        # 思维导图节点成功后再次落库用量快照(含导图大纲调用)
+        _flush_llm_usage()
 
     # ---------------- cleanup ----------------
     def _cleanup(ctx: Any) -> None:
@@ -535,4 +634,4 @@ def run_task(
         cancel_registry.unregister(task_id)
 
 
-__all__ = ["run_task"]
+__all__ = ["run_task", "classify_llm_operation", "LlmUsageAggregator"]

@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     mindmap_paths    TEXT DEFAULT '[]',      -- JSON 数组
     screenshot_paths TEXT DEFAULT '[]',      -- JSON 数组
     node_statuses    TEXT DEFAULT '{}',      -- JSON 对象(六节点)
+    llm_usage        TEXT NOT NULL DEFAULT '{}', -- JSON 对象(LLM 用量聚合)
     llm_provider     TEXT,
     llm_model        TEXT,
     asr_engine       TEXT,
@@ -195,6 +196,11 @@ class Database:
                 cursor.execute(
                     "ALTER TABLE tasks ADD COLUMN note_detail_level "
                     "TEXT NOT NULL DEFAULT 'balanced'"
+                )
+            elif existing_cols and "llm_usage" not in existing_cols:
+                cursor.execute(
+                    "ALTER TABLE tasks ADD COLUMN llm_usage "
+                    "TEXT NOT NULL DEFAULT '{}'"
                 )
 
             # 确保 settings 表存在(幂等)

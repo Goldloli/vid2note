@@ -22,8 +22,10 @@ except ImportError:  # 兼容内核单测的裸 import
 
 # JSON 列:落库前需 json.dumps
 _JSON_COLUMNS: frozenset[str] = frozenset(
-    {"mindmap_paths", "screenshot_paths", "node_statuses", "mindmap_formats"}
+    {"mindmap_paths", "screenshot_paths", "node_statuses", "mindmap_formats", "llm_usage"}
 )
+# 其中 dict 型 JSON 列(None 时落 "{}";其余 list 型落 "[]")
+_JSON_DICT_COLUMNS: frozenset[str] = frozenset({"node_statuses", "llm_usage"})
 
 # 状态字面量(避免频繁枚举转换)
 _PENDING = TaskStatus.PENDING.value
@@ -44,7 +46,7 @@ def _encode_field(key: str, value: Any) -> Any:
     """编码单个字段为可入库的标量(JSON 列 dumps / 枚举取值 / datetime 取 ISO)。"""
     if key in _JSON_COLUMNS:
         if value is None:
-            return "[]" if key != "node_statuses" else "{}"
+            return "{}" if key in _JSON_DICT_COLUMNS else "[]"
         if isinstance(value, str):
             return value  # 已是 JSON 字符串,原样落库
         return json.dumps(value, ensure_ascii=False)
@@ -88,7 +90,7 @@ class TaskRepository:
             INSERT INTO tasks (
                 id, source_type, source_url, title, status, progress,
                 video_path, audio_path, srt_path, note_path, pdf_path,
-                mindmap_paths, screenshot_paths, node_statuses,
+                mindmap_paths, screenshot_paths, node_statuses, llm_usage,
                 llm_provider, llm_model, asr_engine,
                 pdf_mode, extract_images, output_language, note_detail_level,
                 mindmap_formats,
@@ -96,7 +98,7 @@ class TaskRepository:
             ) VALUES (
                 ?, ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?,
-                ?, ?, ?,
+                ?, ?, ?, ?,
                 ?, ?, ?,
                 ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?
@@ -118,6 +120,7 @@ class TaskRepository:
             json.dumps(list(task.mindmap_paths), ensure_ascii=False),
             json.dumps(list(task.screenshot_paths), ensure_ascii=False),
             json.dumps(task.node_statuses, ensure_ascii=False),
+            json.dumps(dict(task.llm_usage), ensure_ascii=False),
             task.llm_provider,
             task.llm_model,
             task.asr_engine,

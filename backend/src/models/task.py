@@ -84,7 +84,7 @@ def default_node_statuses() -> Dict[str, Dict[str, Any]]:
 # JSON 列(落库前 dumps,读出后 loads;空值存 [] / {},MUST NOT 存 NULL)
 # ---------------------------------------------------------------------------
 JSON_LIST_FIELDS: tuple[str, ...] = ("mindmap_paths", "screenshot_paths", "mindmap_formats")
-JSON_DICT_FIELDS: tuple[str, ...] = ("node_statuses",)
+JSON_DICT_FIELDS: tuple[str, ...] = ("node_statuses", "llm_usage")
 JSON_FIELDS: frozenset[str] = frozenset(JSON_LIST_FIELDS + JSON_DICT_FIELDS)
 
 
@@ -152,6 +152,7 @@ class Task:
 
     # ---- 六节点权威视图 ----
     node_statuses: Dict[str, Dict[str, Any]] = field(default_factory=default_node_statuses)
+    llm_usage: Dict[str, Any] = field(default_factory=dict)   # LLM 用量聚合(total/by_stage/by_operation)
 
     # ---- 引擎与生成选项 ----
     llm_provider: Optional[str] = None                # qwen/glm/deepseek/...
@@ -196,6 +197,7 @@ class Task:
             "mindmap_paths": list(self.mindmap_paths),
             "screenshot_paths": list(self.screenshot_paths),
             "node_statuses": dict(self.node_statuses),
+            "llm_usage": dict(self.llm_usage),
             "llm_provider": self.llm_provider,
             "llm_model": self.llm_model,
             "asr_engine": self.asr_engine,
@@ -225,6 +227,10 @@ class Task:
             base.update(node_statuses)
             node_statuses = base
 
+        llm_usage = data.get("llm_usage") or {}
+        if not isinstance(llm_usage, dict):
+            llm_usage = _safe_json_loads(llm_usage, {})
+
         return cls(
             id=data["id"],
             source_type=data.get("source_type", ""),
@@ -240,6 +246,7 @@ class Task:
             mindmap_paths=list(data.get("mindmap_paths") or []),
             screenshot_paths=list(data.get("screenshot_paths") or []),
             node_statuses=node_statuses,
+            llm_usage=llm_usage,
             llm_provider=data.get("llm_provider"),
             llm_model=data.get("llm_model"),
             asr_engine=data.get("asr_engine"),
@@ -289,6 +296,7 @@ class Task:
             mindmap_paths=_safe_json_loads(get_value("mindmap_paths"), []),
             screenshot_paths=_safe_json_loads(get_value("screenshot_paths"), []),
             node_statuses=_safe_json_loads(get_value("node_statuses"), default_node_statuses()) or default_node_statuses(),
+            llm_usage=_safe_json_loads(get_value("llm_usage"), {}) or {},
             llm_provider=get_value("llm_provider"),
             llm_model=get_value("llm_model"),
             asr_engine=get_value("asr_engine"),

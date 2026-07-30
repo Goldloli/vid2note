@@ -111,6 +111,10 @@ class SimpleProcessor:
         self.progress_callback: Optional[Callable[..., None]] = (
             progress_callback if callable(progress_callback) else None
         )
+        usage_callback = self.config.get("usage_callback")
+        self.usage_callback: Optional[Callable[..., None]] = (
+            usage_callback if callable(usage_callback) else None
+        )
         self.logger = logger or TaskLogger("default")
 
     def _call_llm(self, messages, max_tokens=4096, timeout=120, operation_name="LLM调用"):
@@ -130,11 +134,29 @@ class SimpleProcessor:
             RuntimeError: 当API调用失败时
         """
         try:
-            return self.llm.chat(messages, max_tokens=max_tokens, timeout=timeout)
+            result = self.llm.chat(messages, max_tokens=max_tokens, timeout=timeout)
         except Exception as e:
             error_msg = str(e)
             self.logger.error(f"{operation_name}失败: {error_msg}")
             raise
+        self._report_usage(operation_name)
+        return result
+
+    def _report_usage(self, operation_name: str) -> None:
+        """上报一次 LLM 调用的归一化用量(openspec「LLM 用量观测」)。
+
+        适配器无 ``last_usage``(mock / 本地模型)或未注入回调时静默跳过;
+        回调抛异常只记日志,不得中断笔记生成(同 progress_callback 容错语义)。
+        """
+        if self.usage_callback is None:
+            return
+        usage = getattr(self.llm, "last_usage", None)
+        if not usage:
+            return
+        try:
+            self.usage_callback(operation_name, usage)
+        except Exception as exc:  # noqa: BLE001 - 用量采集失败不得中断生成
+            self.logger.warning(f"LLM 用量上报失败({operation_name}): {exc}")
 
     def process(self, subtitle_file: str, pdf_file: Optional[str] = None, extract_images: bool = False) -> str:
         """
