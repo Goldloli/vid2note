@@ -856,17 +856,20 @@ class SimpleProcessor:
                 previous_context=previous_context,
                 next_context=next_context,
             )
+            # 每段独立消息链：首调 + 按需 ID 修复接链尾，使首调的输入与输出
+            # 成为可命中的缓存前缀单元(openspec「超详细 prompt 前缀缓存优化」)。
+            evidence_messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "你是严谨的课程内容分析师。只从给定字幕提取可追溯语义证据，"
+                        "不撰写最终笔记，不补充外部知识。"
+                    ),
+                },
+                {"role": "user", "content": evidence_prompt},
+            ]
             evidence = self._call_llm(
-                [
-                    {
-                        "role": "system",
-                        "content": (
-                            "你是严谨的课程内容分析师。只从给定字幕提取可追溯语义证据，"
-                            "不撰写最终笔记，不补充外部知识。"
-                        ),
-                    },
-                    {"role": "user", "content": evidence_prompt},
-                ],
+                evidence_messages,
                 max_tokens=EXHAUSTIVE_EVIDENCE_MAX_TOKENS,
                 timeout=300,
                 operation_name=f"超详细字幕理解({index + 1}/{total})",
@@ -877,25 +880,18 @@ class SimpleProcessor:
                 )
             expected_namespace = rf"\bE{index + 1:02d}-\d{{3}}\b"
             if not re.search(expected_namespace, evidence):
-                evidence_repair_prompt = (
-                    self._build_exhaustive_evidence_id_repair_prompt(
-                        evidence_prompt=evidence_prompt,
-                        evidence=evidence,
-                        index=index,
-                        total=total,
-                    )
+                evidence_messages.append({"role": "assistant", "content": evidence})
+                evidence_messages.append(
+                    {
+                        "role": "user",
+                        "content": self._build_exhaustive_evidence_id_repair_instruction(
+                            index=index,
+                            total=total,
+                        ),
+                    }
                 )
                 repaired_evidence = self._call_llm(
-                    [
-                        {
-                            "role": "system",
-                            "content": (
-                                "你是语义证据结构校对员。只补齐稳定证据 ID 和结构，"
-                                "不得删除、概括或新增原材料事实。"
-                            ),
-                        },
-                        {"role": "user", "content": evidence_repair_prompt},
-                    ],
+                    evidence_messages,
                     max_tokens=EXHAUSTIVE_EVIDENCE_MAX_TOKENS,
                     timeout=300,
                     operation_name=(
@@ -919,17 +915,20 @@ class SimpleProcessor:
             for index, packet in enumerate(evidence_packets)
         )
         blueprint_prompt = self._build_exhaustive_blueprint_prompt(evidence_text)
+        # 蓝图独立消息链：JSON 修复、覆盖修复按需接链尾，不重发全部证据
+        # (openspec「超详细 prompt 前缀缓存优化」)。
+        blueprint_messages = [
+            {
+                "role": "system",
+                "content": (
+                    "你是资深课程架构师，负责把全部语义证据综合为一份全局知识蓝图。"
+                    "必须合并跨时段主题并保留证据映射。"
+                ),
+            },
+            {"role": "user", "content": blueprint_prompt},
+        ]
         blueprint = self._call_llm(
-            [
-                {
-                    "role": "system",
-                    "content": (
-                        "你是资深课程架构师，负责把全部语义证据综合为一份全局知识蓝图。"
-                        "必须合并跨时段主题并保留证据映射。"
-                    ),
-                },
-                {"role": "user", "content": blueprint_prompt},
-            ],
+            blueprint_messages,
             max_tokens=EXHAUSTIVE_BLUEPRINT_MAX_TOKENS,
             timeout=420,
             operation_name="超详细课程知识蓝图",
@@ -942,22 +941,17 @@ class SimpleProcessor:
         try:
             blueprint_data = self._parse_exhaustive_blueprint(blueprint, total)
         except RuntimeError as parse_error:
-            json_repair_prompt = self._build_exhaustive_blueprint_json_repair_prompt(
-                evidence_text=evidence_text,
-                malformed_blueprint=blueprint,
-                parse_error=str(parse_error),
+            blueprint_messages.append({"role": "assistant", "content": blueprint})
+            blueprint_messages.append(
+                {
+                    "role": "user",
+                    "content": self._build_exhaustive_blueprint_json_repair_instruction(
+                        parse_error=str(parse_error),
+                    ),
+                }
             )
             repaired_json = self._call_llm(
-                [
-                    {
-                        "role": "system",
-                        "content": (
-                            "你是严格的 JSON 结构修复员。依据全部证据补全蓝图，"
-                            "只返回可解析 JSON，不省略章节、术语或证据映射。"
-                        ),
-                    },
-                    {"role": "user", "content": json_repair_prompt},
-                ],
+                blueprint_messages,
                 max_tokens=EXHAUSTIVE_BLUEPRINT_MAX_TOKENS,
                 timeout=420,
                 operation_name="超详细课程知识蓝图 JSON 修复",
@@ -968,28 +962,24 @@ class SimpleProcessor:
                 repaired_json,
                 total,
             )
+            blueprint = repaired_json
         missing_ids, unknown_ids = self._exhaustive_blueprint_coverage(
             blueprint_data,
             expected_evidence_ids,
         )
         if missing_ids or unknown_ids:
-            repair_prompt = self._build_exhaustive_blueprint_repair_prompt(
-                evidence_text=evidence_text,
-                blueprint=blueprint_data,
-                missing_ids=missing_ids,
-                unknown_ids=unknown_ids,
+            blueprint_messages.append({"role": "assistant", "content": blueprint})
+            blueprint_messages.append(
+                {
+                    "role": "user",
+                    "content": self._build_exhaustive_blueprint_repair_instruction(
+                        missing_ids=missing_ids,
+                        unknown_ids=unknown_ids,
+                    ),
+                }
             )
             repaired_blueprint = self._call_llm(
-                [
-                    {
-                        "role": "system",
-                        "content": (
-                            "你是课程知识蓝图校验员。只修复证据映射和必要的章节规划，"
-                            "返回符合指定 schema 的严格 JSON，不写解释。"
-                        ),
-                    },
-                    {"role": "user", "content": repair_prompt},
-                ],
+                blueprint_messages,
                 max_tokens=EXHAUSTIVE_BLUEPRINT_MAX_TOKENS,
                 timeout=420,
                 operation_name="超详细课程知识蓝图修复",
@@ -1032,18 +1022,22 @@ class SimpleProcessor:
                 pdf_structure=pdf_structure,
                 extract_images=extract_images,
             )
+            # 每章一条独立消息链：审校、格式修复、术语保真依次接链尾，
+            # 深写输入与初稿整体成为可命中的缓存前缀单元
+            # (openspec「超详细 prompt 前缀缓存优化」)。不跨章累积历史。
+            chapter_messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "你是资深课程作者。只写当前逻辑章节，充分使用分配给"
+                        "本章的原始字幕和语义证据，输出可直接进入终稿的 Markdown。"
+                    ),
+                },
+                {"role": "user", "content": draft_prompt},
+            ]
             draft = self._clean_markdown_output(
                 self._call_llm(
-                    [
-                        {
-                            "role": "system",
-                            "content": (
-                                "你是资深课程作者。只写当前逻辑章节，充分使用分配给"
-                                "本章的原始字幕和语义证据，输出可直接进入终稿的 Markdown。"
-                            ),
-                        },
-                        {"role": "user", "content": draft_prompt},
-                    ],
+                    chapter_messages,
                     max_tokens=EXHAUSTIVE_DRAFT_MAX_TOKENS,
                     timeout=600,
                     operation_name=(
@@ -1055,11 +1049,11 @@ class SimpleProcessor:
                 raise RuntimeError(
                     f"超详细章节初稿 {chapter['chapter_id']} 输出为空"
                 )
+            chapter_messages.append({"role": "assistant", "content": draft})
             chapter_drafts.append(
                 {
                     "chapter": chapter,
-                    "source": chapter_source,
-                    "evidence": chapter_evidence,
+                    "messages": chapter_messages,
                     "draft": draft,
                 }
             )
@@ -1072,27 +1066,19 @@ class SimpleProcessor:
         reviewed_chapters: list[str] = []
         for chapter_index, item in enumerate(chapter_drafts, start=1):
             chapter = item["chapter"]
-            review_prompt = self._build_exhaustive_chapter_review_prompt(
-                chapter,
-                blueprint=blueprint_data,
-                source_text=item["source"],
-                evidence_text=item["evidence"],
-                draft=item["draft"],
-                pdf_structure=pdf_structure,
-                extract_images=extract_images,
+            chain = item["messages"]
+            chain.append(
+                {
+                    "role": "user",
+                    "content": self._build_exhaustive_chapter_review_instruction(
+                        chapter,
+                        extract_images=extract_images,
+                    ),
+                }
             )
             reviewed = self._clean_markdown_output(
                 self._call_llm(
-                    [
-                        {
-                            "role": "system",
-                            "content": (
-                                "你是课程笔记章节编辑和事实审校员。对照本章全部"
-                                "原始材料完成最终章节，不能为了简短删除独立信息。"
-                            ),
-                        },
-                        {"role": "user", "content": review_prompt},
-                    ],
+                    chain,
                     max_tokens=EXHAUSTIVE_REVIEW_MAX_TOKENS,
                     timeout=600,
                     operation_name=(
@@ -1119,22 +1105,18 @@ class SimpleProcessor:
                 # 不对普通结构缺失自动“兜底”，避免把不合格章节悄悄发布。
                 if "包含内部分析模板" not in str(validation_error):
                     raise
-                repair_prompt = self._build_exhaustive_chapter_format_repair_prompt(
-                    chapter,
-                    reviewed=reviewed,
+                chain.append({"role": "assistant", "content": reviewed})
+                chain.append(
+                    {
+                        "role": "user",
+                        "content": self._build_exhaustive_chapter_format_repair_instruction(
+                            chapter,
+                        ),
+                    }
                 )
                 repaired = self._clean_markdown_output(
                     self._call_llm(
-                        [
-                            {
-                                "role": "system",
-                                "content": (
-                                    "你是 Markdown 无损校对员。只清除内部分析标记，"
-                                    "保持所有面向读者的事实、论证和结构不变。"
-                                ),
-                            },
-                            {"role": "user", "content": repair_prompt},
-                        ],
+                        chain,
                         max_tokens=EXHAUSTIVE_REVIEW_MAX_TOKENS,
                         timeout=600,
                         operation_name=(
@@ -1157,27 +1139,18 @@ class SimpleProcessor:
                     chapter_id=chapter["chapter_id"],
                 )
             if EXHAUSTIVE_SUSPICIOUS_ASR_TERMS.search(reviewed):
-                fidelity_prompt = (
-                    self._build_exhaustive_terminology_fidelity_prompt(
-                        chapter,
-                        blueprint=blueprint_data,
-                        source_text=item["source"],
-                        evidence_text=item["evidence"],
-                        reviewed=reviewed,
-                    )
+                chain.append({"role": "assistant", "content": reviewed})
+                chain.append(
+                    {
+                        "role": "user",
+                        "content": self._build_exhaustive_terminology_fidelity_instruction(
+                            chapter,
+                        ),
+                    }
                 )
                 terminology_checked = self._clean_markdown_output(
                     self._call_llm(
-                        [
-                            {
-                                "role": "system",
-                                "content": (
-                                    "你是课程笔记实体与专名校对员。修复高置信 ASR "
-                                    "音译、概念/产品混淆及机制归属，正文信息必须无损。"
-                                ),
-                            },
-                            {"role": "user", "content": fidelity_prompt},
-                        ],
+                        chain,
                         max_tokens=EXHAUSTIVE_REVIEW_MAX_TOKENS,
                         timeout=600,
                         operation_name=(
@@ -1370,43 +1343,33 @@ class SimpleProcessor:
             mapped_ids - expected_evidence_ids,
         )
 
-    def _build_exhaustive_blueprint_repair_prompt(
+    def _build_exhaustive_blueprint_repair_instruction(
         self,
         *,
-        evidence_text: str,
-        blueprint: Dict[str, Any],
         missing_ids: set[str],
         unknown_ids: set[str],
     ) -> str:
+        """蓝图覆盖修复的链尾增量指令；全部证据与上一版蓝图已在链内前缀中。"""
         return f"""
-【阶段：全局知识蓝图】
 【阶段：修复知识蓝图】
-当前蓝图未通过机械证据覆盖校验。请修复章节规划并重新返回完整严格 JSON。
+你上一则回复的蓝图未通过机械证据覆盖校验。请修复章节规划并重新返回完整严格 JSON。
 
 必须补入的证据 ID：{", ".join(sorted(missing_ids)) or "无"}
 必须移除的未知证据 ID：{", ".join(sorted(unknown_ids)) or "无"}
-
-【当前蓝图 JSON】
-{json.dumps(blueprint, ensure_ascii=False, indent=2)}
-
-【全部语义证据】
-{self._sanitize_content(evidence_text, max_length=None)}
 
 沿用原 schema；每个真实证据 ID 恰好分配给最合适的章节，必要时可调整章节，
 并确保每章 source_chunks 覆盖其证据来源。只返回 JSON。
 """.strip()
 
-    def _build_exhaustive_blueprint_json_repair_prompt(
+    def _build_exhaustive_blueprint_json_repair_instruction(
         self,
         *,
-        evidence_text: str,
-        malformed_blueprint: str,
         parse_error: str,
     ) -> str:
+        """蓝图 JSON 修复的链尾增量指令；全部证据与首次输出已在链内前缀中。"""
         return f"""
-【阶段：全局知识蓝图】
 【阶段：修复蓝图 JSON】
-首次蓝图包含有价值的规划内容，但 JSON 语法或完整性未通过严格解析。
+你上一则回复包含有价值的规划内容，但 JSON 语法或完整性未通过严格解析。
 请依据全部语义证据返回一份完整、可解析的蓝图 JSON。
 
 解析错误：{self._sanitize_content(parse_error, max_length=None)}
@@ -1417,14 +1380,8 @@ class SimpleProcessor:
 - 不得遗漏任何真实证据 ID；每个 evidence ID 都要进入最合适章节
 - source_chunks 必须覆盖章节证据来源
 - 高置信术语只做拼写校对，概念与产品不得混淆；无法确认时标 uncertain
-- 如果首次输出在中途截断，必须根据全部证据补齐，而不是只闭合残缺括号
+- 如果上一则回复在中途截断，必须根据全部证据补齐，而不是只闭合残缺括号
 - 只返回严格 JSON，不要 Markdown 围栏或说明文字
-
-【首次未通过解析的蓝图】
-{self._sanitize_content(malformed_blueprint, max_length=None)}
-
-【全部语义证据】
-{self._sanitize_content(evidence_text, max_length=None)}
 """.strip()
 
     def _exhaustive_chapter_material(
@@ -1457,10 +1414,12 @@ class SimpleProcessor:
         pdf_structure: Optional[Dict[str, Any]],
         extract_images: bool,
     ) -> str:
+        # 前缀稳定化：固定指令、全局蓝图与讲义参考（跨章逐字节相同）在前，
+        # 章节 ID / 规划 / 证据 / 原文等变量压到末尾，使跨章公共前缀可命中缓存
+        # (openspec「超详细 prompt 前缀缓存优化」)。
         prompt = f"""
 【阶段：章节深写】
-章节 ID：{chapter["chapter_id"]}
-请只撰写蓝图中的当前章节，输出一个以 `##` 开头、可直接拼入终稿的完整章节。
+请只撰写蓝图指定的当前章节（章节 ID 见文末），输出一个以 `##` 开头、可直接拼入终稿的完整章节。
 
 {detail_instruction("exhaustive")}
 
@@ -1472,9 +1431,24 @@ class SimpleProcessor:
 - 只使用字幕和讲义可支持的内容；专名或数字无法确认时明确标记不确定
 - 不输出 H1，不展示 evidence ID、source chunk、蓝图字段或写作过程
 - 章节内部使用必要的 H3、列表、表格与时间戳，让读者能独立学习和复用
+"""
+        if extract_images:
+            prompt += (
+                "\n"
+                + SCREENSHOT_INSTRUCTION.strip()
+                + "\n这是逐章写作：本章仅在确有高信息量画面时保留 0-1 个标记，"
+                "避免全篇截图过密。\n"
+            )
+        prompt += f"""
+直接返回当前章节的纯 Markdown，不要包裹代码块。
 
 【全局蓝图 JSON】
 {json.dumps(blueprint, ensure_ascii=False, indent=2)}
+
+{self._exhaustive_reference_context(pdf_structure)}
+
+【当前章节】
+章节 ID：{chapter["chapter_id"]}
 
 【当前章节规划】
 {json.dumps(chapter, ensure_ascii=False, indent=2)}
@@ -1482,37 +1456,23 @@ class SimpleProcessor:
 【当前章节语义证据】
 {self._sanitize_content(evidence_text, max_length=None)}
 
-{self._exhaustive_reference_context(pdf_structure)}
-
 【当前章节全部原始字幕】
 {self._sanitize_content(source_text, max_length=None)}
-
-直接返回当前章节的纯 Markdown，不要包裹代码块。
 """.strip()
-        if extract_images:
-            prompt += (
-                "\n\n"
-                + SCREENSHOT_INSTRUCTION.strip()
-                + "\n这是逐章写作：本章仅在确有高信息量画面时保留 0-1 个标记，"
-                "避免全篇截图过密。"
-            )
         return prompt
 
-    def _build_exhaustive_chapter_review_prompt(
+    def _build_exhaustive_chapter_review_instruction(
         self,
         chapter: Dict[str, Any],
         *,
-        blueprint: Dict[str, Any],
-        source_text: str,
-        evidence_text: str,
-        draft: str,
-        pdf_structure: Optional[Dict[str, Any]],
         extract_images: bool,
     ) -> str:
-        prompt = f"""
+        """章节审校的链尾增量指令；蓝图、规划、证据、原文与初稿已在链内前缀中。"""
+        instruction = f"""
 【阶段：章节编辑审校】
-章节 ID：{chapter["chapter_id"]}
-请对当前章节初稿执行最终事实核验和深度编辑，直接输出一个以 `##` 开头的终稿章节。
+现在你是课程笔记章节编辑和事实审校员。以上是你要审校的章节初稿
+（章节 ID：{chapter["chapter_id"]}，全局蓝图、章节规划、语义证据与原始字幕见对话前文）。
+请对照前文全部原始材料对它执行最终事实核验和深度编辑，直接输出一个以 `##` 开头的终稿章节。
 
 内部逐项审查但不展示评分或过程：
 1. 事实忠实度：结论、数字、专名和因果是否有原始材料支持
@@ -1529,33 +1489,16 @@ class SimpleProcessor:
 - 不得引入外部事实；ASR 无法确认的内容保留不确定性，不得擅自猜测映射
 - 只输出当前章节，恰好一个 H2，不输出 H1、证据 ID、source chunk 或内部指令
 
-【全局蓝图 JSON】
-{json.dumps(blueprint, ensure_ascii=False, indent=2)}
-
-【当前章节规划】
-{json.dumps(chapter, ensure_ascii=False, indent=2)}
-
-【当前章节语义证据】
-{self._sanitize_content(evidence_text, max_length=None)}
-
-【待审校章节初稿】
-{self._sanitize_content(draft, max_length=None)}
-
-{self._exhaustive_reference_context(pdf_structure)}
-
-【当前章节全部原始字幕】
-{self._sanitize_content(source_text, max_length=None)}
-
 直接返回当前章节的最终纯 Markdown，不要包裹代码块。
 """.strip()
         if extract_images:
-            prompt += (
+            instruction += (
                 "\n\n"
                 + SCREENSHOT_INSTRUCTION.strip()
                 + "\n这是逐章审校：仅保留本章 0-1 个真正有教学价值且时间戳可靠的"
                 "截图标记，不得把已有有效标记全部删除。"
             )
-        return prompt
+        return instruction
 
     def _normalize_exhaustive_chapter(self, content: str) -> str:
         """把模型偶发的章节 H1 降为 H2，不改写章节正文。"""
@@ -1606,17 +1549,16 @@ class SimpleProcessor:
                 normalized = normalized.replace(variant, canonical)
         return normalized
 
-    def _build_exhaustive_chapter_format_repair_prompt(
+    def _build_exhaustive_chapter_format_repair_instruction(
         self,
         chapter: Dict[str, Any],
-        *,
-        reviewed: str,
     ) -> str:
+        """章节格式修复的链尾增量指令；待清理章节是链内上一则 assistant 回复。"""
         return f"""
 【阶段：章节格式修复】
 章节 ID：{chapter["chapter_id"]}
-以下章节的内容已经完成事实审校，但混入了 evidence ID、source chunk、证据命名空间
-或内部阶段标签。请只删除这些内部分析标记及其无意义连接词。
+你上一则回复的章节内容已经完成事实审校，但混入了 evidence ID、source chunk、
+证据命名空间或内部阶段标签。请只删除这些内部分析标记及其无意义连接词，重新输出完整章节。
 
 严格要求：
 - 不得概括、压缩或删除正文信息
@@ -1624,25 +1566,19 @@ class SimpleProcessor:
 - 保持原有 Markdown 层级，输出恰好一个 H2，不输出 H1
 - 不得保留 `E01-001` 这类证据 ID、source chunk 或内部阶段标签
 - 只返回清理后的完整章节，不解释修改过程
-
-【待无损清理章节】
-{self._sanitize_content(reviewed, max_length=None)}
 """.strip()
 
-    def _build_exhaustive_terminology_fidelity_prompt(
+    def _build_exhaustive_terminology_fidelity_instruction(
         self,
         chapter: Dict[str, Any],
-        *,
-        blueprint: Dict[str, Any],
-        source_text: str,
-        evidence_text: str,
-        reviewed: str,
     ) -> str:
+        """术语保真的链尾增量指令；术语表、字幕、证据与待校对章节均在链内前缀中。"""
         return f"""
 【阶段：术语保真审校】
 章节 ID：{chapter["chapter_id"]}
-当前章节内容和结构已经完成审校，但仍含疑似 ASR 音译、错拼、年份或概念 /
-产品 / 机制归属混淆。请对照全局术语表、原始字幕上下文和语义证据，执行实体保真。
+你上一则回复的章节内容和结构已经完成审校，但仍含疑似 ASR 音译、错拼、年份或
+概念 / 产品 / 机制归属混淆。请对照对话前文的全局术语表、原始字幕上下文和语义证据，
+执行实体保真，重新输出完整章节。
 
 严格要求：
 - 不得概括、删减或扩写正文事实，不得改变论证、案例、可靠数字、时间戳和截图标记
@@ -1657,21 +1593,6 @@ class SimpleProcessor:
   不得写成 2023 或 2025 年
 - 可以在当前章内移动直接归错产品的小节，但不得删除其中任何事实或改变原有论证作用
 - 只返回完整章节，恰好一个 H2，不输出 H1、证据 ID 或校对说明
-
-【全局蓝图与术语表】
-{json.dumps(blueprint, ensure_ascii=False, indent=2)}
-
-【当前章节规划】
-{json.dumps(chapter, ensure_ascii=False, indent=2)}
-
-【当前章节语义证据】
-{self._sanitize_content(evidence_text, max_length=None)}
-
-【当前章节原始字幕】
-{self._sanitize_content(source_text, max_length=None)}
-
-【待术语保真章节】
-{self._sanitize_content(reviewed, max_length=None)}
 """.strip()
 
     def _validate_exhaustive_chapter(
@@ -1795,23 +1716,32 @@ class SimpleProcessor:
         next_context: str = "",
     ) -> str:
         namespace = f"E{index + 1:02d}-"
+        # 前缀稳定化：固定提取要求在前（跨段逐字节相同），段序号、命名空间、
+        # 边界上下文与正文压到末尾 (openspec「超详细 prompt 前缀缓存优化」)。
         return f"""
 【阶段：语义证据提取】
-当前是完整课程字幕的第 {index + 1}/{total} 段。
-证据命名空间：{namespace}
+你的任务不是写笔记，而是充分理解给定的一段课程字幕，为后续全局建模提供可追溯证据。
+本段的定位信息与证据命名空间见文末。
 
-你的任务不是写笔记，而是充分理解本段，为后续全局建模提供可追溯证据。
-每个独立知识单元使用 `{namespace}001`、`{namespace}002` 递增编号，并记录：
-- 主题与中心结论
-- 定义、解释和完整论证链
-- 数据、步骤、案例、反例，以及它们证明或限制了什么
-- 适用边界、注意事项、术语、易错点和有价值问答
-- 与前后内容可能存在的跨段线索
-- 时间戳或时间范围（原文存在时）
+证据提取要求：
+- 使用文末给定的证据命名空间，每个独立知识单元从 `命名空间001` 起递增编号
+  （例如命名空间为 E01- 时，编号为 E01-001、E01-002）
+- 记录主题与中心结论
+- 记录定义、解释和完整论证链
+- 记录数据、步骤、案例、反例，以及它们证明或限制了什么
+- 记录适用边界、注意事项、术语、易错点和有价值问答
+- 记录与前后内容可能存在的跨段线索
+- 记录时间戳或时间范围（原文存在时）
 - ASR 不确定项：只做高置信纠正，无法确认的专名、数字或语句原样标记
 
 不要写课程总标题，不要把寒暄和逐字重复创建为证据，不要使用外部知识。
 边界上下文只用于理解衔接，不得重复提取为本段证据。
+
+直接返回结构化 Markdown 证据包，不要解释工作过程。
+
+【本段定位】
+当前是完整课程字幕的第 {index + 1}/{total} 段。
+证据命名空间：{namespace}
 
 【上一段结尾上下文】
 {self._sanitize_content(previous_context)}
@@ -1821,35 +1751,25 @@ class SimpleProcessor:
 
 【下一段开头上下文】
 {self._sanitize_content(next_context)}
-
-直接返回结构化 Markdown 证据包，不要解释工作过程。
 """.strip()
 
-    def _build_exhaustive_evidence_id_repair_prompt(
+    def _build_exhaustive_evidence_id_repair_instruction(
         self,
         *,
-        evidence_prompt: str,
-        evidence: str,
         index: int,
         total: int,
     ) -> str:
+        """证据 ID 修复的链尾增量指令；原任务、字幕与首次输出均在链内前缀中。"""
         namespace = f"E{index + 1:02d}-"
         return f"""
-【阶段：语义证据提取】
 【阶段：修复语义证据 ID】
-第 {index + 1}/{total} 段的首次输出有内容，但没有使用规定的稳定证据 ID。
+你上一则回复（第 {index + 1}/{total} 段）有内容，但没有使用规定的稳定证据 ID。
 
 修复要求：
 - 每个独立知识单元按 `{namespace}001`、`{namespace}002` 递增编号
 - 不得删除原输出中的事实、论证、案例、边界、时间戳或 ASR 不确定项
 - 不得概括原输出，不得补充原字幕没有的新事实
 - 只返回修复后的完整结构化 Markdown 证据包
-
-【原任务与完整原始字幕】
-{evidence_prompt}
-
-【首次输出】
-{self._sanitize_content(evidence, max_length=None)}
 """.strip()
 
     def _build_exhaustive_blueprint_prompt(self, evidence_text: str) -> str:
