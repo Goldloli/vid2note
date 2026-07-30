@@ -15,4 +15,4 @@
 
 - [x] 3.1 更新/新增 RecordingLLM 测试：链式消息结构、增量指令内容、既有校验与失败语义不变
 - [x] 3.2 `openspec validate optimize-exhaustive-prompt-cache --strict`、后端完整 pytest、前端门禁
-- [ ] 3.3 重建 Docker，真实超详细任务对比 llm_usage（review/draft 命中提升、miss 总量下降）
+- [x] 3.3 重建 Docker，真实超详细任务对比 llm_usage（review/draft 命中提升、miss 总量下降）

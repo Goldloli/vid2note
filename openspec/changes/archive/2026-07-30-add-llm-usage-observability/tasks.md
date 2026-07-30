@@ -20,4 +20,4 @@
 
 - [x] 4.1 `openspec validate add-llm-usage-observability --strict` 与后端完整 pytest
 - [x] 4.2 前端 Node 测试、lint 与生产构建
-- [ ] 4.3 重建 Docker，用真实超详细任务验证详情页展示与 DeepSeek 命中/未命中拆分
+- [x] 4.3 重建 Docker，用真实超详细任务验证详情页展示与 DeepSeek 命中/未命中拆分
