@@ -223,3 +223,64 @@ note-generation capability 的核心契约是:消费上游 ASR 步骤产出的�
 
 - **WHEN** 截图嵌入开启,LLM 输出的某个 `[IMG:<秒>]` 标记其秒数超出视频时长,或 ffmpeg 截帧失败
 - **THEN** 该 capability MUST 跳过该标记(不得替换为图片、也不得在笔记中残留原始 `[IMG:...]` 标记),MUST NOT 因单个标记失败而中断整个笔记生成
+
+### Requirement: 笔记生成的 LLM 调用支持用量上报
+
+笔记生成的 LLM 调用漏斗 MUST 支持可选的用量上报回调：每次调用成功后，若 LLM 适配器留有最近一次调用的 usage 且已注入回调，MUST 以操作名和归一化 usage 调用该回调。回调失败 MUST NOT 中断笔记生成。未注入回调或适配器无 usage 时，生成行为 MUST 与现状完全一致。
+
+#### Scenario: 注入回调后逐次上报
+
+- **WHEN** 以 `usage_callback` 构造处理器并执行包含多次 LLM 调用的生成
+- **THEN** 每次调用 MUST 产生恰好一次回调，携带本次的 `operation_name` 与归一化 usage dict
+
+#### Scenario: 回调异常不中断
+
+- **WHEN** `usage_callback` 抛出异常
+- **THEN** 处理器 MUST 记录日志并继续生成，MUST NOT 让任务因用量采集失败而失败
+
+### Requirement: LLM 适配器暂存归一化 usage
+
+OpenAI 兼容适配器 MUST 在每次 `chat()` 成功后把响应 usage 归一化为 `{prompt_tokens, completion_tokens, cache_hit_tokens, cache_miss_tokens}` 并暂存于实例属性 `last_usage`，MUST NOT 改变 `chat()` 的返回签名。DeepSeek 的 `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens` 与 OpenAI 系的 `prompt_tokens_details.cached_tokens` MUST 映射到统一字段。
+
+#### Scenario: DeepSeek 缓存字段映射
+
+- **WHEN** 响应 usage 含 `prompt_cache_hit_tokens = 100`、`prompt_cache_miss_tokens = 900`
+- **THEN** `last_usage` MUST 为 `{prompt_tokens: 1000, completion_tokens: <值>, cache_hit_tokens: 100, cache_miss_tokens: 900}`
+
+#### Scenario: 无缓存字段时未命中兜底
+
+- **WHEN** 响应 usage 仅含 `prompt_tokens = 500` 与 `completion_tokens`
+- **THEN** `last_usage.cache_hit_tokens` MUST 为 0 且 `cache_miss_tokens` MUST 为 500
+
+### Requirement: 超详细 prompt 前缀稳定
+
+超详细链路中同一阶段类型的多次 LLM 调用，其消息前缀 MUST 由逐字节稳定的内容构成：固定指令与跨调用不变的大块内容（如全局蓝图 JSON）在前，每次调用不同的内容（章节 ID、章节规划、本章证据、本章原文、段序号、命名空间、边界上下文、字幕正文）在末尾。重排 MUST NOT 改变任何阶段的生成契约、机械校验与失败语义。
+
+#### Scenario: 章节深写 prompt 的顺序
+
+- **WHEN** 构造第 3 章与第 5 章的深写 prompt
+- **THEN** 两个 prompt 从首字符到全局蓝图 JSON 结束 MUST 逐字节相同，章节规划、证据与原文 MUST 出现在蓝图之后
+
+### Requirement: 章内审校与修复使用消息链
+
+章节审校、章节格式修复、术语保真 MUST 在本章深写调用的消息链尾以增量指令发起：消息列表依次包含深写的 system/user 消息、深写输出（assistant）、增量指令（user），MUST NOT 把蓝图、证据、原文、初稿作为新的完整 prompt 重发。每章 MUST 使用独立消息链，MUST NOT 跨章累积对话历史。增量指令 MUST 保留既有审校规则与输出契约，机械校验与失败语义 MUST 与单发 prompt 时一致。
+
+#### Scenario: 审校调用不重发上游材料
+
+- **WHEN** 某章深写成功后发起审校
+- **THEN** 审校请求的消息 MUST 以深写请求的完整消息列表为前缀，审校 user 消息 MUST NOT 包含全局蓝图 JSON 或本章原始字幕全文
+
+#### Scenario: 条件修复接在链尾
+
+- **WHEN** 章节审校稿触发格式修复与术语保真
+- **THEN** 两次调用 MUST 依次接在同一章的消息链尾，修复后的输出 MUST 作为链的最新 assistant 内容参与后续校验
+
+### Requirement: 证据与蓝图修复使用消息链
+
+语义证据 ID 修复、蓝图 JSON 修复、蓝图覆盖修复 MUST 接在各自首次调用的消息链尾，修复指令 MUST NOT 重发首次输出全文或全部证据全文（内容已在链内前缀中）。修复失败判定与抛错行为 MUST 与现状一致。
+
+#### Scenario: 证据 ID 修复
+
+- **WHEN** 第 i 段证据首次输出缺少命名空间 ID
+- **THEN** 修复请求 MUST 以 `[system, user(原证据 prompt), assistant(首次输出), user(修复要求)]` 结构发起，修复后仍缺 ID 时 MUST 抛出与现状相同的错误
+
