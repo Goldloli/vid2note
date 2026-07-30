@@ -1,15 +1,15 @@
 # web-frontend Specification
 
 ## Purpose
-TBD - created by archiving change build-vid2note-v1. Update Purpose after archive.
+定义本地 Web 应用的导航、任务管理、笔记、导图、ASR 和设置交互。确保桌面与窄屏环境下的状态反馈、可访问性和配置编辑保持清晰一致。
 ## Requirements
 ### Requirement: 应用骨架与六页导航
 
-前端 MUST 以浏览器访问 `localhost:8765` 的 Web 应用形态提供（由 FastAPI 后端直接托管静态资源，MUST NOT 依赖 Electron 客户端），并 MUST 包含与高保真原型对齐的统一应用骨架：顶部标题栏、左侧固定侧栏、右侧主内容区。侧栏 MUST 提供全局导航入口，至少包含：主控台、笔记、思维导图、历史、ASR、设置；其中「笔记」「思维导图」页签点击后 MUST 进入对应的全量浏览页（`/notes` / `/mindmaps`），并默认定位到最新一篇；任务详情页由主控台 / 历史进入（per-task，不在全局侧栏）。当前所在页 MUST 在侧栏中被高亮为激活态。侧栏底部 MUST 始终展示一份引擎状态卡，实时反映当前选定的 ASR 引擎、LLM 引擎与后端运行态。
+前端 MUST 以浏览器访问 `localhost:8761` 的 Web 应用形态提供（由 FastAPI 后端直接托管静态资源，MUST NOT 依赖 Electron 客户端），并 MUST 包含与高保真原型对齐的统一应用骨架：顶部标题栏、左侧固定侧栏、右侧主内容区。侧栏 MUST 提供全局导航入口，至少包含：主控台、笔记、思维导图、历史、ASR、设置；其中「笔记」「思维导图」页签点击后 MUST 进入对应的全量浏览页（`/notes` / `/mindmaps`），并默认定位到最新一篇；任务详情页由主控台 / 历史进入（per-task，不在全局侧栏）。当前所在页 MUST 在侧栏中被高亮为激活态。侧栏底部 MUST 始终展示一份引擎状态卡，实时反映当前选定的 ASR 引擎、LLM 引擎与后端运行态。
 
 #### Scenario: 六页均可通过侧栏到达且布局对齐原型
 
-- **WHEN** 用户在浏览器中打开 `localhost:8765` 并依次点击侧栏的导航项
+- **WHEN** 用户在浏览器中打开 `localhost:8761` 并依次点击侧栏的导航项
 - **THEN** 应用 MUST 分别渲染主控台、笔记浏览页、思维导图浏览页、历史、ASR、设置各页面，每页的主结构（标题栏 + 侧栏 + 主内容区）MUST 与原型布局一致
 
 #### Scenario: 笔记与思维导图页签定位最近一篇
@@ -30,7 +30,7 @@ TBD - created by archiving change build-vid2note-v1. Update Purpose after archiv
 #### Scenario: 前端为浏览器 Web 应用而非 Electron
 
 - **WHEN** 用户在设置「关于」区域查看运行模式
-- **THEN** 页面 MUST 显示其为 Docker 部署的 Web 应用（服务地址 `http://localhost:8765`），MUST NOT 出现「electron」「桌面客户端」等与 v1 形态不符的标识
+- **THEN** 页面 MUST 显示其为 Docker 部署的 Web 应用（服务地址 `http://localhost:8761`），MUST NOT 出现「electron」「桌面客户端」等与 v1 形态不符的标识
 
 ### Requirement: 主控台任务创建入口
 
@@ -121,7 +121,7 @@ TBD - created by archiving change build-vid2note-v1. Update Purpose after archiv
 #### Scenario: 打开任务详情即建立 SSE 并增量追加日志
 
 - **WHEN** 用户打开一个运行中任务的详情页
-- **THEN** 前端 MUST 与后端 `:8765` 建立 SSE 连接,后端每推送一条日志,终端 MUST 增量追加一行,且 MUST NOT 重复追加已接收的行
+- **THEN** 前端 MUST 通过同源 `/api/v1/tasks/{task_id}/stream` 与后端建立 SSE 连接,后端每推送一条日志,终端 MUST 增量追加一行,且 MUST NOT 重复追加已接收的行
 
 #### Scenario: 日志按级别着色并带时间戳
 
@@ -261,75 +261,80 @@ TBD - created by archiving change build-vid2note-v1. Update Purpose after archiv
 
 ### Requirement: 设置页 ASR 与 LLM 引擎配置
 
-设置页 MUST 提供 ASR 引擎选择（含云端 / 本地 / 外部三种可选引擎）与云端 API Key 填写及连通性测试入口；ASR 引擎选择 MUST 持久化到后端 `asr.engine`（修复 v1 早期 key 名不匹配导致存不进的问题）；MUST 提供引擎策略选择（在线优先·失败转本地 / 指定单一）；MUST 提供八家 LLM 提供商（通义千问 Qwen、DeepSeek、智谱 GLM、Moonshot/Kimi、百度文心、字节豆包 Doubao、MiniMax、Ollama 本地）的配置，每家 MUST 可填写其所需的凭证（API Key / Secret Key / Group ID / Host 之一或多项）、模型与 Base URL，并 MUST 提供连接测试。默认 LLM 提供商 MUST 为 DeepSeek（模型 `deepseek-v4-flash`）；默认在线 ASR provider MUST 为必剪（`bcut`）。
+设置中心 MUST 采用「通用 / LLM 服务 / 笔记生成 / 存储与清理 / 高级设置 / 关于」六个页签。设置中心 MUST NOT 再提供第二套完整 ASR 表单，只 SHALL 展示当前 ASR 摘要与进入独立 ASR 页的入口。LLM 页签 MUST 展示八家内置 provider 和一个自定义 OpenAI-compatible 槽位，允许分别编辑模型、Base URL 和所需凭证，并有且仅有一个默认 provider。已配置凭证输入框 MUST 默认显示黑点和配置状态，右侧 MUST 提供可访问的眼睛按钮按需切换明文。
 
-#### Scenario: ASR 引擎可选且持久化
+#### Scenario: 六个设置页签切换
 
-- **WHEN** 用户在设置页的 ASR 区域选择某一 ASR 引擎（必剪云接口 / Whisper 本地 / 外部 ASR 三者之一）并保存
-- **THEN** 该选择 MUST 被持久化到 `asr.engine`，刷新或重启容器后 MUST 仍为该值，且主控台新建任务的 ASR 默认选中项 MUST 同步更新
+- **WHEN** 用户打开设置中心并依次点击六个页签
+- **THEN** 页面 MUST 只展示当前页签内容，切换 MUST NOT 丢失尚未保存的同页编辑状态，窄屏下页签 MUST 可横向滚动或换行且不得溢出
 
-#### Scenario: ASR 引擎策略可选
+#### Scenario: 设置页只显示 ASR 摘要
 
-- **WHEN** 用户选择策略为「在线优先·失败转本地」或「指定单一」并保存
-- **THEN** 该策略 MUST 持久化到 `asr.strategy`，后续任务 MUST 按所选策略执行（在线优先在失败时降级本地；指定单一下不降级）
+- **WHEN** 用户在设置中心查看通用或相关摘要区域
+- **THEN** 页面 SHALL 显示当前默认 ASR 和策略，并提供「前往 ASR 设置」，MUST NOT 出现可与独立 ASR 页产生冲突的第二套完整编辑表单
 
-#### Scenario: ASR 云端 Key 可填写并测试连通性
+#### Scenario: 九种 LLM 槽位各可配置
 
-- **WHEN** 用户填写 ASR 云端相关配置并点击「测试」（或跳转 ASR 管理页测试）
-- **THEN** 前端 MUST 调用后端进行连通性测试并反馈结果（成功 / 失败及原因），成功时 MUST 展示「验证通过」状态
+- **WHEN** 用户进入 LLM 服务页签
+- **THEN** 页面 MUST 列出 DeepSeek、Qwen、GLM、Kimi、百度千帆、豆包、MiniMax、Ollama 和自定义槽位，并展示默认/已配置/未配置/本地等状态
 
-#### Scenario: 八家 LLM 提供商各可配置
+#### Scenario: 模型有建议值且允许自由填写
 
-- **WHEN** 用户进入设置页的 LLM 区域
-- **THEN** 页面 MUST 列出八家 LLM 提供商（Qwen / DeepSeek / GLM / Moonshot / 百度文心 / Doubao / MiniMax / Ollama），每家 MUST 可展开填写其所需凭证字段、模型与 Base URL，且 MUST 有且仅有一家处于选中态（单选）
+- **WHEN** 用户选择任一内置 provider
+- **THEN** 模型输入框 MUST 初始显示该 provider 的建议模型 ID，并允许用户直接编辑成其他非空 ID
+
+#### Scenario: 已配置密钥默认显示黑点
+
+- **WHEN** 某 provider 的 API Key 已保存并重新加载页面
+- **THEN** 输入框 MUST 显示黑点而非空白，旁边 MUST 显示「已配置」和安全尾号，使用户可区分未配置状态
+
+#### Scenario: 眼睛按钮查看与隐藏明文
+
+- **WHEN** 用户点击密钥框右侧眼睛按钮
+- **THEN** 页面 MUST 按需读取并显示明文；再次点击、切换 provider/页签或超时后 MUST 恢复黑点并清除明文
 
 #### Scenario: LLM 默认提供商为 DeepSeek
 
-- **WHEN** 首次启动且数据库无任何 LLM 配置
-- **THEN** 选中的默认 LLM 提供商 MUST 为 DeepSeek，默认模型 MUST 为 `deepseek-v4-flash`，主控台新建任务的 LLM 默认选中项 MUST 与之一致
+- **WHEN** 首次启动且没有任何 LLM 配置
+- **THEN** 默认 provider MUST 为 DeepSeek、模型 MUST 为 `deepseek-v4-flash`，主控台新建任务的 LLM 默认项 MUST 与之一致
 
-#### Scenario: LLM 连接测试反馈结果
+#### Scenario: Ollama 与自定义地址可配置
 
-- **WHEN** 用户为某家 LLM 填写凭证后点击「测试连接」
-- **THEN** 前端 MUST 调用后端对该配置发起测试调用，并 MUST 向用户反馈结果（成功时可展示延迟，失败时展示原因），MUST NOT 在未测试的情况下声称连接正常
+- **WHEN** 用户选择 Ollama 或自定义槽位
+- **THEN** 页面 MUST 允许填写容器可达的 Base URL；Ollama SHALL 提示 API Key 非必需，自定义槽位 MUST 要求非空名称、模型和 URL
 
-### Requirement: 设置页处理选项与高级参数
+### Requirement: 设置页处理选项
 
-设置页 MUST 提供处理选项:截图嵌入开关(默认关)及图片质量、并发任务数(限定 1~3,默认 1)、PDF 处理方式(简单 pypdf / MinerU 版面拆解)、输出格式与输出语言;MUST 提供高级参数:分块大小 chunk_size、温度 temperature、最大重试次数,且 MUST 提供保存配置与还原默认操作。前端 MUST 对取值越界的参数进行校验并拒绝提交。
+设置中心 MUST 在对应页签提供界面语言、背景、输出语言、四档笔记详细程度、图片提取与质量、PDF 模式、并发任务数（1~3）、分块大小、Temperature、最大重试次数和五类保留策略。截图嵌入 SHALL 继续作为新建任务的逐任务选项，但设置页可提供新任务默认值。PDF 只展示当前稳定的 `pypdf`，MUST NOT 展示未实现的 MinerU 选择。
 
-#### Scenario: 截图嵌入开关默认关闭且可切换质量
+#### Scenario: 笔记详细程度四档可选
 
-- **WHEN** 首次打开设置页处理选项
-- **THEN** 「提取视频关键帧图片」开关 MUST 默认处于关闭状态;用户开启后 MUST 可选择图片质量(低 / 中 / 高),并保存生效
+- **WHEN** 用户在笔记生成页签选择「简洁 / 适中 / 详细 / 超详细」之一并保存
+- **THEN** `note.detail_level` MUST 保存为对应合法值，页面 MUST 解释该档位对覆盖率和 token/耗时的影响，后续新建任务 MUST 使用该默认档位
+
+#### Scenario: 截图嵌入逐任务选择
+
+- **WHEN** 用户在主控台创建任务
+- **THEN** 截图开关 MUST 以设置默认值预填且仍可为本次任务覆盖，本次选择 SHALL 只影响本任务
 
 #### Scenario: 并发任务数限定 1~3 且越界被拒
 
 - **WHEN** 用户尝试将并发任务数设为 0 或 4(或范围外的任意值)并保存
-- **THEN** 前端 MUST 校验失败并阻止保存,提示允许范围为 1~3;设为合法值(如 2)时 MUST 保存成功且默认值 MUST 为 1
+- **THEN** 前端 MUST 校验失败并阻止保存；合法值 MUST 保存成功
 
-#### Scenario: PDF 处理方式可选
+#### Scenario: 高级数值显示范围与说明
 
-- **WHEN** 用户在处理选项中选择 PDF 方式为「MinerU 版面拆解」或「简单 pypdf」并保存
-- **THEN** 该选择 MUST 持久化,且后续 PDF 对照任务 MUST 按所选方式处理 PDF
+- **WHEN** 用户打开高级设置
+- **THEN** chunk size、Temperature 和最大重试次数 MUST 以带最小值/最大值/用途说明的数字字段展示，非法值 MUST 在提交前提示
 
-#### Scenario: 输出语言可配置
+#### Scenario: 保存反馈不使用阻塞弹窗
 
-- **WHEN** 用户将输出语言设为「English」并保存
-- **THEN** 该配置 MUST 持久化,后续新建任务的默认输出语言 MUST 为英文
-
-#### Scenario: 高级参数校验范围
-
-- **WHEN** 用户将 chunk_size 设为超出其允许范围(如小于 1000 或大于 8000)、或 temperature 设为超出 0~1、或最大重试次数设为负数并保存
-- **THEN** 前端 MUST 校验失败并阻止保存,提示各参数的合法范围;设为范围内的值时 MUST 保存成功
-
-#### Scenario: 保存配置与还原默认
-
-- **WHEN** 用户修改若干处理选项或高级参数后点击「保存配置」,或点击「还原默认」
-- **THEN** 「保存配置」MUST 将当前表单值持久化到后端;「还原默认」MUST 将本页所有设置恢复为系统默认值并同步到表单
+- **WHEN** 用户保存任一页签
+- **THEN** 页面 MUST 以页内状态或 toast 展示保存中、成功或错误，MUST NOT 使用浏览器原生 `alert`
 
 ### Requirement: 设置页产物保留策略配置
 
-设置页 MUST 为五类产物(视频 / 音频 / SRT / 笔记 / 截图)各自提供独立的保留策略选择,每一类的取值 MUST 限定为「永久」「7 天」「30 天」三者之一;修改任意一类的策略 MUST NOT 影响其他四类;侧栏「当前配置」MUST 实时反映当前各策略值。保存后该配置 MUST 立即对后端清理逻辑生效(具体清理执行由 `storage-retention` 保障)。
+设置页 MUST 为五类产物(视频 / 音频 / SRT / 笔记 / 截图)各自提供独立的保留策略选择,每一类的取值 MUST 限定为「永久」「7 天」「30 天」三者之一;修改任意一类的策略 MUST NOT 影响其他四类。保存后配置 MUST 对后续清理逻辑生效。
 
 #### Scenario: 五类产物各自独立选择保留策略
 
@@ -340,11 +345,6 @@ TBD - created by archiving change build-vid2note-v1. Update Purpose after archiv
 
 - **WHEN** 用户仅修改「音频」的保留策略并保存
 - **THEN** 其余四类产物的保留策略 MUST 保持不变,MUST NOT 因音频的修改而被改动
-
-#### Scenario: 侧栏当前配置实时反映
-
-- **WHEN** 用户修改任一类保留策略(即使尚未保存)或保存成功后
-- **THEN** 侧栏「当前配置」区域 MUST 展示各策略的最新值,且保存成功后刷新页面 MUST 仍显示为已保存的值
 
 ### Requirement: 国际化与明暗主题
 
@@ -450,32 +450,42 @@ TBD - created by archiving change build-vid2note-v1. Update Purpose after archiv
 
 ### Requirement: ASR 管理页
 
-系统 MUST 提供一个独立的「ASR」管理页（通过侧栏导航可达），集中承载 ASR 引擎的全部配置与诊断：三种引擎的说明与适用场景、默认引擎与引擎策略选择、外部 endpoint 配置、各引擎就绪态、以及连通性测试。在线 ASR 引擎在用户可见文案中 MUST 对外称作「必剪云接口」（不得出现 AsrTools / 剪映 / 必剪 等技术名词作为面向用户的引擎名）。
+系统 MUST 保留一个经侧栏到达的独立 ASR 管理页，并采用「引擎 / Whisper 本地 / 外部 ASR / 转录策略」四个内部页签。页面 MUST 集中承载三种引擎的说明、默认选择、配置和诊断。实验性在线 ASR 的用户可见名称 MUST 为「bcut」，不得暗示官方、稳定或保证免费，也不得暴露内部兼容实现名。
+
+#### Scenario: 四个 ASR 页签职责清晰
+
+- **WHEN** 用户依次切换四个 ASR 页签
+- **THEN** 引擎页 MUST 展示三引擎卡片与总览，Whisper 页 MUST 展示本地模型参数，外部页 MUST 展示 endpoint/凭证，策略页 MUST 展示降级/VAD/并发参数
 
 #### Scenario: 三引擎说明可见
 
-- **WHEN** 用户打开 ASR 管理页
-- **THEN** 页面 MUST 展示三张引擎卡片：必剪云接口（在线·免费）/ Whisper 本地（离线·CPU）/ 外部 ASR（自建 HTTP），每张 MUST 含一句适用场景说明
+- **WHEN** 用户打开 ASR 的引擎页签
+- **THEN** 页面 MUST 展示 bcut（在线、实验性、无需本地 GPU）、Whisper 本地（离线、CPU）与外部 ASR（自建 HTTP）三张卡片，每张 MUST 含适用场景、当前状态和测试入口
 
-#### Scenario: 默认引擎与策略选择并持久化
+#### Scenario: 默认引擎与策略持久化
 
-- **WHEN** 用户在 ASR 页选择默认引擎为「必剪云接口」并将策略切到「在线优先·失败转本地」，保存
-- **THEN** 该选择 MUST 持久化到后端（`asr.engine` / `asr.strategy`），刷新或重启后保留，且主控台新建任务的默认引擎 MUST 同步
+- **WHEN** 用户选择默认引擎为 bcut、策略为在线优先并保存
+- **THEN** `asr.engine` / `asr.strategy` MUST 持久化，刷新或重启后保留，主控台默认引擎 MUST 同步
 
-#### Scenario: 外部 endpoint 可配置
+#### Scenario: Whisper 参数可配置
 
-- **WHEN** 用户在 ASR 页填写外部 ASR 的 HTTP endpoint 与 API Key 并保存
-- **THEN** 该配置 MUST 持久化到 `asr.config`，后续选择「外部 ASR」引擎或在线优先降级时 MUST 能取到该 endpoint
+- **WHEN** 用户填写模型路径、可选 binary 和识别语言并保存
+- **THEN** 配置 MUST 在 Whisper 页重新加载时完整显示，状态区 MUST 基于后端检查展示模型和 binary 是否就绪
 
-#### Scenario: 各引擎就绪态展示
+#### Scenario: 外部 endpoint 和密钥可配置
 
-- **WHEN** 用户打开 ASR 页
-- **THEN** 页面 MUST 展示各引擎就绪态：必剪云接口的 provider、Whisper 本地的模型文件 / binary 是否就绪、外部 ASR 是否已配置 endpoint；数据 MUST 来自后端 `GET /asr/status` 而非前端臆测
+- **WHEN** 用户填写外部 ASR endpoint、API Key 与超时并保存
+- **THEN** endpoint 与超时 MUST 写入非敏感设置，API Key MUST 进入加密凭证存储；重新加载时密钥框 MUST 显示已配置黑点
 
 #### Scenario: 连通性测试反馈结果
 
-- **WHEN** 用户对某个引擎点击「测试连通性」
-- **THEN** 前端 MUST 调用后端 `POST /asr/test` 对该引擎做探活 / 模型可加载检查，并 MUST 反馈结果（成功时含耗时，失败时含原因），MUST NOT 在未测试时声称可用
+- **WHEN** 用户对某个引擎点击「测试连接」
+- **THEN** 前端 MUST 调用后端测试接口并反馈成功耗时或失败原因，MUST NOT 在未测试时声称连接可用
+
+#### Scenario: 页面响应式可用
+
+- **WHEN** 页面宽度缩小到手机尺寸
+- **THEN** 页签、引擎卡片、表单与操作按钮 MUST 重排为单列或可滚动布局，MUST NOT 出现水平页面溢出或被遮挡的保存按钮
 
 ### Requirement: 笔记与思维导图全量浏览页
 
@@ -514,4 +524,3 @@ TBD - created by archiving change build-vid2note-v1. Update Purpose after archiv
 
 - **WHEN** 一个任务的标题、视频标题与笔记 H1 均缺失
 - **THEN** 列表项 MUST 显示「未命名」作为标题位（如 `MM-DD 未命名 · 直链`），MUST NOT 使用 BV号 / videoId / 长URL 兜底
-

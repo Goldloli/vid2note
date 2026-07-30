@@ -23,7 +23,6 @@ runtime.runner —— v1 任务运行栈的执行入口(契约 §5 / §6 / 设�
 """
 from __future__ import annotations
 
-import json
 import os
 import re
 from pathlib import Path
@@ -50,7 +49,12 @@ from src.pipeline import (
 from src.pipeline.dag import NodeState
 
 from .adapters import RepoStateAdapter, SSEBusAdapter, get_cancel_registry
-from .settings import get_credentials, get_settings_snapshot
+from .settings import (
+    get_bilibili_cookies,
+    get_credentials,
+    get_external_asr_api_key,
+    get_settings_snapshot,
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -98,6 +102,24 @@ def _source_type_enum(value: Any) -> Any:
         if st.value == s:
             return st
     return SourceType.DIRECT
+
+
+def _note_stage_progress(
+    phase: str,
+    completed: int,
+    total: int,
+) -> tuple[int, str]:
+    """把超详细内部阶段映射成单调且面向用户的节点进度。"""
+    if phase == "understand":
+        percent = 30 + round((completed / max(1, total)) * 25)
+        return percent, f"正在理解字幕第 {completed}/{total} 段"
+    if phase == "blueprint":
+        return 62, "正在构建课程知识结构"
+    if phase == "draft":
+        percent = 62 + round((completed / max(1, total)) * 12)
+        return percent, f"正在撰写第 {completed}/{total} 章"
+    percent = 74 + round((completed / max(1, total)) * 10)
+    return percent, f"正在审校第 {completed}/{total} 章"
 
 
 # --------------------------------------------------------------------------- #
@@ -197,21 +219,6 @@ def _build_initial_state(task: Any) -> TaskState:
 # --------------------------------------------------------------------------- #
 # 节点执行器构造
 # --------------------------------------------------------------------------- #
-def _bilibili_cookies(snapshot: Dict[str, str]) -> Optional[dict]:
-    """从快照解析 Bilibili cookie(仅 bilibili 来源用,契约 §6.1)。"""
-    raw = snapshot.get("bilibili.cookie") or "{}"
-    try:
-        ck = json.loads(raw) if isinstance(raw, str) else dict(raw or {})
-    except (ValueError, TypeError):
-        return None
-    if not isinstance(ck, dict) or not ck:
-        return None
-    # 仅保留三键,过滤无效
-    keys = {"SESSDATA", "bili_jct", "DedeUserID"}
-    filtered = {k: str(ck[k]).strip() for k in keys if str(ck.get(k, "")).strip()}
-    return filtered or None
-
-
 def _make_executors(
     task: Any,
     snapshot: Dict[str, str],
@@ -231,7 +238,11 @@ def _make_executors(
 
         source_url = getattr(task, "source_url", None) or ""
         source_type = _source_type_enum(task.source_type)
-        cookies = _bilibili_cookies(snapshot) if source_type.value == "bilibili" else None
+        cookies = (
+            get_bilibili_cookies(snapshot)
+            if source_type.value == "bilibili"
+            else None
+        )
         ctx_ext = _NodeContextExt(ctx, data_root / "temp" / task_id)
         ctx_ext.work_temp.mkdir(parents=True, exist_ok=True)
         try:
@@ -270,6 +281,7 @@ def _make_executors(
             raise AsrError("ASR 转录失败:缺少上游音频产物", reason="invalid_response", engine="runtime")
         srt_out_rel = ctx.rel_of(ctx.product_path("srt", "srt"))
         asr_config = AsrConfig.from_settings(snapshot)
+        asr_config.external_api_key = get_external_asr_api_key()
         try:
             transcribe(ctx, audio_rel, srt_out_rel, asr_config)
         except AsrCancelled as exc:
@@ -293,14 +305,32 @@ def _make_executors(
         ctx.emit_log("info", "开始生成笔记" + ("(含 PDF 讲义参考)" if pdf_abs else ""))
         ctx.emit_progress(5, "初始化笔记生成")
         llm = _build_llm(snapshot, task)
-        processor = SimpleProcessor(llm, logger=TaskLogger(task_id))
+
+        def _report_note_stage(
+            phase: str,
+            completed: int,
+            total: int,
+        ) -> None:
+            percent, message = _note_stage_progress(phase, completed, total)
+            ctx.emit_progress(percent, message)
+
+        processor = SimpleProcessor(
+            llm,
+            config={
+                "note_detail_level": getattr(
+                    task, "note_detail_level", "balanced"
+                ),
+                "progress_callback": _report_note_stage,
+            },
+            logger=TaskLogger(task_id),
+        )
 
         ctx.emit_progress(30, "调用 LLM 生成笔记")
         # 无 PDF 走 generate_directly 分支;有 PDF 走 generate_with_pdf_reference 分支
         # (SimpleProcessor.process 内部据 pdf_file 是否为空自动分流)
         markdown = processor.process(str(srt_abs), str(pdf_abs) if pdf_abs else None, extract_images=bool(getattr(task, "extract_images", False)))
         markdown = _strip_code_fence(markdown)
-        ctx.emit_progress(75, "笔记生成完成,准备落盘")
+        ctx.emit_progress(88, "高质量笔记生成完成，准备落盘")
 
         # 截图嵌入(extract_images=True 时;契约 §6.3)
         if getattr(task, "extract_images", False):
@@ -405,12 +435,13 @@ def _embed_screenshots(ctx: Any, task: Any, markdown: str, data_root: Path) -> s
     )
     # 把「相对笔记目录」的 src 换算为「相对 DATA_ROOT」的产物路径并登记
     for src in srcs:
-        shot_abs = note_dir / src
+        shot_abs = (note_dir / src).resolve()
         try:
             if shot_abs.exists():
-                rel = ctx.rel_of(shot_abs)
+                # 必须先归一化再登记，避免数据库保存 notes/<id>/../../screenshots/...。
+                rel = shot_abs.relative_to(data_root.resolve()).as_posix()
                 ctx.register_product("screenshot", rel, shot_abs.stat().st_size)
-        except Exception:  # noqa: BLE001 - 单张截图登记失败不中断笔记
+        except (ValueError, OSError):  # 单张截图越界/登记失败不中断笔记
             logger.debug("截图产物登记失败 task=%s src=%s", task.id, src, exc_info=True)
     return cleaned
 

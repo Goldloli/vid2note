@@ -20,7 +20,7 @@ from src.speech_to_text import (
     AsrError,
     AudioSegment,
     Cue,
-    AsrToolsEngine,
+    BcutEngine,
     WhisperCppEngine,
     ExternalAsrEngine,
     build_engines,
@@ -52,7 +52,7 @@ def short_wav(tmp_path_factory):
 
 
 class _StubOnline(AsrEngine):
-    name = "asrtools"
+    name = "bcut"
 
     def __init__(self, fail=False, reason="rate_limited", status_code=429, cues=None):
         self._fail = fail
@@ -62,7 +62,7 @@ class _StubOnline(AsrEngine):
 
     def transcribe(self, audio_path, on_progress=None):
         if self._fail:
-            raise AsrError("限流", reason=self._reason, engine="asrtools", status_code=self._status)
+            raise AsrError("限流", reason=self._reason, engine="bcut", status_code=self._status)
         return list(self._cues)
 
 
@@ -130,18 +130,18 @@ class TestCueSrt:
 class TestEngineConfig:
     def test_build_three_engines(self):
         engines = build_engines(AsrConfig(external_endpoint="http://x"))
-        assert isinstance(engines["asrtools"], AsrToolsEngine)
+        assert isinstance(engines["bcut"], BcutEngine)
         assert isinstance(engines["whisper_cpp"], WhisperCppEngine)
         assert isinstance(engines["external"], ExternalAsrEngine)
 
     def test_resolve_online_first_order(self):
-        order = resolve_engine_order(AsrConfig(strategy="online_first", engine="asrtools"))
-        assert order[0] == "asrtools"
+        order = resolve_engine_order(AsrConfig(strategy="online_first", engine="bcut"))
+        assert order[0] == "bcut"
         assert order[-1] == "whisper_cpp"  # 本地兜底
 
     def test_resolve_single_no_fallback(self):
-        order = resolve_engine_order(AsrConfig(strategy="single", engine="asrtools"))
-        assert order == ["asrtools"]
+        order = resolve_engine_order(AsrConfig(strategy="single", engine="bcut"))
+        assert order == ["bcut"]
 
     def test_resolve_external_online_first(self):
         order = resolve_engine_order(AsrConfig(strategy="online_first", engine="external"))
@@ -151,12 +151,26 @@ class TestEngineConfig:
         cfg = AsrConfig.from_settings({
             "asr.engine": "external",
             "asr.strategy": "single",
-            "asr.config": '{"endpoint": "http://my-asr", "whisper_model_path": "/m"}',
+            "asr.config": '{"endpoint": "http://my-asr", "whisper_model_path": "/m", "bcut_timeout": 8}',
         })
         assert cfg.engine == "external"
         assert cfg.strategy == "single"
         assert cfg.external_endpoint == "http://my-asr"
         assert cfg.whisper_model_path == "/m"
+        assert cfg.bcut_timeout == 8
+
+    def test_bcut_parses_string_result_and_millisecond_timestamps(self):
+        cues = BcutEngine._parse_result({
+            "result": (
+                '{"utterances": ['
+                '{"start_time": 1250, "end_time": 2750, "transcript": "测试"}'
+                ']}'
+            ),
+        })
+        assert cues == [Cue(start=1.25, end=2.75, text="测试")]
+
+    def test_bcut_does_not_fabricate_empty_transcript(self):
+        assert BcutEngine._parse_result({"result": {"utterances": []}}) == []
 
 
 # ----------------------------- 降级 / 不可用 ----------------------------- #
@@ -165,7 +179,7 @@ class TestEngineConfig:
 class TestDegradation:
     def test_online_first_degrades_with_log(self, short_wav, patch_engines):
         logs = []
-        patch_engines({"asrtools": _StubOnline(fail=True), "whisper_cpp": _StubLocal()})
+        patch_engines({"bcut": _StubOnline(fail=True), "whisper_cpp": _StubLocal()})
         srt = transcribe_to_srt(
             short_wav, AsrConfig(strategy="online_first", whisper_model_path="/tmp/x"),
             on_log=lambda lv, line: logs.append((lv, line)),
@@ -173,18 +187,18 @@ class TestDegradation:
         assert "本地字幕" in srt
         # 结构化降级事件已写（warn 级别 + 原因）
         joined = " ".join(line for _, line in logs)
-        assert "降级" in joined and "asrtools" in joined and "whisper_cpp" in joined
+        assert "降级" in joined and "bcut" in joined and "whisper_cpp" in joined
 
     def test_single_does_not_degrade(self, short_wav, patch_engines):
-        patch_engines({"asrtools": _StubOnline(fail=True), "whisper_cpp": _StubLocal()})
+        patch_engines({"bcut": _StubOnline(fail=True), "whisper_cpp": _StubLocal()})
         with pytest.raises(AsrError) as exc:
             transcribe_to_srt(
-                short_wav, AsrConfig(strategy="single", engine="asrtools", whisper_model_path="/tmp/x"),
+                short_wav, AsrConfig(strategy="single", engine="bcut", whisper_model_path="/tmp/x"),
             )
-        assert exc.value.engine == "asrtools"  # 失败于原引擎，未降级
+        assert exc.value.engine == "bcut"  # 失败于原引擎，未降级
 
     def test_all_unavailable_raises(self, short_wav, patch_engines):
-        patch_engines({"asrtools": _StubOnline(fail=True)})
+        patch_engines({"bcut": _StubOnline(fail=True)})
         with pytest.raises(AsrError) as exc:
             transcribe_to_srt(short_wav, AsrConfig(strategy="online_first"))
         assert "无可用" in str(exc.value)
@@ -226,9 +240,9 @@ class TestShortAudio:
         )
         from src.speech_to_text import transcribe_audio
         monkeypatch.setattr(P, "build_engines",
-                            lambda cfg: {"asrtools": _StubOnline(), "whisper_cpp": _StubLocal()})
+                            lambda cfg: {"bcut": _StubOnline(), "whisper_cpp": _StubLocal()})
         seen = []
-        transcribe_audio(short_wav, AsrConfig(strategy="single", engine="asrtools"),
+        transcribe_audio(short_wav, AsrConfig(strategy="single", engine="bcut"),
                          on_log=lambda lv, line: seen.append(line))
         assert called["split"] is False
         assert any("整段转录" in ln for ln in seen)
@@ -271,7 +285,7 @@ class TestContractEntry:
             aabs.parent.mkdir(parents=True)
             aabs.write_bytes(Path(short_wav).read_bytes())
             monkeypatch.setattr(P, "build_engines",
-                                lambda cfg: {"asrtools": _StubOnline(), "whisper_cpp": _StubLocal()})
+                                lambda cfg: {"bcut": _StubOnline(), "whisper_cpp": _StubLocal()})
             ctx = _FakeCtx(td)
             srt_rel = "srt/task_t/test.srt"
             ret = transcribe(ctx, arel, srt_rel,
@@ -282,7 +296,7 @@ class TestContractEntry:
 
     def test_transcribe_missing_audio_no_srt(self, tmp_path, monkeypatch):
         monkeypatch.setattr(P, "build_engines",
-                            lambda cfg: {"asrtools": _StubOnline(), "whisper_cpp": _StubLocal()})
+                            lambda cfg: {"bcut": _StubOnline(), "whisper_cpp": _StubLocal()})
         ctx = _FakeCtx(str(tmp_path))
         srt_rel = "srt/task_t/missing.srt"
         with pytest.raises(AsrError):

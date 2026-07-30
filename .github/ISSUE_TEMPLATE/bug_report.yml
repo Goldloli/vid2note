@@ -1,0 +1,49 @@
+name: Bug Report
+description: 报告可复现的缺陷
+title: "[Bug] "
+labels: ["bug", "needs-triage"]
+body:
+  - type: checkboxes
+    attributes:
+      label: 提交前检查
+      options:
+        - label: 我已搜索现有 Issue，未发现重复问题
+          required: true
+        - label: 我已移除 API Key、Cookie 和私人视频链接
+          required: true
+  - type: input
+    attributes:
+      label: 版本
+      description: Release、commit 或 Docker 镜像标签
+      placeholder: v1.0.0
+    validations:
+      required: true
+  - type: dropdown
+    attributes:
+      label: 部署方式
+      options:
+        - Docker Compose
+        - 本地开发环境
+        - 其他
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: 问题描述
+      description: 发生了什么？预期是什么？
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. …
+        2. …
+        3. …
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: 日志
+      description: 请先删除密钥、Cookie、私人 URL 和字幕内容
+      render: shell

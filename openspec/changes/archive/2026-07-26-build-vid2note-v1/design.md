@@ -37,7 +37,7 @@
 
 1. **一条命令可用**:`docker compose up` 后 `localhost:8765` 即完整前后端同源服务。
 2. **粘链接出笔记**:YouTube / Bilibili / 直链 / 本地音视频四类输入,自动跑通六步,产出 Markdown 笔记 + 思维导图(xmind/png/md)。
-3. **ASR 优先在线、本地兜底**:AsrTools(剪映/必剪)默认在线,whisper.cpp(CPU + int8)兜底,失败可显式降级,全程对调用方透明。
+3. **ASR 优先在线、本地兜底**:实验性 bcut 默认在线,whisper.cpp(CPU + int8)兜底,失败可显式降级,全程对调用方透明。
 4. **长音频可扛**:VAD 按静音切分并行转录,时间戳偏移拼回一份连续单调的 SRT。
 5. **最大化复用基底**:LLM 适配、prompt 库、SRT→笔记、SQLite、安全防护、思维导图导出原样复用;改造聚焦在「输入端 + 编排层 + 新集成」。
 6. **可观测 / 可重跑**:6 步 DAG 可视化、SSE 实时进度、节点级失败重跑(不必从头重下载)。
@@ -68,13 +68,13 @@
 
 ### D2. ASR 引擎:抽象 `AsrEngine` 接口 + 三实现 + 两种选择策略
 
-**决策。** 新建 `speech_to_text/engine.py` 定义统一接口(`transcribe(audio_path) -> List[Cue]`,Cue = {start, end, text}),三实现:`AsrToolsEngine`(在线,剪映/必剪,默认首选)、`WhisperCppEngine`(本地 CPU + int8)、`ExternalAsrEngine`(HTTP endpoint,扩展位)。引擎来源与策略均来自配置项;两种策略:「在线优先,失败转本地」(默认)与「指定单一引擎」。每次降级写一条结构化日志(原因 / 原引擎 / 目标引擎 / 时间戳)。
+**决策。** 新建 `speech_to_text/engine.py` 定义统一接口(`transcribe(audio_path) -> List[Cue]`,Cue = {start, end, text}),三实现:`BcutEngine`(实验性在线 bcut,默认首选)、`WhisperCppEngine`(本地 CPU + int8)、`ExternalAsrEngine`(HTTP endpoint,扩展位)。引擎来源与策略均来自配置项;两种策略:「在线优先,失败转本地」(默认)与「指定单一引擎」。每次降级写一条结构化日志(原因 / 原引擎 / 目标引擎 / 时间戳)。
 
-**理由。** 约束是「无 GPU」但又要「质量好 + 离线兜底」。在线 AsrTools 走纯 HTTP、免 GPU、剪映引擎中文质量高、速度快,做默认;whisper.cpp 用 int8 量化在 arm64 CPU 上可用,做兜底保证「断网也能出字幕」;external endpoint 留给未来接自建 GPU ASR,接口先占位。「在线优先」让默认路径又快又好,失败静默降级不阻塞用户;「指定单一引擎」给「我就要纯本地/我就要在线」的强需求。
+**理由。** 约束是「无 GPU」但又要「质量好 + 离线兜底」。实验性在线 bcut 走纯 HTTP、无需本地 GPU,做默认;whisper.cpp 用 int8 量化在 arm64 CPU 上可用,做兜底保证「断网也能出字幕」;external endpoint 留给未来接自建 GPU ASR,接口先占位。「在线优先」在外部能力可用时优先在线处理,失败则降级而不阻塞用户;「指定单一引擎」给「我就要纯本地/我就要在线」的强需求。
 
 **Alternatives。**
 - *仅 whisper.cpp:* 纯本地、零依赖,但 CPU 长音频慢、中文质量不如剪映,默认体验差。作为兜底保留,不作唯一。
-- *仅 AsrTools:* 依赖网络与第三方接口可用性,断网/限流即全停,无兜底。否决。
+- *仅 bcut:* 依赖网络与外部服务可用性,断网/限流/协议变化即全停,无兜底。否决。
 - *whisper 大模型(GPU):* 违反「无 GPU」约束。否决。
 - *`faster-whisper` Python 绑定代替 whisper.cpp:* 见 Open Questions,需评估依赖体积与 arm64 兼容。
 
@@ -177,8 +177,8 @@
 
 ## Risks / Trade-offs
 
-- **[风险] 在线 AsrTools 接口不稳定 / 限流(429)/ 被风控** → [缓解] whisper.cpp 本地兜底(D2「在线优先」自动降级)+ external endpoint 扩展位 + 每次降级结构化日志 + 「指定单一引擎」逃生口。
-- **[风险] whisper.cpp CPU 转录长音频极慢(数倍实时)** → [缓解] VAD 切分并行(D3)+ int8 量化 + 默认走在线 AsrTools,本地仅兜底;并在任务详情页暴露预估进度。
+- **[风险] 在线 bcut 不稳定 / 限流(429)/ 协议变化** → [缓解] whisper.cpp 本地兜底(D2「在线优先」自动降级)+ external endpoint 扩展位 + 每次降级结构化日志 + 「指定单一引擎」逃生口。
+- **[风险] whisper.cpp CPU 转录长音频极慢(数倍实时)** → [缓解] VAD 切分并行(D3)+ int8 量化 + 默认走在线 bcut,本地仅兜底;并在任务详情页暴露预估进度。
 - **[风险] bilibili cookie 失效 / 触发风控** → [缓解] 失效识别为「登录态错误」并明确提示重粘;未配置时降级免登录画质并提示;cookie 仅用于 bilibili 来源、不外泄到其他平台下载请求。
 - **[风险] MinerU CPU pipeline 慢且镜像大** → [缓解] 可选构建层默认不进镜像(D5);外部 endpoint 扩展位;默认走 pypdf。
 - **[风险] `[IMG:ts]` 标记位置不准 / 滥用 / 越界时间戳** → [缓解] 默认关;后端对非法 ts 容错跳过并记日志;Non-goal 已声明 v1 接受猜测精度,以后换更强模型或多模态复核。
@@ -198,7 +198,7 @@
 2. **内核隔离。** 把 D6 表中的「内核」模块收敛到稳定的内部包边界(如 `core/kernel/`),明确对外接口,使后续改造不污染内核。验证:内核单元测试(基底已有 `backend/tests/`)全绿。
 3. **DAG 编排层(D8 / D10)。** 新建 `pipeline/dag.py`(6 步状态机 + 节点级重跑)+ SSE 推送层;先把「下载/提取」做成 no-op、「ASR」直接读用户上传的 SRT(临时桥),让 DAG 与 SSE 先跑通。验证:粘一个本地 SRT,前端能看到 6 步进度推送与节点状态。
 4. **输入端前移(D6 改造)。** API 从「上传 SRT」改为「视频链接 / 本地音视频」+ 来源识别;实现 `media_ingest/`(yt-dlp 整段最高画质 + bilibili cookie 降级 + ffmpeg 提取)。验证:YouTube / Bilibili / 直链 / 本地音视频四类输入分别走对跳过逻辑。
-5. **ASR 层(D2 / D3)。** 实现 `AsrEngine` 抽象 + AsrTools / whisper.cpp / external 三实现 + 在线优先降级 + VAD 切分并行与时间戳拼回;删除第 3 步的临时 SRT 桥。验证:短音频不分段、长音频分段拼回时间戳单调;断网时自动降级 whisper.cpp。
+5. **ASR 层(D2 / D3)。** 实现 `AsrEngine` 抽象 + bcut / whisper.cpp / external 三实现 + 在线优先降级 + VAD 切分并行与时间戳拼回;删除第 3 步的临时 SRT 桥。验证:短音频不分段、长音频分段拼回时间戳单调;断网时自动降级 whisper.cpp。
 6. **笔记 + 截图(D4)。** 复用 `SimpleProcessor` + prompt 库;实现 `[IMG:ts]` 标记解析与 ffmpeg 截帧替换(默认关);接 MinerU 可选层(D5)。验证:开 / 关截图两种产物对比;带 PDF 讲义时笔记按章节对齐。
 7. **保留与清理(D9)。** 五类产物分目录 + 独立策略 + 定时 / 启动扫描 + 存储统计接口。验证:把系统时钟注入快进,验证过期删除与 permanent 不删;`docker compose down`(不带 `-v`)再 up 数据与产物在。
 8. **前端重建(D7)。** 按 6 页原型把 Vue 视图重建,接 SSE / 任务 / 设置 / 历史 API。验证:6 页视觉与原型对齐,DAG 进度与降级提示实时呈现。
@@ -210,7 +210,7 @@
 ## Open Questions
 
 1. **whisper.cpp 集成形态:** 调预编译二进制(镜像小、依赖少)还是 Python 绑定 `faster-whisper`(API 顺、但带 ONNX/Torch 依赖)?需在 arm64 CPU 上实测体积与速度后定。
-2. **在线 AsrTools 默认引擎:** 剪映 / 必剪 / 快手三家,哪一家做默认首选?需对比中文识别质量、稳定性与限流情况(参考 `项目参考/AsrTools-main`)。
+2. **在线 ASR 默认引擎:** 选择 `bcut` 作为实验性默认 provider，并以本地引擎提供可用性兜底。
 3. **VAD 工具选型:** `silero-vad`(轻、准、Torch 依赖)vs `webrtcvad`(极轻、准度一般)vs whisper.cpp 内置 VAD?与 Q1 的依赖策略一并定。
 4. **截图存储形态:** base64 内嵌 md(单文件自包含、但 md 膨胀且不可移植到无图环境)vs volume 内文件 + 相对路径(md 轻盈可移植、但离开 volume 看不到图)?倾向相对路径,待确认导出语义。
 5. **任务内 vs 跨任务并发预算:** 默认跨任务并发 1 时,VAD 分段并行是否仍开?两层共享一个 CPU 上限还是独立?需在 D8 并发实现时实测。

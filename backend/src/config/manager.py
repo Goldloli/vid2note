@@ -11,7 +11,7 @@ from typing import Optional
 from .models import (
     AppConfig, QwenConfig, GLMConfig, DeepSeekConfig,
     MoonshotConfig, BaiduConfig, DoubaoConfig, MiniMaxConfig,
-    ServerConfig
+    OllamaConfig, CustomConfig, ServerConfig
 )
 
 
@@ -82,6 +82,8 @@ class ConfigManager:
             "baidu": ("BAIDU", config.baidu),
             "doubao": ("DOUBAO", config.doubao),
             "minimax": ("MINIMAX", config.minimax),
+            "ollama": ("OLLAMA", config.ollama),
+            "custom": ("CUSTOM", config.custom),
         }
 
         for name, (prefix, prov_cfg) in provider_fields.items():
@@ -99,6 +101,8 @@ class ConfigManager:
                         "baidu": BaiduConfig,
                         "doubao": DoubaoConfig,
                         "minimax": MiniMaxConfig,
+                        "ollama": OllamaConfig,
+                        "custom": CustomConfig,
                     }
                     prov_cfg = defaults[name]()
                     setattr(config, name, prov_cfg)
@@ -108,15 +112,6 @@ class ConfigManager:
                     prov_cfg.model = model
                 if base_url is not None:
                     prov_cfg.base_url = base_url
-                # 百度/MiniMax 特有字段
-                if name == "baidu":
-                    sk = os.environ.get("BAIDU_SECRET_KEY")
-                    if sk is not None:
-                        prov_cfg.secret_key = sk
-                if name == "minimax":
-                    gid = os.environ.get("MINIMAX_GROUP_ID")
-                    if gid is not None:
-                        prov_cfg.group_id = gid
 
         # 服务器配置
         if os.environ.get("SERVER_PORT"):
@@ -148,52 +143,57 @@ class ConfigManager:
         # 初始化所有提供商配置（空API Key）
         config.qwen = QwenConfig(
             api_key="",
-            model="qwen-plus",
+            model="qwen3.7-plus",
             base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
         )
 
         config.glm = GLMConfig(
             api_key="",
-            model="glm-4-flash",
+            model="glm-5.2",
             base_url="https://open.bigmodel.cn/api/paas/v4/"
         )
 
         config.deepseek = DeepSeekConfig(
             api_key="",
-            model="deepseek-chat",
+            model="deepseek-v4-flash",
             base_url="https://api.deepseek.com/v1"
         )
 
         config.moonshot = MoonshotConfig(
             api_key="",
-            model="moonshot-v1-8k",
+            model="kimi-k2.6",
             base_url="https://api.moonshot.cn/v1"
         )
 
         config.baidu = BaiduConfig(
             api_key="",
-            secret_key="",
-            model="ernie-bot-4",
-            base_url="https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop"
+            model="ernie-5.0",
+            base_url="https://qianfan.baidubce.com/v2"
         )
 
         config.doubao = DoubaoConfig(
             api_key="",
-            model="doubao-pro-4k",
+            model="doubao-seed-2-0-lite-260215",
             base_url="https://ark.cn-beijing.volces.com/api/v3"
         )
 
         config.minimax = MiniMaxConfig(
             api_key="",
-            group_id="",
-            model="abab6.5-chat",
-            base_url="https://api.minimax.chat/v1"
+            model="MiniMax-M2.7",
+            base_url="https://api.minimaxi.com/v1"
         )
+
+        config.ollama = OllamaConfig(
+            api_key="ollama",
+            model="qwen3.5",
+            base_url="http://host.docker.internal:11434/v1",
+        )
+        config.custom = CustomConfig()
 
         # 服务器配置
         config.server = ServerConfig(
             port=8765,
-            host="0.0.0.0",
+            host="127.0.0.1",
             debug=False,
             temp_dir="/tmp/course-doc-generator"
         )
@@ -213,6 +213,8 @@ class ConfigManager:
             "baidu": config.baidu,
             "doubao": config.doubao,
             "minimax": config.minimax,
+            "ollama": config.ollama,
+            "custom": config.custom,
         }
 
         provider_config = provider_config_map.get(provider)
@@ -228,7 +230,7 @@ class ConfigManager:
         """获取指定提供商的LLM配置
 
         Args:
-            provider: 提供商名称 (qwen/glm/deepseek/moonshot/baidu/doubao/minimax)
+            provider: 提供商名称 (qwen/glm/deepseek/moonshot/baidu/doubao/minimax/ollama/custom)
 
         Returns:
             包含provider、api_key、model、base_url等的配置字典
@@ -246,6 +248,8 @@ class ConfigManager:
             "baidu": config.baidu,
             "doubao": config.doubao,
             "minimax": config.minimax,
+            "ollama": config.ollama,
+            "custom": config.custom,
         }
 
         provider_config = provider_config_map.get(provider)
@@ -289,9 +293,8 @@ class ConfigManager:
         elif provider == "baidu":
             config.baidu = BaiduConfig(
                 api_key=api_key,
-                secret_key=kwargs.get("secret_key", ""),
                 model=model,
-                base_url=kwargs.get("base_url", "https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop")
+                base_url=kwargs.get("base_url", "https://qianfan.baidubce.com/v2")
             )
         elif provider == "doubao":
             config.doubao = DoubaoConfig(
@@ -302,10 +305,23 @@ class ConfigManager:
         elif provider == "minimax":
             config.minimax = MiniMaxConfig(
                 api_key=api_key,
-                group_id=kwargs.get("group_id", ""),
                 model=model,
-                base_url=kwargs.get("base_url", "https://api.minimax.chat/v1")
+                base_url=kwargs.get("base_url", "https://api.minimaxi.com/v1")
             )
+        elif provider == "ollama":
+            config.ollama = OllamaConfig(
+                api_key=api_key or "ollama",
+                model=model,
+                base_url=kwargs.get("base_url", "http://host.docker.internal:11434/v1"),
+            )
+        elif provider == "custom":
+            config.custom = CustomConfig(
+                api_key=api_key,
+                model=model,
+                base_url=kwargs.get("base_url", ""),
+            )
+        else:
+            raise ValueError(f"不支持的 LLM 提供商：{provider}")
 
         self.save(config)
 
@@ -362,6 +378,8 @@ class ConfigManager:
             "baidu": config.baidu.model_dump() if config.baidu else None,
             "doubao": config.doubao.model_dump() if config.doubao else None,
             "minimax": config.minimax.model_dump() if config.minimax else None,
+            "ollama": config.ollama.model_dump() if config.ollama else None,
+            "custom": config.custom.model_dump() if config.custom else None,
             "processing": config.processing.model_dump(),
             "advanced": config.advanced.model_dump(),
             "pdf_watermarks": config.pdf_watermarks.model_dump(),

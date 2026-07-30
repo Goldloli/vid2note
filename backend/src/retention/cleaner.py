@@ -3,7 +3,7 @@
 职责
 ----
 1. 五类产物(video/audio/srt/note/screenshot)各自独立的保留策略(permanent / 7d / 30d),
-   策略来源:传入的 ``settings``(SQLite settings 快照或 ``retention.<kind>`` 字典),
+   策略来源:传入的 ``settings``(运行时设置快照或 ``retention.<kind>`` 字典),
    缺省时回退到 :data:`DEFAULT_RETENTION_POLICIES`( CONTRACT §3.2 建议)。
 2. :func:`run_cleanup_scan` —— 周期性 + 启动时调用:
    - 按各自策略删过期产物(permanent 永不删);

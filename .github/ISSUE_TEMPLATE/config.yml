@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 安全漏洞
+    url: https://github.com/Goldloli/vid2note/security/advisories/new
+    about: 请通过私有安全通告报告漏洞，不要公开提交 Issue
+  - name: 使用讨论
+    url: https://github.com/Goldloli/vid2note/discussions
+    about: 配置问题、想法交流和一般性问答

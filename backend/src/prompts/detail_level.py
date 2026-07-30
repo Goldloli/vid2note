@@ -1,0 +1,50 @@
+"""笔记详细程度的附加约束，供两条笔记 prompt 路径复用。"""
+from __future__ import annotations
+
+
+DETAIL_LEVEL_INSTRUCTIONS: dict[str, str] = {
+    "concise": """
+【笔记详细程度：简洁】
+只保留字幕或讲义中的结论、核心概念、关键数据和必要步骤；合并重复表达，
+省略寒暄、枝节和非必要例子。不得捏造字幕或讲义中不存在的事实。
+""".strip(),
+    "balanced": """
+【笔记详细程度：适中】
+完整保留字幕或讲义中的主要论点、必要解释、代表性示例和结论，在信息覆盖与阅读效率间平衡。
+不得捏造字幕或讲义中不存在的事实。
+""".strip(),
+    "detailed": """
+【笔记详细程度：详细】
+在忠实覆盖字幕或讲义主要内容的基础上，保留重要上下文、推导过程、例子、注意事项与章节小结。
+不得捏造字幕或讲义中不存在的事实；原材料未说明之处应明确保持空缺。
+""".strip(),
+    "exhaustive": """
+【笔记详细程度：超详细】
+先充分理解全部字幕或讲义，再写成事实忠实、全局连贯、论证完整、信息价值高且易读的
+深度笔记。围绕课程中心问题组织知识，而不是按字幕顺序改写或堆积更多文字。
+
+必须说明核心结论是什么、为什么成立、推导如何展开、关键案例证明什么，并保留重要定义、
+步骤、数据、反例、适用边界、注意事项、术语、跨章节关联、易错点和有信息量的问答。
+同一主题分散在多个时间段时应合并理解，既去除逐字重复，也保留后来新增的独立信息。
+
+只删除寒暄、口头禅、无信息互动和无新增信息的重复。不得捏造字幕或讲义中不存在的事实，
+不得使用外部常识擅自补齐论据；对无法结合上下文可靠纠正的 ASR 专名、数字或语句明确标记
+为不确定。质量以事实忠实度、主题覆盖、结构连贯、信息价值和可读性衡量，不以篇幅衡量。
+""".strip(),
+}
+
+
+def normalize_detail_level(value: object) -> str:
+    normalized = str(value or "").strip().lower()
+    return normalized if normalized in DETAIL_LEVEL_INSTRUCTIONS else "balanced"
+
+
+def detail_instruction(value: object) -> str:
+    return DETAIL_LEVEL_INSTRUCTIONS[normalize_detail_level(value)]
+
+
+__all__ = [
+    "DETAIL_LEVEL_INSTRUCTIONS",
+    "detail_instruction",
+    "normalize_detail_level",
+]

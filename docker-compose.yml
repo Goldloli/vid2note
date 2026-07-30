@@ -1,15 +1,59 @@
 services:
   vid2note:
-    build: .
+    build:
+      context: .
+      args:
+        APP_UID: ${VID2NOTE_UID:-1000}
+        APP_GID: ${VID2NOTE_GID:-1000}
     container_name: vid2note
     ports:
-      - "8761:8765"
+      - "127.0.0.1:${VID2NOTE_PORT:-8761}:8765"
     volumes:
       - ./data:/app/data
     environment:
-      - DATA_ROOT=/app/data
-      - DB_PATH=/app/data/tasks.db
-      - LLM_PROVIDER=${LLM_PROVIDER:-deepseek}
-      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
-      - DEEPSEEK_MODEL=${DEEPSEEK_MODEL:-deepseek-v4-flash}
+      DATA_ROOT: /app/data
+      DB_PATH: /app/data/tasks.db
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 8765
+      # 生产环境可直接传 VID2NOTE_MASTER_KEY，或把只读 Docker secret
+      # 挂载到 /run/secrets/vid2note_master_key；留空则在 data/config 生成本地密钥。
+      VID2NOTE_MASTER_KEY: ${VID2NOTE_MASTER_KEY:-}
+      VID2NOTE_MASTER_KEY_FILE: ${VID2NOTE_MASTER_KEY_FILE:-}
+      LLM_PROVIDER: ${LLM_PROVIDER:-deepseek}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-v4-flash}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com/v1}
+      QWEN_API_KEY: ${QWEN_API_KEY:-}
+      QWEN_MODEL: ${QWEN_MODEL:-qwen3.7-plus}
+      QWEN_BASE_URL: ${QWEN_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      GLM_API_KEY: ${GLM_API_KEY:-}
+      GLM_MODEL: ${GLM_MODEL:-glm-5.2}
+      GLM_BASE_URL: ${GLM_BASE_URL:-https://open.bigmodel.cn/api/paas/v4/}
+      MOONSHOT_API_KEY: ${MOONSHOT_API_KEY:-}
+      MOONSHOT_MODEL: ${MOONSHOT_MODEL:-kimi-k2.6}
+      MOONSHOT_BASE_URL: ${MOONSHOT_BASE_URL:-https://api.moonshot.cn/v1}
+      BAIDU_API_KEY: ${BAIDU_API_KEY:-}
+      BAIDU_MODEL: ${BAIDU_MODEL:-ernie-5.0}
+      BAIDU_BASE_URL: ${BAIDU_BASE_URL:-https://qianfan.baidubce.com/v2}
+      DOUBAO_API_KEY: ${DOUBAO_API_KEY:-}
+      DOUBAO_MODEL: ${DOUBAO_MODEL:-doubao-seed-2-0-lite-260215}
+      DOUBAO_BASE_URL: ${DOUBAO_BASE_URL:-https://ark.cn-beijing.volces.com/api/v3}
+      MINIMAX_API_KEY: ${MINIMAX_API_KEY:-}
+      MINIMAX_MODEL: ${MINIMAX_MODEL:-MiniMax-M2.7}
+      MINIMAX_BASE_URL: ${MINIMAX_BASE_URL:-https://api.minimaxi.com/v1}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3.5}
+      CUSTOM_API_KEY: ${CUSTOM_API_KEY:-}
+      CUSTOM_MODEL: ${CUSTOM_MODEL:-}
+      CUSTOM_BASE_URL: ${CUSTOM_BASE_URL:-}
+      MAX_MEDIA_UPLOAD_MB: ${MAX_MEDIA_UPLOAD_MB:-2048}
+      MAX_PDF_UPLOAD_MB: ${MAX_PDF_UPLOAD_MB:-100}
+      ALLOW_PRIVATE_URLS: ${ALLOW_PRIVATE_URLS:-false}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     restart: unless-stopped

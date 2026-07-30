@@ -42,7 +42,7 @@ from .engine import (
     get_audio_duration_seconds,
     sanitize_cues,
 )
-from .asrtools import AsrToolsEngine
+from .bcut import BcutEngine
 from .external import ExternalAsrEngine
 from .vad import AudioSegment, split_audio_by_silence
 from .whisper_local import WhisperCppEngine
@@ -56,7 +56,7 @@ except Exception:  # pragma: no cover
 _LOGGER = logging.getLogger("speech_to_text.pipeline")
 
 # 引擎名常量（与 settings 的 asr.engine 取值一致）
-ENGINE_ASRTOOLS = "asrtools"
+ENGINE_BCUT = "bcut"
 ENGINE_WHISPER = "whisper_cpp"
 ENGINE_EXTERNAL = "external"
 
@@ -73,15 +73,12 @@ CancelCheck = Callable[[], bool]
 class AsrConfig:
     """ASR 引擎与策略配置（镜像 settings 的 ``asr.*`` 命名空间）。
 
-    所有在线/本地/外部引擎参数集中于此，由 DAG 节点从 SQLite settings 快照构造后传入。
+    所有在线/本地/外部引擎参数集中于此，由 DAG 节点从运行时设置快照构造后传入。
     """
 
     strategy: str = STRATEGY_ONLINE_FIRST      # online_first / single
-    engine: str = ENGINE_ASRTOOLS               # single 模式指定的引擎
-    # 在线必剪云接口(bcut=必剪 / jianying=剪映)
-    asrtools_provider: str = "bcut"             # bcut(必剪) / jianying(剪映)
-    asrtools_sign_endpoint: str = "https://asrtools-update.bkfeng.top/sign"
-    asrtools_timeout: float = 120.0
+    engine: str = ENGINE_BCUT                    # single 模式指定的引擎
+    bcut_timeout: float = 120.0
     # 本地 whisper.cpp（CPU + int8）
     whisper_model_path: str = ""
     whisper_binary: str = ""
@@ -101,12 +98,12 @@ class AsrConfig:
 
     @classmethod
     def from_settings(cls, settings: dict) -> "AsrConfig":
-        """从 SQLite settings 快照（``asr.*`` 命名空间）构造。
+        """从运行时设置快照（``asr.*`` 命名空间）构造。
 
         ``settings`` 可为扁平 dict（``{"asr.engine": ..., "asr.config": "{...}"}``）。
         ``asr.config`` 为 JSON 串/对象，承载引擎专属参数（endpoint / 模型路径 等）。
         """
-        engine = str(settings.get("asr.engine", ENGINE_ASRTOOLS))
+        engine = str(settings.get("asr.engine", ENGINE_BCUT))
         strategy = str(settings.get("asr.strategy", STRATEGY_ONLINE_FIRST))
         raw_cfg = settings.get("asr.config")
         cfg: dict = {}
@@ -124,10 +121,8 @@ class AsrConfig:
 
         return cls(
             strategy=strategy if strategy in (STRATEGY_ONLINE_FIRST, STRATEGY_SINGLE) else STRATEGY_ONLINE_FIRST,
-            engine=engine if engine in (ENGINE_ASRTOOLS, ENGINE_WHISPER, ENGINE_EXTERNAL) else ENGINE_ASRTOOLS,
-            asrtools_provider=str(cfg.get("asrtools_provider", "bcut")) or "bcut",
-            asrtools_sign_endpoint=_cfg_str("asrtools_sign_endpoint", "https://asrtools-update.bkfeng.top/sign"),
-            asrtools_timeout=float(cfg.get("asrtools_timeout", 120.0) or 120.0),
+            engine=engine if engine in (ENGINE_BCUT, ENGINE_WHISPER, ENGINE_EXTERNAL) else ENGINE_BCUT,
+            bcut_timeout=float(cfg.get("bcut_timeout", 120.0) or 120.0),
             whisper_model_path=_cfg_str("whisper_model_path") or _cfg_str("model_path"),
             whisper_binary=_cfg_str("whisper_binary") or _cfg_str("binary"),
             whisper_device=str(cfg.get("whisper_device", "cpu") or "cpu"),
@@ -153,10 +148,8 @@ class AsrConfig:
 def build_engines(config: AsrConfig) -> dict[str, AsrEngine]:
     """按配置实例化全部引擎（不预检可用性，运行时惰性判定）。"""
     return {
-        ENGINE_ASRTOOLS: AsrToolsEngine(
-            provider=config.asrtools_provider,
-            sign_endpoint=config.asrtools_sign_endpoint,
-            timeout=config.asrtools_timeout,
+        ENGINE_BCUT: BcutEngine(
+            timeout=config.bcut_timeout,
         ),
         ENGINE_WHISPER: WhisperCppEngine(
             model_path=config.whisper_model_path,
@@ -176,18 +169,18 @@ def build_engines(config: AsrConfig) -> dict[str, AsrEngine]:
 def resolve_engine_order(config: AsrConfig) -> list[str]:
     """按策略返回「尝试顺序」的引擎名列表。
 
-    - ``online_first``（默认，design D2）：在线引擎在前（AsrTools 默认首选；如配置了
+    - ``online_first``（默认，design D2）：在线引擎在前（bcut 默认首选；如配置了
       external 也作为在线候选），本地 whisper.cpp 兜底。
     - ``single``：仅 ``config.engine`` 指定的那一种，**不降级**。
     """
     if config.strategy == STRATEGY_SINGLE:
-        return [config.engine] if config.engine in (ENGINE_ASRTOOLS, ENGINE_WHISPER, ENGINE_EXTERNAL) else [ENGINE_ASRTOOLS]
+        return [config.engine] if config.engine in (ENGINE_BCUT, ENGINE_WHISPER, ENGINE_EXTERNAL) else [ENGINE_BCUT]
     # online_first
     order: list[str] = []
     if config.engine == ENGINE_EXTERNAL:
         order.append(ENGINE_EXTERNAL)
-    if ENGINE_ASRTOOLS not in order:
-        order.append(ENGINE_ASRTOOLS)
+    if ENGINE_BCUT not in order:
+        order.append(ENGINE_BCUT)
     if config.engine == ENGINE_EXTERNAL and ENGINE_EXTERNAL not in order:
         order.append(ENGINE_EXTERNAL)
     # 兜底：本地 whisper（始终放最后）

@@ -6,6 +6,7 @@ import shutil
 
 from fastapi import APIRouter
 
+from src import __version__
 from src.runtime.settings import get_settings_snapshot
 from src.runtime.task_service import get_task_service
 
@@ -25,13 +26,14 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "vid2note",
+        "version": __version__,
         "tools": {
             # 媒体下载与音频提取依赖 yt-dlp / ffmpeg(契约 §6.1)
             "yt-dlp": _which("yt-dlp") or _which("youtube-dl"),
             "ffmpeg": _which("ffmpeg"),
         },
         "engines": {
-            # 引擎配置态(从 SQLite settings 读出的强类型快照)
+            # 引擎配置态（由文件权威态、环境默认值和注册表合并）
             "asr_engine": snapshot.get("asr.engine"),
             "asr_strategy": snapshot.get("asr.strategy"),
             "llm_provider": snapshot.get("llm.provider"),

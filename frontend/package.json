@@ -1,25 +1,37 @@
 {
   "name": "vid2note-frontend",
   "version": "1.0.0",
+  "engines": {
+    "node": ">=22"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite --port 5735",
+    "test:unit": "node --test tests/*.test.js",
+    "lint": "eslint . --max-warnings=0",
     "build": "vite build",
+    "check": "npm run test:unit && npm run lint && npm run build",
     "preview": "vite preview --port 5735"
   },
   "dependencies": {
-    "axios": "^1.6.0",
+    "@phosphor-icons/vue": "^2.2.1",
+    "axios": "^1.18.1",
+    "dompurify": "^3.4.12",
     "html2pdf.js": "^0.14.0",
     "marked": "^12.0.0",
     "markmap-lib": "^0.18.0",
     "markmap-view": "^0.18.0",
     "pinia": "^2.1.0",
     "vue": "^3.4.0",
-    "vue-i18n": "^9.14.5",
+    "vue-i18n": "^11.4.8",
     "vue-router": "^4.2.0"
   },
   "devDependencies": {
-    "@vitejs/plugin-vue": "^5.0.0",
-    "vite": "^5.0.0"
+    "@eslint/js": "^10.0.1",
+    "@vitejs/plugin-vue": "^6.0.8",
+    "eslint": "^10.8.0",
+    "eslint-plugin-vue": "^10.10.0",
+    "globals": "^17.8.0",
+    "vite": "^8.1.5"
   }
 }

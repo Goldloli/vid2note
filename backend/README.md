@@ -1,98 +1,24 @@
-# 课程字幕整理工具 - 后端服务
+# vid2note 后端
 
-## 项目结构
+FastAPI 后端负责媒体输入、六步 DAG、SQLite 持久化、SSE、LLM/ASR Provider 和前端静态资源托管。
 
-```
-backend/
-├── src/
-│   ├── __init__.py
-│   ├── main.py              # FastAPI 主应用入口
-│   ├── api/                 # API 路由
-│   │   ├── __init__.py
-│   │   ├── upload.py        # 文件上传接口
-│   │   ├── process.py       # 任务处理接口
-│   │   └── config.py        # 配置管理接口
-│   ├── config/              # 配置管理模块
-│   │   ├── __init__.py
-│   │   ├── models.py        # Pydantic 配置模型
-│   │   └── manager.py       # 配置管理器
-│   ├── parsers/             # 输入解析模块
-│   │   ├── __init__.py
-│   │   ├── srt_parser.py    # SRT 字幕解析器
-│   │   └── pdf_parser.py    # PDF 课件解析器
-│   ├── llm/                 # LLM 接口模块
-│   │   ├── __init__.py
-│   │   ├── base.py          # LLM 抽象基类
-│   │   ├── qwen.py          # 通义千问实现
-│   │   ├── glm.py           # 智谱AI实现
-│   │   └── factory.py       # LLM 工厂类
-│   ├── core/                # 核心处理模块
-│   │   ├── __init__.py
-│   │   ├── aligner.py       # 语义对齐
-│   │   ├── filter.py        # 内容过滤
-│   │   └── generator.py     # Markdown生成器
-│   ├── tasks/               # 任务队列模块
-│   │   ├── __init__.py
-│   │   └── pipeline.py      # 处理管道
-│   ├── utils/               # 工具函数
-│   │   └── __init__.py
-│   └── prompts/             # Prompt 文件
-│       ├── classify.txt
-│       └── restructure.txt
-├── requirements.txt
-├── run.py
-└── README.md
-```
+公开 API 使用 `/api/v1` 前缀；交互式文档位于 `/docs`。
 
-## 安装依赖
+## 开发
 
 ```bash
-cd backend
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-# 或 venv\Scripts\activate  # Windows
-
-pip install -r requirements.txt
+python3.11 -m venv .venv
+.venv/bin/python -m pip install -r requirements-dev.txt
+SERVER_HOST=127.0.0.1 .venv/bin/python run.py
 ```
 
-## 启动服务
+测试：
 
 ```bash
-python run.py
+.venv/bin/python -m pytest
+.venv/bin/python -m pip_audit -r requirements.txt
 ```
 
-服务将在 http://0.0.0.0:5735 启动
+不要使用旧的 `src.api.upload/process/queue` 路由开发新功能；v1 入口集中在 `src/api/v1/`。新增模块通过 `src.core.kernel` 门面使用继承自 `ai_srt2md` 的内核。
 
-## API 接口
-
-### 文件上传
-- `POST /api/v1/upload/srt` - 上传 SRT 字幕文件
-- `POST /api/v1/upload/pdf` - 上传 PDF 课件文件
-- `POST /api/v1/upload/task` - 创建处理任务
-
-### 任务处理
-- `POST /api/v1/process/start` - 开始处理任务
-- `GET /api/v1/process/status/{task_id}` - 查询任务状态
-- `GET /api/v1/process/{task_id}/download` - 下载处理结果
-
-### 配置管理
-- `GET /api/v1/config` - 获取当前配置
-- `PUT /api/v1/config` - 更新配置
-- `POST /api/v1/config/verify` - 验证 API Key
-- `GET /api/v1/config/models` - 获取可用模型列表
-
-## 环境变量
-
-复制 `.env.example` 为 `.env` 并配置：
-
-```bash
-# LLM 配置
-QWEN_API_KEY=your_qwen_api_key
-GLM_API_KEY=your_glm_api_key
-DEFAULT_LLM_PROVIDER=qwen
-
-# 服务配置
-PORT=5735
-HOST=0.0.0.0
-DEBUG=false
-```
+架构、扩展点和数据流见 [项目架构文档](../docs/ARCHITECTURE.md)，接口和数据模型约定见 [CONTRACT.md](CONTRACT.md)。

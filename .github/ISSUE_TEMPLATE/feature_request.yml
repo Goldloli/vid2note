@@ -1,0 +1,26 @@
+name: Feature Request
+description: 建议新的能力或改进
+title: "[Feature] "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: checkboxes
+    attributes:
+      label: 提交前检查
+      options:
+        - label: 我已搜索现有 Issue 和 Discussion
+          required: true
+  - type: textarea
+    attributes:
+      label: 使用场景
+      description: 你试图解决什么问题？
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: 建议方案
+      description: 描述期望行为、替代方案和可能的兼容性影响
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: 补充信息

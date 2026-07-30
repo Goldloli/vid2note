@@ -9,14 +9,6 @@ function mmdd(d) {
   return m ? `${m[1]}-${m[2]}` : ''
 }
 
-function videoId(t) {
-  const st = t.source_type || '', url = t.source_url || ''
-  if (st === 'youtube') { const m = url.match(/(?:v=|youtu\.be\/)([\w-]{6,})/); return m ? m[1] : '' }
-  if (st === 'bilibili') { const m = url.match(/(BV[\w]+)/); return m ? m[1] : '' }
-  if (st === 'direct') { try { return new URL(url).hostname } catch (e) { return '' } }
-  return ''
-}
-
 function sourceName(st) {
   const t = i18n.global.t
   return ({

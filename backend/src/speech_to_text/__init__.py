@@ -3,10 +3,10 @@
 公共 API：
 - ``Cue``：统一字幕单元（秒）。
 - ``AsrEngine``：引擎抽象基类；三实现：
-    * ``AsrToolsEngine``（在线，剪映/必剪，默认首选）
+    * ``BcutEngine``（实验性在线，默认首选）
     * ``WhisperCppEngine``（本地 CPU + int8，MUST NOT 发网络请求）
     * ``ExternalAsrEngine``（HTTP endpoint，地址来自配置）
-- ``AsrConfig``：引擎与策略配置（``from_settings`` 从 SQLite settings 快照构造）。
+- ``AsrConfig``：引擎与策略配置（``from_settings`` 从运行时设置快照构造）。
 - ``transcribe(ctx, audio_rel_path, srt_out_rel_path, asr_config)``：DAG 节点入口（CONTRACT）。
 - ``transcribe_to_srt(audio_path, asr_config, ...)``：便捷入口，返回 SRT 文本。
 - ``cues_to_srt`` / ``parse_srt_to_cues``：Cue ↔ SRT 文本互转。
@@ -25,7 +25,7 @@ from .engine import (
     parse_srt_to_cues,
     sanitize_cues,
 )
-from .asrtools import AsrToolsEngine
+from .bcut import BcutEngine
 from .whisper_local import WhisperCppEngine
 from .external import ExternalAsrEngine
 from .vad import AudioSegment, compute_split_points, detect_silence_points, split_audio_by_silence
@@ -46,7 +46,7 @@ __all__ = [
     "CancelledError",
     "ProgressCallback",
     # 引擎实现
-    "AsrToolsEngine",
+    "BcutEngine",
     "WhisperCppEngine",
     "ExternalAsrEngine",
     # 配置与编排

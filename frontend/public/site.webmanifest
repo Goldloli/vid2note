@@ -1,0 +1,23 @@
+{
+  "name": "vid2note — 视频笔记",
+  "short_name": "vid2note",
+  "description": "将视频链接或本地文件转换为 Markdown 笔记与思维导图",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7f8fa",
+  "theme_color": "#f58a12",
+  "icons": [
+    {
+      "src": "/icons/vid2note-icon-192.png?v=3",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/vid2note-icon-512.png?v=3",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

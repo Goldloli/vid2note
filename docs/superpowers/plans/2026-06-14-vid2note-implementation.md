@@ -816,7 +816,7 @@ class ASRError(Vid2NoteError): ...
 class ASRToolBChanged(ASRError):
     def __init__(self, detail: str = ""):
         super().__init__(
-            f"AsrTools b 接口结构变更: {detail}",
+            f"bcut 协议结构变更: {detail}",
             code="ASRTOOL_B_CHANGED",
             retryable=False,
             user_message="语音识别接口有变化，请等待更新或切换其他提供商",
@@ -2472,19 +2472,19 @@ git commit -m "feat: ffmpeg 音频提取 wrapper"
 
 ---
 
-## Phase 6: ASR 云端（AsrTools b 接口）
+## Phase 6: 在线 ASR（bcut）
 
-### Task 6.1: AsrTools b 接口适配器
+### Task 6.1: bcut 在线 ASR 适配器
 
 **Files:**
-- Create: `core/src/vid2note_core/asr/cloud/asrtools.py`
-- Test: `core/tests/unit/asr/test_asrtools.py`
+- Create: `core/src/vid2note_core/asr/cloud/bcut.py`
+- Test: `core/tests/unit/asr/test_bcut.py`
 
 - [ ] **Step 1: 写实现**
 
-`/Users/gejiawei/Desktop/ai_code/vid2note/core/src/vid2note_core/asr/cloud/asrtools.py`:
+`/Users/gejiawei/Desktop/ai_code/vid2note/core/src/vid2note_core/asr/cloud/bcut.py`:
 ```python
-"""AsrTools b 接口适配器"""
+"""bcut 实验性在线 ASR 适配器"""
 import httpx
 import time
 from pathlib import Path
@@ -2493,12 +2493,12 @@ from vid2note_core.asr.base import IASR, ASRResult, ASRSegment
 from vid2note_core.errors import ASRToolBChanged, ASRNetworkError
 
 
-class AsrToolsBLLM(IASR):
-    name = "asrtools-b"
+class BcutASR(IASR):
+    name = "bcut"
     is_cloud = True
     requires_local_gpu = False
 
-    # b 接口 endpoint（从 AsrTools 项目提取）
+    # bcut endpoint（外部协议，可能变化）
     BASE_URL = "https://api.example-asr.com/v1"  # Phase 6 实际调研后填入
     CHUNK_SEC = 60
 
@@ -2511,7 +2511,7 @@ class AsrToolsBLLM(IASR):
         # 2. 上传每块
         # 3. 轮询结果
         # 4. 合并时间戳
-        # TODO: Phase 6 实际实现（需要调研 AsrTools 具体接口）
+        # TODO: Phase 6 实际实现（需要调研 bcut 协议）
         raise NotImplementedError("Phase 6 实现")
 
     def is_available(self) -> bool:
@@ -2521,11 +2521,11 @@ class AsrToolsBLLM(IASR):
 - [ ] **Step 2: 写测试（mock httpx）**
 
 ```python
-"""测试 AsrTools b 接口"""
+"""测试 bcut 在线 ASR"""
 import pytest
 from unittest.mock import AsyncMock, patch
 from pathlib import Path
-from vid2note_core.asr.cloud.asrtools import AsrToolsBLLM
+from vid2note_core.asr.cloud.bcut import BcutASR
 
 
 @pytest.mark.asyncio
@@ -2537,7 +2537,7 @@ async def test_transcribe_success():
             "status": "completed",
             "result": {"text": "hello world", "segments": [{"start": 0, "end": 2000, "text": "hello world"}]}
         }))
-        asr = AsrToolsBLLM()
+        asr = BcutASR()
         result = await asr.transcribe(Path("/tmp/audio.wav"), {})
         assert result.text_full == "hello world"
 
@@ -2546,7 +2546,7 @@ async def test_transcribe_success():
 async def test_transcribe_api_changed():
     with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
         mock_post.return_value = AsyncMock(status_code=200, json=AsyncMock(return_value={"unexpected": "structure"}))
-        asr = AsrToolsBLLM()
+        asr = BcutASR()
         with pytest.raises(ASRToolBChanged):
             await asr.transcribe(Path("/tmp/audio.wav"), {})
 ```
@@ -2554,8 +2554,8 @@ async def test_transcribe_api_changed():
 - [ ] **Step 3: Commit**
 
 ```bash
-git add core/src/vid2note_core/asr/cloud/asrtools.py core/tests/unit/asr/test_asrtools.py
-git commit -m "feat: AsrTools b 接口适配器（云端 ASR 默认）"
+git add core/src/vid2note_core/asr/cloud/bcut.py core/tests/unit/asr/test_bcut.py
+git commit -m "feat: bcut 在线 ASR 适配器"
 ```
 
 ---
@@ -2949,7 +2949,7 @@ class CreateTaskRequest(BaseModel):
     video_url: str | None = None
     video_file: str | None = None
     pdf_file: str | None = None
-    asr_provider: str = "asrtools-b"
+    asr_provider: str = "bcut"
     llm_provider: str = "qwen"
     export_mindmap: bool = False
 
@@ -3045,7 +3045,7 @@ from unittest.mock import patch, MagicMock
 def test_url_to_notes(client):
     with patch("vid2note_core.downloaders.ytdlp.YtDlpDownloader.download") as mock_dl, \
          patch("vid2note_core.audio.extractor.AudioExtractor.extract") as mock_audio, \
-         patch("vid2note_core.asr.cloud.asrtools.AsrToolsBLLM.transcribe") as mock_asr, \
+         patch("vid2note_core.asr.cloud.bcut.BcutASR.transcribe") as mock_asr, \
          patch("vid2note_core.llm.qwen.QwenLLM.chat") as mock_llm:
         mock_dl.return_value = MagicMock(video_path="/tmp/v.mp4")
         mock_audio.return_value = Path("/tmp/audio.wav")
@@ -3809,7 +3809,7 @@ make package   # 打包客户端
 - Python 3.11 + FastAPI + Pydantic + SQLite
 - Vue3 + Element Plus + Electron
 - LLM: 通义千问 / 智谱 GLM / DeepSeek / Kimi / 百度文心 / 字节豆包 / MiniMax / Ollama
-- ASR: AsrTools (cloud) / FunASR / Qwen3-ASR (local)
+- ASR: bcut (experimental online) / FunASR / Qwen3-ASR (local)
 - 下载: yt-dlp + BBDown + you-get
 ```
 
@@ -3857,7 +3857,7 @@ git commit -m "docs: 最终文档（README + 架构 + 贡献指南）"
 
 ### 已知限制
 
-1. **AsrTools b 接口具体 endpoint**：Phase 6 需要实际调研 AsrTools 项目源码，当前用占位 BASE_URL
+1. **bcut endpoint**：Phase 6 需要实际调研外部协议，当前用占位 BASE_URL；可用性不作保证
 2. **FunASR / Qwen3-ASR 推理代码**：Phase 7 需要实际加载模型调试，当前用 `raise NotImplementedError`
 3. **Golden Dataset 阈值**：WER/ROUGE 阈值需实际跑数据后校准
 4. **BBDown 二进制下载 URL**：Phase 4 需要确认最新 release URL

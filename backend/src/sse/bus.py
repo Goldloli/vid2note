@@ -84,7 +84,11 @@ class SSEBus:
 
 
 def _format_sse(evt: Dict[str, Any]) -> str:
-    return f"data: {json.dumps(evt, ensure_ascii=False)}\n\n"
+    event_name = str(evt.get("event") or "message").replace("\n", "")
+    return (
+        f"event: {event_name}\n"
+        f"data: {json.dumps(evt, ensure_ascii=False)}\n\n"
+    )
 
 
 _bus: Optional[SSEBus] = None

@@ -9,52 +9,64 @@ from pydantic import BaseModel, Field
 class QwenConfig(BaseModel):
     """通义千问配置"""
     api_key: str = ""
-    model: str = "qwen-turbo"
+    model: str = "qwen3.7-plus"
     base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
 
 class GLMConfig(BaseModel):
     """智谱AI配置"""
     api_key: str = ""
-    model: str = "glm-4-flash"
+    model: str = "glm-5.2"
     base_url: str = "https://open.bigmodel.cn/api/paas/v4/"
 
 
 class DeepSeekConfig(BaseModel):
     """DeepSeek配置"""
     api_key: str = ""
-    model: str = "deepseek-chat"
+    model: str = "deepseek-v4-flash"
     base_url: str = "https://api.deepseek.com/v1"
 
 
 class MoonshotConfig(BaseModel):
     """Moonshot (Kimi)配置"""
     api_key: str = ""
-    model: str = "moonshot-v1-8k"
+    model: str = "kimi-k2.6"
     base_url: str = "https://api.moonshot.cn/v1"
 
 
 class BaiduConfig(BaseModel):
-    """百度文心一言配置"""
+    """百度千帆 v2 OpenAI-compatible 配置"""
     api_key: str = ""
-    secret_key: str = ""  # 百度需要API Key和Secret Key
-    model: str = "ernie-bot-4"
-    base_url: str = "https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop"
+    model: str = "ernie-5.0"
+    base_url: str = "https://qianfan.baidubce.com/v2"
 
 
 class DoubaoConfig(BaseModel):
     """字节豆包配置"""
     api_key: str = ""
-    model: str = "doubao-pro-4k"
+    model: str = "doubao-seed-2-0-lite-260215"
     base_url: str = "https://ark.cn-beijing.volces.com/api/v3"
 
 
 class MiniMaxConfig(BaseModel):
     """MiniMax配置"""
     api_key: str = ""
-    group_id: str = ""  # MiniMax需要group_id
-    model: str = "abab6.5-chat"
-    base_url: str = "https://api.minimax.chat/v1"
+    model: str = "MiniMax-M2.7"
+    base_url: str = "https://api.minimaxi.com/v1"
+
+
+class OllamaConfig(BaseModel):
+    """Ollama OpenAI-compatible endpoint configuration."""
+    api_key: str = "ollama"
+    model: str = "qwen3.5"
+    base_url: str = "http://host.docker.internal:11434/v1"
+
+
+class CustomConfig(BaseModel):
+    """自定义 OpenAI-compatible endpoint 配置。"""
+    api_key: str = ""
+    model: str = ""
+    base_url: str = ""
 
 
 class ProcessingConfig(BaseModel):
@@ -90,8 +102,9 @@ class AppConfig(BaseModel):
     """应用主配置"""
     version: str = "1.0"
     llm_provider: Literal[
-        "qwen", "glm", "deepseek", "moonshot", "baidu", "doubao", "minimax"
-    ] = "qwen"
+        "qwen", "glm", "deepseek", "moonshot", "baidu", "doubao", "minimax",
+        "ollama", "custom"
+    ] = "deepseek"
     qwen: Optional[QwenConfig] = None
     glm: Optional[GLMConfig] = None
     deepseek: Optional[DeepSeekConfig] = None
@@ -99,8 +112,10 @@ class AppConfig(BaseModel):
     baidu: Optional[BaiduConfig] = None
     doubao: Optional[DoubaoConfig] = None
     minimax: Optional[MiniMaxConfig] = None
-    processing: ProcessingConfig = ProcessingConfig()
-    advanced: AdvancedConfig = AdvancedConfig()
-    pdf_watermarks: PDFWatermarksConfig = PDFWatermarksConfig()
-    default_models: dict = {}  # 各提供商默认模型
-    server: ServerConfig = ServerConfig()
+    ollama: Optional[OllamaConfig] = None
+    custom: Optional[CustomConfig] = None
+    processing: ProcessingConfig = Field(default_factory=ProcessingConfig)
+    advanced: AdvancedConfig = Field(default_factory=AdvancedConfig)
+    pdf_watermarks: PDFWatermarksConfig = Field(default_factory=PDFWatermarksConfig)
+    default_models: dict = Field(default_factory=dict)  # 各提供商默认模型
+    server: ServerConfig = Field(default_factory=ServerConfig)

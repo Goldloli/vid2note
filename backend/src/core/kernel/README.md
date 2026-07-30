@@ -5,7 +5,7 @@
 
 ## 规矩
 
-- v1 新增模块(`media_ingest` / `speech_to_text` / `screenshot` / `pdf_reference/mineru_provider` / `pipeline/dag` / `retention` / SSE 层)**必须**从 `core.kernel` 导入内核能力。
+- v1 新增模块(`media_ingest` / `speech_to_text` / `screenshot` / `pipeline/dag` / `retention` / SSE 层)**必须**从 `core.kernel` 导入内核能力。
 - **不得**直接穿透内核内部(如 `from src.core.simple_processor import ...`、`from src.llm.xxx import ...`)。
 - 内核模块本身保持基底位置,**不做物理移动** —— 零迁移风险,便于上游 cherry-pick。
 
@@ -27,7 +27,7 @@
 - 输入端(视频链接 / 本地音视频)→ `media_ingest/`(新)
 - ASR → `speech_to_text/`(新)
 - 截图嵌入 → `screenshot/`(新)
-- MinerU PDF 拆解 → `pdf_reference/mineru_provider.py`(新,与内核 `parsers/pdf_parser.py` 并列,经 `PdfReferenceProvider` 抽象)
+- PDF 基础文本提取 → 复用内核 `parsers/pdf_parser.py`;MinerU/OCR 属于 Roadmap
 - DAG 编排 → `pipeline/dag.py`(新,复用内核 `TaskQueue` 但在其上加六步状态机)
 - 保留清理 → `retention/`(新)
 - SSE 推送 → 新增层

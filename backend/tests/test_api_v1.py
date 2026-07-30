@@ -22,10 +22,13 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.api.v1 import v1_router
+from src.api.v1 import asr as asr_api
+from src.api.v1 import settings as settings_api
 from src.db.database import Database
 from src.models.task import TaskStatus
 from src.runtime import task_service as task_service_mod
 from src.runtime import worker as worker_mod
+from src.api.v1 import tasks as tasks_api
 
 
 # --------------------------------------------------------------------------- #
@@ -39,6 +42,8 @@ def client(tmp_path, monkeypatch):
 
     monkeypatch.setenv("DATA_ROOT", str(data_root))
     monkeypatch.setenv("DB_PATH", str(db_path))
+    monkeypatch.delenv("VID2NOTE_MASTER_KEY", raising=False)
+    monkeypatch.delenv("VID2NOTE_MASTER_KEY_FILE", raising=False)
 
     # 清掉进程级单例,使后续 TaskRepository()/TaskService() 用新的 env
     Database.reset_instance()
@@ -77,6 +82,7 @@ class TestHealthStorage:
         assert r.status_code == 200
         body = r.json()
         assert body["status"] == "healthy"
+        assert body["version"]
         assert "yt-dlp" in body["tools"]
         assert "ffmpeg" in body["tools"]
         assert "asr_engine" in body["engines"]
@@ -96,53 +102,236 @@ class TestHealthStorage:
 # settings
 # --------------------------------------------------------------------------- #
 class TestSettings:
-    def test_get_masks_credentials(self, client):
-        repo = _svc().repo
-        repo.set_setting("llm.credentials", '{"deepseek": {"api_key": "sk-secret"}}')
+    def test_get_exposes_provider_metadata_and_status_without_plaintext(self, client):
+        saved = client.put(
+            "/api/v1/settings/credentials",
+            json={"provider": "deepseek", "field": "api_key", "value": "sk-secret-a1b2"},
+        )
+        assert saved.status_code == 200, saved.text
+
         r = client.get("/api/v1/settings")
         assert r.status_code == 200
-        settings = r.json()["settings"]
-        assert settings["llm.credentials"] == "***"  # 已配置脱敏
-        # 非凭证字段正常返回
-        assert settings["concurrency.max"] == "1"
+        body = r.json()
+        assert len(body["providers"]) == 9
+        assert {item["id"] for item in body["providers"]} == {
+            "deepseek",
+            "qwen",
+            "glm",
+            "moonshot",
+            "baidu",
+            "doubao",
+            "minimax",
+            "ollama",
+            "custom",
+        }
+        state = body["credentials"]["deepseek"]["api_key"]
+        assert state == {"configured": True, "masked": "••••••••a1b2", "source": "encrypted"}
+        serialized = __import__("json").dumps(body, ensure_ascii=False)
+        assert "sk-secret-a1b2" not in serialized
+        assert body["settings"]["concurrency.max"] == "1"
+        assert "settings.json" in body["storage"]["settings_path"]
+        assert "credentials.enc" in body["storage"]["credentials_path"]
 
-    def test_put_valid_persists(self, client):
-        r = client.put("/api/v1/settings", json={"concurrency.max": 2, "pdf.mode": "mineru"})
+    def test_put_valid_persists_to_settings_file_not_sqlite(self, client):
+        r = client.put("/api/v1/settings", json={"concurrency.max": 2, "pdf.mode": "pypdf"})
         assert r.status_code == 200, r.text
         updated = r.json()["updated"]
         assert "concurrency.max" in updated and "pdf.mode" in updated
-        # 已落库
-        assert _svc().repo.get_setting("concurrency.max") == "2"
-        assert _svc().repo.get_setting("pdf.mode") == "mineru"
+        settings_path = Path(os.environ["DATA_ROOT"]) / "config" / "settings.json"
+        assert settings_path.exists()
+        stored = __import__("json").loads(settings_path.read_text(encoding="utf-8"))
+        assert stored["settings"]["concurrency.max"] == "2"
+        assert _svc().repo.get_setting("concurrency.max") is None
 
     def test_put_invalid_concurrency_rejected(self, client):
         r = client.put("/api/v1/settings", json={"concurrency.max": 9})
         assert r.status_code == 400
-        # 非法值不落库
-        assert _svc().repo.get_setting("concurrency.max") in (None, "1")
+        current = client.get("/api/v1/settings").json()["settings"]
+        assert current["concurrency.max"] == "1"
 
     def test_put_invalid_enum_rejected(self, client):
         r = client.put("/api/v1/settings", json={"pdf.mode": "weird"})
         assert r.status_code == 400
+        detail = client.put(
+            "/api/v1/settings", json={"note.detail_level": "encyclopedic"}
+        )
+        assert detail.status_code == 400
 
-    def test_put_credential_mask_not_clobbered(self, client):
-        repo = _svc().repo
-        repo.set_setting("llm.credentials", '{"deepseek": {"api_key": "sk-real"}}')
-        # 前端把脱敏值原样回传 → 跳过,不覆盖
-        r = client.put("/api/v1/settings", json={"llm.credentials": "***"})
-        assert r.status_code == 200
-        assert repo.get_setting("llm.credentials") == '{"deepseek": {"api_key": "sk-real"}}'
+    def test_put_asr_config_scalar_rejected(self, client):
+        r = client.put("/api/v1/settings", json={"asr.config": "not-an-object"})
+        assert r.status_code == 400
 
-    def test_put_credentials_as_dict(self, client):
+    def test_put_unknown_provider_rejected(self, client):
+        r = client.put("/api/v1/settings", json={"llm.provider": "not-a-provider"})
+        assert r.status_code == 400
+
+    def test_put_is_atomic_when_one_field_is_invalid(self, client):
+        assert client.put("/api/v1/settings", json={"concurrency.max": 2}).status_code == 200
         r = client.put(
             "/api/v1/settings",
-            json={"llm.credentials": {"deepseek": {"api_key": "sk-new"}}},
+            json={"concurrency.max": 3, "advanced.temperature": 8},
+        )
+        assert r.status_code == 400
+        current = client.get("/api/v1/settings").json()["settings"]
+        assert current["concurrency.max"] == "2"
+
+    def test_provider_profile_is_editable_and_validated(self, client):
+        r = client.put(
+            "/api/v1/settings",
+            json={
+                "llm.providers": {
+                    "deepseek": {
+                        "model": "my-model",
+                        "base_url": "https://llm.example.test/v1",
+                        "timeout": 45,
+                    }
+                }
+            },
         )
         assert r.status_code == 200, r.text
-        import json as _json
+        profile = r.json()["profiles"]["deepseek"]
+        assert profile["model"] == "my-model"
+        assert profile["base_url"] == "https://llm.example.test/v1"
+        assert profile["timeout"] == 45
 
-        stored = _json.loads(_svc().repo.get_setting("llm.credentials"))
-        assert stored["deepseek"]["api_key"] == "sk-new"
+        invalid = client.put(
+            "/api/v1/settings",
+            json={"llm.providers": {"custom": {"model": "", "base_url": "javascript:x"}}},
+        )
+        assert invalid.status_code == 400
+
+    def test_credential_save_reveal_clear_and_no_store(self, client):
+        saved = client.put(
+            "/api/v1/settings/credentials",
+            json={"provider": "qwen", "field": "api_key", "value": "sk-visible-on-demand"},
+        )
+        assert saved.status_code == 200, saved.text
+        assert saved.json()["state"]["configured"] is True
+
+        reveal = client.post(
+            "/api/v1/settings/credentials/reveal",
+            json={"provider": "qwen", "field": "api_key"},
+        )
+        assert reveal.status_code == 200
+        assert reveal.json() == {"value": "sk-visible-on-demand"}
+        assert "no-store" in reveal.headers["cache-control"]
+
+        cleared = client.delete("/api/v1/settings/credentials/qwen/api_key")
+        assert cleared.status_code == 200
+        assert cleared.json()["state"]["configured"] is False
+        missing = client.post(
+            "/api/v1/settings/credentials/reveal",
+            json={"provider": "qwen", "field": "api_key"},
+        )
+        assert missing.status_code == 404
+
+    def test_credential_field_whitelist_rejects_illegal_field(self, client):
+        saved = client.put(
+            "/api/v1/settings/credentials",
+            json={
+                "provider": "deepseek",
+                "field": "base_url",
+                "value": "https://attacker.invalid",
+            },
+        )
+        revealed = client.post(
+            "/api/v1/settings/credentials/reveal",
+            json={"provider": "deepseek", "field": "base_url"},
+        )
+        assert saved.status_code == 400
+        assert revealed.status_code == 400
+
+    def test_empty_credential_does_not_overwrite_existing(self, client):
+        client.put(
+            "/api/v1/settings/credentials",
+            json={"provider": "glm", "field": "api_key", "value": "keep-me"},
+        )
+        r = client.put(
+            "/api/v1/settings/credentials",
+            json={"provider": "glm", "field": "api_key", "value": ""},
+        )
+        assert r.status_code == 200
+        reveal = client.post(
+            "/api/v1/settings/credentials/reveal",
+            json={"provider": "glm", "field": "api_key"},
+        )
+        assert reveal.json()["value"] == "keep-me"
+
+    def test_llm_connection_test_uses_saved_profile_and_secret(self, client, monkeypatch):
+        client.put(
+            "/api/v1/settings/credentials",
+            json={"provider": "deepseek", "field": "api_key", "value": "sk-connect"},
+        )
+        client.put(
+            "/api/v1/settings",
+            json={
+                "llm.providers": {
+                    "deepseek": {
+                        "model": "test-model",
+                        "base_url": "https://llm.example.test/v1",
+                        "timeout": 15,
+                    }
+                }
+            },
+        )
+        captured = {}
+
+        class FakeLLM:
+            def chat(self, messages, **kwargs):
+                captured["messages"] = messages
+                captured["chat_kwargs"] = kwargs
+                return "OK"
+
+        def fake_create(provider, config):
+            captured["provider"] = provider
+            captured["config"] = config
+            return FakeLLM()
+
+        monkeypatch.setattr(settings_api.LLMFactory, "create", fake_create)
+        r = client.post("/api/v1/settings/llm/test", json={"provider": "deepseek"})
+
+        assert r.status_code == 200, r.text
+        assert r.json()["ok"] is True
+        assert captured["provider"] == "deepseek"
+        assert captured["config"]["api_key"] == "sk-connect"
+        assert captured["config"]["model"] == "test-model"
+        assert captured["config"]["base_url"] == "https://llm.example.test/v1"
+        assert captured["config"]["timeout"] == 15
+        assert captured["chat_kwargs"]["max_tokens"] <= 8
+
+    @pytest.mark.parametrize(
+        ("error", "category"),
+        [
+            (TimeoutError("request timed out"), "timeout"),
+            (RuntimeError("401 Unauthorized sk-secret-must-not-leak"), "authentication"),
+        ],
+    )
+    def test_llm_connection_failure_is_categorized_and_sanitized(
+        self, client, monkeypatch, error, category
+    ):
+        client.put(
+            "/api/v1/settings/credentials",
+            json={
+                "provider": "qwen",
+                "field": "api_key",
+                "value": "sk-secret-must-not-leak",
+            },
+        )
+
+        class FailingLLM:
+            def chat(self, _messages, **_kwargs):
+                raise error
+
+        monkeypatch.setattr(
+            settings_api.LLMFactory,
+            "create",
+            lambda _provider, _config: FailingLLM(),
+        )
+        r = client.post("/api/v1/settings/llm/test", json={"provider": "qwen"})
+        assert r.status_code == 200
+        assert r.json()["ok"] is False
+        assert r.json()["category"] == category
+        assert "sk-secret-must-not-leak" not in r.text
 
 
 # --------------------------------------------------------------------------- #
@@ -152,12 +341,16 @@ class TestTasksCrud:
     def test_create_online(self, client):
         r = client.post(
             "/api/v1/tasks",
-            data={"source_url": "https://www.youtube.com/watch?v=abc123"},
+            data={
+                "source_url": "https://www.youtube.com/watch?v=abc123",
+                "note_detail_level": "detailed",
+            },
         )
         assert r.status_code == 201, r.text
         task = r.json()
         assert task["source_type"] == "youtube"
         assert task["status"] == "pending"
+        assert task["note_detail_level"] == "detailed"
         assert task["id"].startswith("task_")
         tid = task["id"]
 
@@ -168,6 +361,42 @@ class TestTasksCrud:
 
     def test_create_unrecognized_400(self, client):
         r = client.post("/api/v1/tasks", data={"source_url": "totally not a url"})
+        assert r.status_code == 400
+
+    def test_create_local_media_upload(self, client):
+        r = client.post(
+            "/api/v1/tasks",
+            files={"file": ("clip.mp4", b"\x00\x00\x00\x20ftyp-test", "video/mp4")},
+        )
+        assert r.status_code == 201, r.text
+        task = r.json()
+        assert task["source_type"] == "local_video"
+        staging = _svc().data_root / "temp" / "_staging"
+        assert not list(staging.glob("*"))
+
+    def test_rejects_unsupported_upload(self, client):
+        r = client.post(
+            "/api/v1/tasks",
+            files={"file": ("notes.txt", b"not media", "text/plain")},
+        )
+        assert r.status_code == 400
+
+    def test_rejects_oversized_upload(self, client, monkeypatch):
+        monkeypatch.setattr(tasks_api, "MAX_MEDIA_UPLOAD_BYTES", 4)
+        r = client.post(
+            "/api/v1/tasks",
+            files={"file": ("clip.mp4", b"12345", "video/mp4")},
+        )
+        assert r.status_code == 400
+        staging = _svc().data_root / "temp" / "_staging"
+        assert not list(staging.glob("*"))
+
+    def test_rejects_fake_pdf(self, client):
+        r = client.post(
+            "/api/v1/tasks",
+            data={"source_url": "https://youtu.be/pdf-test"},
+            files={"pdf": ("lecture.pdf", b"not a pdf", "application/pdf")},
+        )
         assert r.status_code == 400
 
     def test_get_missing_404(self, client):
@@ -295,6 +524,7 @@ class TestStream:
     def test_stream_missing_task(self, client):
         r = client.get("/api/v1/tasks/task_missing000/stream")
         assert r.status_code == 200
+        assert "event: task-missing" in r.text
         assert "task-missing" in r.text
 
     def test_stream_terminal_task(self, client):
@@ -304,6 +534,8 @@ class TestStream:
         _svc().repo.update(tid, status=TaskStatus.COMPLETED.value, progress=100)
         r = client.get(f"/api/v1/tasks/{tid}/stream")
         assert r.status_code == 200
+        assert "event: snapshot" in r.text
+        assert "event: task-completed" in r.text
         assert "snapshot" in r.text
         assert "task-completed" in r.text
 
@@ -338,19 +570,149 @@ class TestBatch:
 # asr:status / test(openspec change asr-management-page)
 # --------------------------------------------------------------------------- #
 class TestAsr:
+    def test_legacy_model_path_is_normalized_before_asr_form_round_trip(
+        self, client
+    ):
+        settings_api.SettingsStore().write(
+            {"asr.config": {"model_path": "/app/data/models/legacy-whisper"}}
+        )
+
+        current = client.get("/api/v1/settings")
+        assert current.status_code == 200
+        asr_config = current.json()["settings"]["asr.config"]
+        assert asr_config["whisper_model_path"] == "/app/data/models/legacy-whisper"
+        assert "model_path" not in asr_config
+
+        saved = client.put(
+            "/api/v1/settings",
+            json={"asr.engine": "whisper_cpp", "asr.config": asr_config},
+        )
+        assert saved.status_code == 200, saved.text
+        stored = settings_api.SettingsStore().read()["asr.config"]
+        assert stored["whisper_model_path"] == "/app/data/models/legacy-whisper"
+        assert "model_path" not in stored
+
+    def test_asr_config_is_validated_atomically_and_external_key_is_encrypted(
+        self, client
+    ):
+        valid = {
+            "whisper_model_path": "/app/data/models/ggml-small.bin",
+            "whisper_binary": "/usr/local/bin/whisper-cli",
+            "whisper_language": "zh",
+            "external_endpoint": "https://asr.example.test/v1/transcribe",
+            "external_timeout": 45,
+            "vad_threshold_seconds": 240,
+            "vad_target_segment_seconds": 90,
+            "concurrency": 2,
+            "request_timeout": 180,
+        }
+        saved = client.put("/api/v1/settings", json={"asr.config": valid})
+        assert saved.status_code == 200, saved.text
+        key_saved = client.put(
+            "/api/v1/settings/credentials",
+            json={
+                "provider": "external_asr",
+                "field": "api_key",
+                "value": "asr-encrypted-key",
+            },
+        )
+        assert key_saved.status_code == 200
+        body = client.get("/api/v1/settings").json()
+        assert body["settings"]["asr.config"]["concurrency"] == 2
+        assert body["sensitive"]["external_asr"]["api_key"]["configured"] is True
+        public_file = (
+            Path(os.environ["DATA_ROOT"]) / "config" / "settings.json"
+        ).read_text(encoding="utf-8")
+        encrypted_file = (
+            Path(os.environ["DATA_ROOT"]) / "config" / "credentials.enc"
+        ).read_bytes()
+        assert "asr-encrypted-key" not in public_file
+        assert b"asr-encrypted-key" not in encrypted_file
+
+        invalid = client.put(
+            "/api/v1/settings",
+            json={
+                "asr.config": {"vad_threshold_seconds": 5},
+                "asr.engine": "external",
+            },
+        )
+        assert invalid.status_code == 400
+        after = client.get("/api/v1/settings").json()["settings"]
+        assert after["asr.engine"] == "bcut"
+        assert after["asr.config"]["vad_threshold_seconds"] == 240
+
+    @pytest.mark.parametrize(
+        "bad_config",
+        [
+            {"external_endpoint": "file:///etc/passwd"},
+            {"external_timeout": 0},
+            {"concurrency": 9},
+            {"vad_target_segment_seconds": 5},
+            {"whisper_device": "cuda"},
+            {"whisper_compute_type": "float16"},
+        ],
+    )
+    def test_asr_config_rejects_invalid_fields(self, client, bad_config):
+        r = client.put("/api/v1/settings", json={"asr.config": bad_config})
+        assert r.status_code == 400
+
     def test_status_three_engines(self, client):
+        client.put(
+            "/api/v1/settings",
+            json={
+                "asr.engine": "external",
+                "asr.strategy": "single",
+                "asr.config": {
+                    "whisper_model_path": "/missing/model.bin",
+                    "whisper_binary": "/missing/whisper-cli",
+                    "whisper_language": "en",
+                    "external_endpoint": "https://asr.example.test/v1",
+                    "external_timeout": 33,
+                    "vad_threshold_seconds": 360,
+                    "vad_target_segment_seconds": 120,
+                    "concurrency": 2,
+                },
+            },
+        )
         r = client.get("/api/v1/asr/status")
         assert r.status_code == 200
         d = r.json()
-        assert {"asrtools", "whisper_cpp", "external"} <= set(d.keys())
-        assert d["asrtools"]["available"] is True
-        assert d["asrtools"]["provider"] == "bcut"  # 默认 provider 改为必剪
+        assert {"bcut", "whisper_cpp", "external"} <= set(d.keys())
+        assert d["bcut"]["available"] is True
+        assert d["bcut"]["experimental"] is True
         assert "model_exists" in d["whisper_cpp"]
+        assert d["whisper_cpp"]["binary_exists"] is False
+        assert d["whisper_cpp"]["language"] == "en"
         assert "endpoint_configured" in d["external"]
+        assert "endpoint" not in d["external"]
+        assert d["external"]["endpoint_host"] == "asr.example.test"
+        assert d["external"]["timeout"] == 33
+        assert d["selection"] == {"engine": "external", "strategy": "single"}
+        assert d["vad"]["threshold_seconds"] == 360
+        assert d["vad"]["target_segment_seconds"] == 120
+        assert d["vad"]["concurrency"] == 2
 
     def test_test_bad_engine_400(self, client):
         r = client.post("/api/v1/asr/test", json={"engine": "nope"})
         assert r.status_code == 400
+
+    def test_test_bcut_uses_bilibili_probe(self, client, monkeypatch):
+        calls = []
+
+        class ProbeResponse:
+            status_code = 200
+
+        def fake_get(url, **kwargs):
+            calls.append((url, kwargs))
+            return ProbeResponse()
+
+        monkeypatch.setattr(asr_api.requests, "get", fake_get)
+        r = client.post("/api/v1/asr/test", json={"engine": "bcut"})
+        assert r.status_code == 200
+        assert r.json()["ok"] is True
+        assert r.json()["message"] == "bcut 可达"
+        assert calls[0][0] == asr_api._BCUT_PROBE_URL
+        assert calls[0][1]["allow_redirects"] is False
 
     def test_test_whisper_missing_model(self, client):
         # 默认未配置 whisper 模型 → ok=False(不发网络)

@@ -13,6 +13,8 @@ from .baidu import BaiduLLM
 from .doubao import DoubaoLLM
 from .minimax import MiniMaxLLM
 from .mock import MockLLM
+from .ollama import OllamaLLM
+from .custom import CustomLLM
 
 
 class LLMFactory:
@@ -26,6 +28,8 @@ class LLMFactory:
         "baidu": BaiduLLM,
         "doubao": DoubaoLLM,
         "minimax": MiniMaxLLM,
+        "ollama": OllamaLLM,
+        "custom": CustomLLM,
         "mock": MockLLM,
     }
     

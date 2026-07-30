@@ -1,7 +1,7 @@
 """
 vid2note 内核门面(Kernel Facade)
 =================================
-v1 所有新增模块(media_ingest / speech_to_text / screenshot / pdf_reference /
+v1 所有新增模块(media_ingest / speech_to_text / screenshot /
 pipeline.dag / retention / SSE 层等)**必须**从 `core.kernel` 导入内核能力,
 不得直接 import 内核各包内部 —— 以保证内核边界稳定,并便于日后从上游 ai_srt2md
 cherry-pick 内核修复(LLM 适配 / prompt / SimpleProcessor 等)。
@@ -28,7 +28,7 @@ from ..generator import MarkdownGenerator, MarkdownOutput
 from ..task_queue import TaskQueue, get_task_queue
 from ..worker import TaskWorker, get_task_worker, start_worker, stop_worker
 
-# LLM 适配(8 家,OpenAI 兼容)
+# LLM 适配(8 家统一门面)
 from ...llm import BaseLLM, LLMFactory
 
 # 输入解析(SRT / PDF)

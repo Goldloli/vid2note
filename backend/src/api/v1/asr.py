@@ -1,7 +1,7 @@
 """``GET/POST /api/v1/asr`` —— ASR 引擎状态与连通性测试(openspec change asr-management-page)。
 
 - ``GET /asr/status``:三引擎就绪态(读 settings + 文件系统检查,无副作用,秒回)。
-- ``POST /asr/test {engine}``:连通性测试——线上免费接口探活签名服务 / whisper 检查模型 / external
+- ``POST /asr/test {engine}``:连通性测试——bcut 探活 / whisper 检查模型 / external
   探活 endpoint,统一返回 ``{ok, latency_ms, message}``。**不做真实音频转录**(v1 边界)。
 
 端点用同步 ``def``(非 async):内部用同步 ``requests``,FastAPI 自动放线程池执行,不阻塞事件循环。
@@ -11,19 +11,22 @@ from __future__ import annotations
 import os
 import time
 from typing import Any, Dict, Tuple
+from urllib.parse import urlparse
 
 import requests
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from src.runtime.settings import get_settings_snapshot
+from src.core.kernel import logger
+from src.runtime.settings import get_external_asr_api_key, get_settings_snapshot
 from src.runtime.task_service import get_task_service
 from src.speech_to_text.pipeline import AsrConfig
 
 router = APIRouter(prefix="/asr", tags=["asr"])
 
-_ENGINES = frozenset({"asrtools", "whisper_cpp", "external"})
+_ENGINES = frozenset({"bcut", "whisper_cpp", "external"})
 _PROBE_TIMEOUT = 8.0
+_BCUT_PROBE_URL = "https://member.bilibili.com"
 
 
 class AsrTestRequest(BaseModel):
@@ -31,9 +34,11 @@ class AsrTestRequest(BaseModel):
 
 
 def _asr_config() -> AsrConfig:
-    """从 SQLite settings 快照构造当前 ASR 配置。"""
+    """从文件设置与加密凭证构造当前 ASR 配置。"""
     repo = get_task_service().repo
-    return AsrConfig.from_settings(get_settings_snapshot(repo))
+    config = AsrConfig.from_settings(get_settings_snapshot(repo))
+    config.external_api_key = get_external_asr_api_key()
+    return config
 
 
 @router.get("/status")
@@ -41,22 +46,41 @@ def asr_status() -> Dict[str, Any]:
     """三引擎就绪态(无副作用)。"""
     cfg = _asr_config()
     model_exists = bool(cfg.whisper_model_path) and os.path.exists(cfg.whisper_model_path)
+    binary_exists = bool(cfg.whisper_binary) and os.path.exists(cfg.whisper_binary)
     endpoint_configured = bool(cfg.external_endpoint)
+    endpoint_host = urlparse(cfg.external_endpoint).hostname or ""
     return {
-        "asrtools": {
+        "selection": {
+            "engine": cfg.engine,
+            "strategy": cfg.strategy,
+        },
+        "bcut": {
             "available": True,  # 在线引擎恒可用,实际可达性由 /test 探活
-            "provider": cfg.asrtools_provider,
-            "sign_endpoint": cfg.asrtools_sign_endpoint,
+            "experimental": True,
+            "timeout": cfg.bcut_timeout,
         },
         "whisper_cpp": {
             "available": model_exists,
             "model_exists": model_exists,
             "model_path": cfg.whisper_model_path,
+            "binary_exists": binary_exists,
+            "binary_path": cfg.whisper_binary,
+            "language": cfg.whisper_language,
+            "device": cfg.whisper_device,
+            "compute_type": cfg.whisper_compute_type,
         },
         "external": {
             "available": endpoint_configured,
             "endpoint_configured": endpoint_configured,
-            "endpoint": cfg.external_endpoint or "",
+            "endpoint_host": endpoint_host,
+            "api_key_configured": bool(cfg.external_api_key),
+            "timeout": cfg.external_timeout,
+        },
+        "vad": {
+            "threshold_seconds": cfg.vad_threshold_seconds,
+            "target_segment_seconds": cfg.vad_target_segment_seconds,
+            "concurrency": cfg.concurrency,
+            "request_timeout": cfg.request_timeout,
         },
     }
 
@@ -66,18 +90,19 @@ def asr_test(req: AsrTestRequest) -> Dict[str, Any]:
     """连通性测试(非真实转录):探活 / 模型可加载,返回 {ok, latency_ms, message}。"""
     engine = (req.engine or "").strip().lower()
     if engine not in _ENGINES:
-        raise HTTPException(status_code=400, detail=f"不支持的引擎:{engine}(允许 asrtools/whisper_cpp/external)")
+        raise HTTPException(status_code=400, detail=f"不支持的引擎:{engine}(允许 bcut/whisper_cpp/external)")
     cfg = _asr_config()
     start = time.perf_counter()
     try:
-        if engine == "asrtools":
-            ok, msg = _probe_online(cfg)
+        if engine == "bcut":
+            ok, msg = _probe_bcut()
         elif engine == "whisper_cpp":
             ok, msg = _probe_whisper(cfg)
         else:
             ok, msg = _probe_external(cfg)
-    except Exception as e:  # noqa: BLE001 - 探活任何异常都转为失败结果,不抛 500
-        ok, msg = False, f"测试异常:{e}"
+    except Exception:  # noqa: BLE001 - 探活任何异常都转为失败结果,不抛 500
+        logger.exception("ASR 连通性测试异常 engine=%s", engine)
+        ok, msg = False, "连通性测试失败，请查看服务端日志"
     return {
         "engine": engine,
         "ok": ok,
@@ -86,22 +111,24 @@ def asr_test(req: AsrTestRequest) -> Dict[str, Any]:
     }
 
 
-def _probe_online(cfg: AsrConfig) -> Tuple[bool, str]:
-    """对线上免费接口签名服务发轻量 POST 探活(不传音频)。"""
-    data = {"url": "/", "current_time": str(int(time.time())), "pf": "4", "appvr": "4.0.0", "tdid": "0" * 12}
+def _probe_bcut() -> Tuple[bool, str]:
+    """不上传音频的 bcut 轻量探活。"""
     try:
-        resp = requests.post(cfg.asrtools_sign_endpoint, json=data, timeout=_PROBE_TIMEOUT)
+        resp = requests.get(
+            _BCUT_PROBE_URL,
+            timeout=_PROBE_TIMEOUT,
+            allow_redirects=False,
+        )
     except requests.exceptions.Timeout:
-        return False, "线上免费接口签名服务超时(>8s)"
-    except requests.exceptions.RequestException as e:
-        return False, f"线上免费接口签名服务不可达:{e}"
-    if resp.status_code != 200:
-        return False, f"签名服务返回 HTTP {resp.status_code}"
-    try:
-        has_sign = bool(resp.json().get("sign"))
-    except ValueError:
-        return False, "签名服务响应非 JSON"
-    return (True, "线上免费接口可达") if has_sign else (False, "签名服务未返回 sign")
+        return False, "bcut 超时(>8s)"
+    except requests.exceptions.RequestException:
+        logger.warning("bcut 探活失败", exc_info=True)
+        return False, "bcut 不可达"
+    return (
+        (True, "bcut 可达")
+        if resp.status_code < 500
+        else (False, f"bcut 返回 HTTP {resp.status_code}")
+    )
 
 
 def _probe_whisper(cfg: AsrConfig) -> Tuple[bool, str]:
@@ -120,7 +147,8 @@ def _probe_external(cfg: AsrConfig) -> Tuple[bool, str]:
         resp = requests.get(cfg.external_endpoint, headers=headers, timeout=_PROBE_TIMEOUT)
     except requests.exceptions.Timeout:
         return False, "外部 endpoint 超时(>8s)"
-    except requests.exceptions.RequestException as e:
-        return False, f"外部 endpoint 不可达:{e}"
+    except requests.exceptions.RequestException:
+        logger.warning("外部 ASR endpoint 探活失败", exc_info=True)
+        return False, "外部 endpoint 不可达"
     # 连通即视为可达(外部服务健康路径各异,不强求 200)
     return True, f"外部 endpoint 可达(HTTP {resp.status_code})"

@@ -156,10 +156,11 @@ class Task:
     # ---- 引擎与生成选项 ----
     llm_provider: Optional[str] = None                # qwen/glm/deepseek/...
     llm_model: Optional[str] = None                   # 如 deepseek-v4-flash
-    asr_engine: Optional[str] = None                  # asrtools/whisper_cpp/external
-    pdf_mode: str = "pypdf"                           # pypdf / mineru
+    asr_engine: Optional[str] = None                  # bcut/whisper_cpp/external
+    pdf_mode: str = "pypdf"                           # 基础 PDF 文本提取
     extract_images: bool = False                      # 截图嵌入开关(默认关)
     output_language: str = "zh"                       # zh / en
+    note_detail_level: str = "balanced"               # concise/balanced/detailed/exhaustive
     mindmap_formats: List[str] = field(default_factory=lambda: ["xmind"])
 
     # ---- 队列 ----
@@ -201,6 +202,7 @@ class Task:
             "pdf_mode": self.pdf_mode,
             "extract_images": self.extract_images,
             "output_language": self.output_language,
+            "note_detail_level": self.note_detail_level,
             "mindmap_formats": list(self.mindmap_formats),
             "queue_position": self.queue_position,
             "error": self.error,
@@ -244,6 +246,7 @@ class Task:
             pdf_mode=data.get("pdf_mode") or "pypdf",
             extract_images=bool(data.get("extract_images", False)),
             output_language=data.get("output_language") or "zh",
+            note_detail_level=data.get("note_detail_level") or "balanced",
             mindmap_formats=list(data.get("mindmap_formats") or ["xmind"]),
             queue_position=data.get("queue_position"),
             error=data.get("error"),
@@ -292,6 +295,7 @@ class Task:
             pdf_mode=get_value("pdf_mode") or "pypdf",
             extract_images=bool(get_value("extract_images", False)),
             output_language=get_value("output_language") or "zh",
+            note_detail_level=get_value("note_detail_level") or "balanced",
             mindmap_formats=_safe_json_loads(get_value("mindmap_formats"), ["xmind"]) or ["xmind"],
             queue_position=get_value("queue_position"),
             error=get_value("error"),

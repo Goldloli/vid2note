@@ -31,13 +31,20 @@ from src.utils.security import secure_filename
 
 from .adapters import get_cancel_registry
 from .runner import _default_data_root
-from .settings import get_settings_snapshot
+from .settings import SUPPORTED_LLM_PROVIDERS, default_model_for, get_settings_snapshot
 from .worker import enqueue, get_worker, mark_skip
 
 
 _RUNNING = TaskStatus.RUNNING.value
 _PENDING = TaskStatus.PENDING.value
 _CANCELLED = TaskStatus.CANCELLED.value
+_SUPPORTED_ASR_ENGINES = frozenset({"bcut", "whisper_cpp", "external"})
+_SUPPORTED_PDF_MODES = frozenset({"pypdf"})
+_SUPPORTED_OUTPUT_LANGUAGES = frozenset({"zh", "en"})
+_SUPPORTED_NOTE_DETAIL_LEVELS = frozenset(
+    {"concise", "balanced", "detailed", "exhaustive"}
+)
+_SUPPORTED_MINDMAP_FORMATS = frozenset({"xmind", "png", "md"})
 
 
 def _as_bool(value: Any) -> bool:
@@ -91,6 +98,7 @@ class TaskService:
         pdf_mode: Optional[str] = None,
         extract_images: Optional[bool] = None,
         output_language: Optional[str] = None,
+        note_detail_level: Optional[str] = None,
         mindmap_formats: Optional[List[str]] = None,
         pdf_path: Optional[str] = None,
     ) -> Task:
@@ -115,14 +123,43 @@ class TaskService:
         task_id = _new_task_id()
 
         # 引擎选项缺省值(契约 §3.2 / §4.1)
-        llm_provider = (llm_provider or snapshot.get("llm.provider") or "deepseek").strip().lower()
-        llm_model = (llm_model or snapshot.get("llm.model") or "deepseek-v4-flash").strip()
-        asr_engine = (asr_engine or snapshot.get("asr.engine") or "asrtools").strip().lower()
+        requested_provider = llm_provider
+        llm_provider = (requested_provider or snapshot.get("llm.provider") or "deepseek").strip().lower()
+        if llm_provider not in SUPPORTED_LLM_PROVIDERS:
+            raise ValueError(f"不支持的 LLM 提供商：{llm_provider}")
+        if llm_model:
+            llm_model = llm_model.strip()
+        elif requested_provider and llm_provider != snapshot.get("llm.provider"):
+            llm_model = default_model_for(llm_provider)
+        else:
+            llm_model = (
+                snapshot.get("llm.model") or default_model_for(llm_provider)
+            ).strip()
+        if not llm_model:
+            raise ValueError("LLM 模型名不能为空")
+        asr_engine = (asr_engine or snapshot.get("asr.engine") or "bcut").strip().lower()
+        if asr_engine not in _SUPPORTED_ASR_ENGINES:
+            raise ValueError(f"不支持的 ASR 引擎：{asr_engine}")
         pdf_mode = (pdf_mode or snapshot.get("pdf.mode") or "pypdf").strip().lower()
+        if pdf_mode not in _SUPPORTED_PDF_MODES:
+            raise ValueError(f"不支持的 PDF 模式：{pdf_mode}")
         if extract_images is None:
             extract_images = _as_bool(snapshot.get("note.extract_images"))
         output_language = (output_language or snapshot.get("note.output_language") or "zh").strip().lower()
+        if output_language not in _SUPPORTED_OUTPUT_LANGUAGES:
+            raise ValueError(f"不支持的输出语言：{output_language}")
+        note_detail_level = (
+            note_detail_level
+            or snapshot.get("note.detail_level")
+            or "balanced"
+        ).strip().lower()
+        if note_detail_level not in _SUPPORTED_NOTE_DETAIL_LEVELS:
+            raise ValueError(f"不支持的笔记详细程度：{note_detail_level}")
         mindmap_formats = list(mindmap_formats) if mindmap_formats else ["xmind", "png", "md"]
+        mindmap_formats = list(dict.fromkeys(str(item).strip().lower() for item in mindmap_formats))
+        invalid_formats = set(mindmap_formats) - _SUPPORTED_MINDMAP_FORMATS
+        if invalid_formats:
+            raise ValueError(f"不支持的思维导图格式：{', '.join(sorted(invalid_formats))}")
 
         resolved_title = title
         if uploaded is not None and not resolved_title:
@@ -140,6 +177,7 @@ class TaskService:
             pdf_mode=pdf_mode,
             extract_images=bool(extract_images),
             output_language=output_language,
+            note_detail_level=note_detail_level,
             mindmap_formats=mindmap_formats,
             pdf_path=str(pdf_path) if pdf_path else None,
         )
@@ -385,10 +423,11 @@ class TaskService:
             status=TaskStatus.PENDING,
             llm_provider=src.llm_provider or snapshot.get("llm.provider") or "deepseek",
             llm_model=src.llm_model or snapshot.get("llm.model") or "deepseek-v4-flash",
-            asr_engine=src.asr_engine or snapshot.get("asr.engine") or "asrtools",
+            asr_engine=src.asr_engine or snapshot.get("asr.engine") or "bcut",
             pdf_mode=src.pdf_mode or "pypdf",
             extract_images=bool(src.extract_images),
             output_language=src.output_language or "zh",
+            note_detail_level=src.note_detail_level or "balanced",
             mindmap_formats=list(src.mindmap_formats or ["xmind", "png", "md"]),
             pdf_path=src.pdf_path,
         )

@@ -5,6 +5,10 @@ api.interceptors.response.use(r => r.data, e => Promise.reject(new Error(e.respo
 export const health = () => api.get('/health')
 export const getSettings = () => api.get('/settings')
 export const putSettings = (data) => api.put('/settings', data)
+export const saveCredential = (provider, field, value) => api.put('/settings/credentials', { provider, field, value })
+export const revealCredential = (provider, field) => api.post('/settings/credentials/reveal', { provider, field })
+export const clearCredential = (provider, field) => api.delete(`/settings/credentials/${encodeURIComponent(provider)}/${encodeURIComponent(field)}`)
+export const testLlm = (provider) => api.post('/settings/llm/test', { provider })
 export const storageStats = () => api.get('/storage/stats')
 
 export const createTask = (payload) => {

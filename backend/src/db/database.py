@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     pdf_mode         TEXT DEFAULT 'pypdf',
     extract_images   BOOLEAN DEFAULT 0,
     output_language  TEXT DEFAULT 'zh',
+    note_detail_level TEXT NOT NULL DEFAULT 'balanced',
     mindmap_formats  TEXT DEFAULT '["xmind"]', -- JSON 数组
     queue_position   INTEGER,
     error            TEXT,
@@ -190,6 +191,11 @@ class Database:
                 # 旧 schema → DROP(连同其索引一并丢弃),由后续 CREATE 重建为新 schema
                 cursor.execute("DROP TABLE IF EXISTS tasks")
                 print("[Database] 检测到旧 tasks schema,已 DROP,将以 v1 新 schema 重建")
+            elif existing_cols and "note_detail_level" not in existing_cols:
+                cursor.execute(
+                    "ALTER TABLE tasks ADD COLUMN note_detail_level "
+                    "TEXT NOT NULL DEFAULT 'balanced'"
+                )
 
             # 确保 settings 表存在(幂等)
             cursor.execute(_SETTINGS_DDL)

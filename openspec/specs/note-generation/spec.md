@@ -1,7 +1,7 @@
 # note-generation Specification
 
 ## Purpose
-TBD - created by archiving change build-vid2note-v1. Update Purpose after archive.
+定义从 ASR 字幕与可选讲义生成结构化 Markdown 笔记和截图嵌入的行为。约束 LLM 配置、提示词安全、详细程度与输出产物的一致性。
 ## Requirements
 ### Requirement: 输入输出契约
 
@@ -72,27 +72,61 @@ note-generation capability 的核心契约是:消费上游 ASR 步骤产出的�
 
 ### Requirement: 8 家 LLM 适配与引擎、模型可配
 
-该 capability SHALL 通过 OpenAI 兼容协议适配 8 家 LLM(基底 ai_srt2md 的 7 家云端:通义千问 / 智谱 GLM / DeepSeek / 月之暗面 Moonshot / 百度文心 / 字节豆包 / MiniMax,加上本地 Ollama)。默认 LLM 引擎 MUST 为 DeepSeek、默认模型 MUST 为 `deepseek-v4-flash`。引擎(provider)与模型(model)SHALL 在设置页可配,且配置变更 MUST 仅作用于其后新建的任务,不得回溯重跑历史任务已生成的笔记。
+该 capability SHALL 通过统一的 `BaseLLM` 门面适配 8 家内置 LLM（DeepSeek / 通义千问 / 智谱 GLM / Moonshot-Kimi / 百度千帆 / 豆包 / MiniMax / Ollama）以及一个 `custom` OpenAI Chat Completions 兼容槽位。默认 LLM 引擎 MUST 为 DeepSeek、默认模型 MUST 为 `deepseek-v4-flash`。每个 provider 的模型、Base URL 与凭证 SHALL 独立可配，用户填写的非空模型 ID MUST 优先于内置建议值；配置变更 MUST 仅作用于其后新建的任务，不得回溯覆盖历史笔记。
 
 #### Scenario: 默认引擎与模型为 DeepSeek deepseek-v4-flash
 
 - **WHEN** 用户从未修改 LLM 引擎与模型设置而创建笔记生成任务
 - **THEN** 该 capability MUST 使用 DeepSeek 引擎与 `deepseek-v4-flash` 模型完成笔记生成
 
-#### Scenario: 设置切换引擎与模型
+#### Scenario: 设置切换引擎与自定义模型
 
-- **WHEN** 用户在设置页将 LLM 引擎切换为另一家(如通义千问)并指定具体模型后新建任务
-- **THEN** 该 capability MUST 使用切换后的引擎与模型完成笔记生成,且 MUST 通过 OpenAI 兼容协议调用
+- **WHEN** 用户把 Qwen 模型改为一个有效的自定义模型 ID、设为默认并新建任务
+- **THEN** 该 capability MUST 通过 Qwen 适配器使用用户填写的精确模型 ID，MUST NOT 回退内置建议模型
 
-#### Scenario: 8 家适配均走 OpenAI 兼容协议
+#### Scenario: 九种槽位均走统一门面
 
-- **WHEN** 笔记生成在 8 家中任意一家引擎下运行
-- **THEN** 该引擎的调用 MUST 走 OpenAI 兼容协议(统一的 chat completions 风格接口),不得为某一家单独实现私有协议分支
+- **WHEN** 笔记生成在任一内置 provider 或 `custom` 下运行
+- **THEN** 调用方 MUST 只依赖统一的 `BaseLLM` 门面，provider 的协议差异 MUST 封装在适配器内部
+
+#### Scenario: 自定义 OpenAI 兼容服务
+
+- **WHEN** 用户选择已配置名称、Base URL、模型和可选密钥的 `custom` 槽位
+- **THEN** 该 capability MUST 向该 Base URL 的 Chat Completions 兼容接口发起请求
 
 #### Scenario: 引擎与模型切换不影响历史任务
 
-- **WHEN** 用户在已有任务 A(笔记已生成)之后切换引擎/模型,再新建任务 B
-- **THEN** 任务 B SHALL 使用新引擎/模型生成笔记,任务 A 的既有笔记 MUST NOT 被自动重跑或覆盖
+- **WHEN** 用户在已有任务 A（笔记已生成）之后切换引擎/模型，再新建任务 B
+- **THEN** 任务 B SHALL 使用新引擎/模型，任务 A 的既有笔记 MUST NOT 被自动重跑或覆盖
+
+### Requirement: 四档笔记详细程度
+
+该 capability MUST 支持 `concise`（简洁）、`balanced`（适中）、`detailed`（详细）、`exhaustive`（超详细）四档笔记详细程度，默认 MUST 为 `balanced`。所选档位 MUST 作为创建任务时的设置快照，同时注入无 PDF 的 `generate_directly` 与有 PDF 的 `generate_with_pdf_reference` 提示词分支。详细程度只控制对输入信息的覆盖与展开，MUST NOT 要求模型捏造字幕或讲义中不存在的事实。
+
+#### Scenario: 简洁档只保留核心
+
+- **WHEN** 新任务的详细程度为 `concise`
+- **THEN** 提示词 MUST 要求只保留结论、核心概念、关键数据和必要步骤，并主动压缩重复解释和次要示例
+
+#### Scenario: 适中档为默认
+
+- **WHEN** 用户从未修改详细程度
+- **THEN** 新任务 MUST 使用 `balanced`，提示词 SHALL 保留主要论点、必要解释、代表性示例和结论
+
+#### Scenario: 详细与超详细逐级增加覆盖
+
+- **WHEN** 相同输入分别使用 `detailed` 与 `exhaustive`
+- **THEN** 两者提示词 MUST 分别要求补充上下文、推导、例子和注意事项，以及尽量完整的推导链、反例、边界和术语说明；`exhaustive` 的覆盖要求 MUST 严格高于 `detailed`
+
+#### Scenario: PDF 分支同样应用详细程度
+
+- **WHEN** 任务携带 PDF 参考材料且详细程度为 `exhaustive`
+- **THEN** `generate_with_pdf_reference` 提示词 MUST 同时包含讲义对照规则和超详细约束，MUST NOT 因进入 PDF 分支丢失档位
+
+#### Scenario: 重跑沿用任务快照
+
+- **WHEN** 任务以 `concise` 创建后，全局设置改为 `exhaustive`，用户重跑原任务
+- **THEN** 重跑 MUST 继续使用原任务的 `concise` 快照，新建任务才使用 `exhaustive`
 
 ### Requirement: 长字幕分块处理
 
@@ -189,4 +223,3 @@ note-generation capability 的核心契约是:消费上游 ASR 步骤产出的�
 
 - **WHEN** 截图嵌入开启,LLM 输出的某个 `[IMG:<秒>]` 标记其秒数超出视频时长,或 ffmpeg 截帧失败
 - **THEN** 该 capability MUST 跳过该标记(不得替换为图片、也不得在笔记中残留原始 `[IMG:...]` 标记),MUST NOT 因单个标记失败而中断整个笔记生成
-

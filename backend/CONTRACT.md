@@ -1,8 +1,8 @@
 # vid2note 后端改造契约（CONTRACT.md）
 
-> 本文件是 vid2note v1 后端（fork 自 ai_srt2md）**所有模块开发与整合的唯一统一约束**。
-> 任何 Implement agent 在动 `backend/src` 前 MUST 先读本文件，并严格遵守本文定义的字段、目录、路由、DAG 数据流与模块接口签名。
-> 上位依据：`openspec/changes/build-vid2note-v1/{proposal.md, design.md, specs/*/spec.md, tasks.md}`。spec 约束「做什么」，design 解释「为什么」，**本文锁定「怎么对接」**。
+> 本文件是 vid2note v1 后端（基于作者自己的 ai_srt2md 内核）**所有模块开发与整合的统一约束**。
+> 修改 `backend/src` 前应先阅读本文，并遵守这里定义的字段、目录、路由、DAG 数据流与模块接口签名。
+> 上位依据：`openspec/specs/` 下的当前主规格。归档 change 仅保留历史决策背景；spec 约束「做什么」，**本文锁定「怎么对接」**。
 > 与本文件冲突时：spec > design > 本契约。发现冲突停下报告，不要擅自改本契约。
 
 ---
@@ -13,12 +13,12 @@
 2. **内核边界（design D6）**：以下能力视为「内核」，**必须**从 `from src.core.kernel import` 取，MUST NOT 直接 import 内核各子包内部：
    - `SimpleProcessor`（字幕→笔记 + 思维导图）、`SemanticAligner`/`AlignedSegment`、`ContentFilter`/`FilterResult`、`MarkdownGenerator`/`MarkdownOutput`
    - `TaskQueue`/`get_task_queue`、`TaskWorker`/`get_task_worker`/`start_worker`/`stop_worker`
-   - `BaseLLM`/`LLMFactory`（8 家 OpenAI 兼容适配）
+   - `BaseLLM`/`LLMFactory`（8 家统一门面适配；兼容服务复用 Chat Completions 客户端，百度和 MiniMax 封装各自协议）
    - `SRTParser`/`SubtitleItem`、`PDFParser`/`PDFPage`/`Chapter`
    - `Database`/`TaskRepository`
    - `logger`/`TaskLogger`
    - 内核还含：`prompts/`（restructure/generate_directly/generate_with_pdf_reference/classify/mindmap/mindmap_outline/pdf_structure_analysis）、`utils/security.py` + `core/security_constants.py`（注入防护）、`utils/srt_validator.py`、思维导图导出。
-   - 内核**只做适配性微调**（如 `task_repository.py` 扩列、`pdf_parser.py` 套 `PdfReferenceProvider`），不得重写其内部实现。
+   - 内核**只做适配性微调**（如 `task_repository.py` 扩列、`pdf_parser.py` 适配基础 PDF 引用流程），不得重写其内部实现。
 3. **语言约定**：全部注释、docstring、用户可见错误信息、日志为**中文**；枚举值/字段名/协议字面量/规范术语（pending/running/…、permanent/7d/30d、xmind/png/md 等）保留英文。
 4. **路径约定**：所有产物路径在 SQLite 中**存相对 `DATA_ROOT` 的 POSIX 相对路径**（如 `videos/task_abc/clip.mp4`），使用处由 `Path(DATA_ROOT) / rel` 解析为绝对路径。MUST NOT 把宿主绝对路径落库。
 5. **状态变更顺序（design D10，关键）**：每次节点/任务状态变化 MUST **先写 SQLite（`task_repository`），再向 SSE EventBus 推事件**。SSE 是瞬态、SQLite 是权威态。
@@ -52,12 +52,13 @@
 | `mindmap_paths` | `list[str]` | `TEXT` (JSON) | 思维导图产物相对路径列表，如 `["notes/<tid>/a.xmind","...png"]` |
 | `screenshot_paths` | `list[str]` | `TEXT` (JSON) | 截图产物相对路径列表（仅 `extract_images=True` 时） |
 | `node_statuses` | `dict` | `TEXT` (JSON) | 六节点各自状态机（结构见 1.2），权威节点视图 |
-| `llm_provider` | `Optional[str]` | `TEXT` | LLM 引擎：`qwen`/`glm`/`deepseek`/`moonshot`/`baidu`/`doubao`/`minimax`/`ollama` |
+| `llm_provider` | `Optional[str]` | `TEXT` | LLM 引擎：`qwen`/`glm`/`deepseek`/`moonshot`/`baidu`/`doubao`/`minimax`/`ollama`/`custom` |
 | `llm_model` | `Optional[str]` | `TEXT` | LLM 模型名（默认 `deepseek-v4-flash`） |
-| `asr_engine` | `Optional[str]` | `TEXT` | 任务选定的 ASR 引擎：`asrtools` / `whisper_cpp` / `external`（+ 策略 online_first/single 存 settings） |
-| `pdf_mode` | `str` (Enum) | `TEXT DEFAULT 'pypdf'` | PDF 方案：`pypdf` / `mineru`（默认 pypdf，切换仅对新任务生效） |
+| `asr_engine` | `Optional[str]` | `TEXT` | 任务选定的 ASR 引擎：`bcut` / `whisper_cpp` / `external`（+ 策略 online_first/single 存 settings） |
+| `pdf_mode` | `str` (Enum) | `TEXT DEFAULT 'pypdf'` | PDF 方案：当前稳定版固定为 `pypdf`，字段为后续兼容扩展保留 |
 | `extract_images` | `bool` | `BOOLEAN DEFAULT 0` | 截图嵌入开关（**默认 False**） |
 | `output_language` | `str` (Enum) | `TEXT DEFAULT 'zh'` | 笔记输出语言：`zh` / `en`（默认 zh） |
+| `note_detail_level` | `str` (Enum) | `TEXT DEFAULT 'balanced'` | 笔记详细度：`concise` / `balanced` / `detailed` / `exhaustive` |
 | `mindmap_formats` | `list[str]` | `TEXT` (JSON) | 思维导图导出格式子集，取值 `["xmind","png","md"]` 子集（默认 `["xmind"]`） |
 | `queue_position` | `Optional[int]` | `INTEGER` | 排队等待位次（pending 任务在队列中的 FIFO 位次，1 为队首；running/终态为 None） |
 | `error` | `Optional[str]` | `TEXT` | 总体/失败节点中文错误信息（含失败节点名 + 归类原因） |
@@ -126,6 +127,11 @@ cancelled → running       # 仅经节点级 rerun 触发（合法）
 ```
 $DATA_ROOT/
 ├── tasks.db                     # SQLite（WAL，见 §3）
+├── config/
+│   ├── settings.json            # 版本化公开设置（0600）
+│   ├── settings.json.last-good  # 最近一次有效副本（0600）
+│   ├── credentials.enc          # Fernet 认证加密凭证（0600）
+│   └── master.key               # 无外部 Secret 时自动生成（0600）
 ├── videos/<task_id>/*.mp4       # 视频产物（download / local_video）
 ├── audio/<task_id>/*.wav        # 音频产物（extract_audio / local_audio），16kHz 单声道
 ├── srt/<task_id>/*.srt          # SRT 字幕产物（asr）
@@ -182,6 +188,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     pdf_mode         TEXT DEFAULT 'pypdf',
     extract_images   BOOLEAN DEFAULT 0,
     output_language  TEXT DEFAULT 'zh',
+    note_detail_level TEXT DEFAULT 'balanced',
     mindmap_formats  TEXT DEFAULT '["xmind"]', -- JSON 数组
     queue_position   INTEGER,
     error            TEXT,
@@ -195,37 +202,41 @@ CREATE INDEX IF NOT EXISTS idx_created_at   ON tasks(created_at);
 CREATE INDEX IF NOT EXISTS idx_source_type  ON tasks(source_type);
 ```
 
-### 3.2 新增 `settings` 表（key/value，spec storage-retention「配置落 SQLite」）
+### 3.2 文件化设置与加密凭证
 
-```sql
-CREATE TABLE IF NOT EXISTS settings (
-    key         TEXT PRIMARY KEY,
-    value       TEXT NOT NULL,                -- 标量存字面量；复杂值存 JSON
-    updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-```
+SQLite `settings` 表仅作为旧版本迁移源。公开设置权威态是
+`$DATA_ROOT/config/settings.json`，文档含 `schema_version` 与 `settings`
+对象，必须使用同目录临时文件、`fsync` 和 `os.replace` 原子替换，并维护
+`settings.json.last-good`。
 
-**约定 key 命名空间**（全部持久化、跨重启保留、设置页读写）：
+敏感值不得出现在公开设置、任务表或普通设置 API 响应中；它们经 Fernet
+认证加密写入 `credentials.enc`。主密钥优先从 `VID2NOTE_MASTER_KEY`、
+`VID2NOTE_MASTER_KEY_FILE` 或 `/run/secrets/vid2note_master_key` 读取，
+无外部配置时才生成 `master.key`。文件权限均为 `0600`。
+
+**公开设置 key 命名空间**：
 
 | key | value 示例 | 用途 |
 |---|---|---|
 | `llm.provider` | `"deepseek"` | 默认 LLM 引擎（默认 DeepSeek） |
 | `llm.model` | `"deepseek-v4-flash"` | 默认 LLM 模型 |
-| `llm.credentials` | JSON `{...}` | 8 家凭证（api_key/base_url/model 等，按 provider 聚合） |
-| `asr.engine` | `"asrtools"` | 默认 ASR 引擎 |
+| `llm.providers` | JSON `{provider:{model,base_url,timeout,...}}` | 九个 Provider 的非敏感覆盖 |
+| `asr.engine` | `"bcut"` | 默认 ASR 引擎 |
 | `asr.strategy` | `"online_first"` | `online_first` / `single` |
-| `asr.config` | JSON `{endpoint,...}` | AsrTools 凭证 / whisper.cpp 模型路径 / external endpoint |
-| `pdf.mode` | `"pypdf"` | `pypdf` / `mineru` |
-| `pdf.mineru_endpoint` | `""` | 外部 MinerU endpoint（空=本地 CPU） |
-| `bilibili.cookie` | JSON `{SESSDATA,bili_jct,DedeUserID}` | Bilibili 登录态（仅 bilibili 来源用） |
+| `asr.config` | JSON `{endpoint,...}` | 在线 ASR 兼容配置 / whisper.cpp 模型路径 / external endpoint |
+| `pdf.mode` | `"pypdf"` | 当前稳定版仅支持基础 PDF 文本提取 |
 | `concurrency.max` | `"1"` | 跨任务最大并发（1~3） |
 | `note.output_language` | `"zh"` | 笔记输出语言 |
+| `note.detail_level` | `"balanced"` | 四档笔记详细度 |
 | `note.extract_images` | `"false"` | 截图嵌入开关 |
 | `note.image_quality` | `"medium"` | low/medium/high |
 | `retention.video` / `.audio` / `.srt` / `.note` / `.screenshot` | `"7d"`/`"30d"`/`"permanent"` | 五类产物各自保留策略 |
 | `advanced.chunk_size` / `.temperature` / `.max_retries` | `"4000"`/`"0.3"`/`"3"` | 高级参数 |
 
-> 首次启动（settings 表为空）MUST 写入合法默认值（spec storage-retention）：LLM=DeepSeek `deepseek-v4-flash`、并发 1、PDF pypdf、五类保留默认（建议 video/audio=7d、srt/screenshot=30d、note=permanent）、语言 zh、截图关。非法取值 MUST 拒绝且不改原值。
+加密 namespace 分为 `llm/<provider>/api_key`、`asr/external/api_key` 和
+`media/bilibili/cookie`。首次启动必须写入合法公开默认值；非法更新必须整体
+拒绝且不改原值。旧 SQLite 设置只有在新公开文件与密文均成功写入并回读一致后
+才可删除敏感键。
 
 ### 3.3 启用 WAL（design Risks、tasks 1.4）
 
@@ -257,7 +268,7 @@ conn.row_factory = sqlite3.Row
 
 | 方法 | 路径 | 用途 | 关键约束 |
 |---|---|---|---|
-| `POST` | `/api/v1/tasks` | 创建任务 | 接受 `source_url`（多部分或 JSON）**或** 本地音视频文件（`multipart/form-data`）+ 引擎选项（`asr_engine`/`llm_provider`/`llm_model`/`pdf_mode`/`extract_images`/`output_language`/`mindmap_formats`）+ 可选 PDF；调用 `media_ingest.identify_source` 识别 `source_type`；队列满→429；无法识别→400 中文错误 |
+| `POST` | `/api/v1/tasks` | 创建任务 | 接受 `source_url`（多部分或 JSON）**或** 本地音视频文件（`multipart/form-data`）+ 引擎选项（`asr_engine`/`llm_provider`/`llm_model`/`pdf_mode`/`extract_images`/`output_language`/`note_detail_level`/`mindmap_formats`）+ 可选 PDF；调用 `media_ingest.identify_source` 识别 `source_type`；队列满→429；无法识别→400 中文错误 |
 | `GET` | `/api/v1/tasks/{task_id}` | 任务详情 | 返回完整 `Task`（含 `node_statuses`/产物路径/`queue_position`） |
 | `GET` | `/api/v1/tasks/{task_id}/stream` | SSE 实时进度/日志 | 见 §5.6 / §6.6；`text/event-stream` |
 | `POST` | `/api/v1/tasks/{task_id}/rerun?from=<node>` | 节点级重跑 | `from` 取六节点之一；复用上游 completed 产物、缺失回退到缺失节点；校验状态可重跑（failed/cancelled/completed 允许；pending/running 拒绝） |
@@ -265,8 +276,11 @@ conn.row_factory = sqlite3.Row
 | `GET` | `/api/v1/tasks` | 历史列表 | 筛选 `status`/`source_type`/`q`（关键词，匹配 title/source_url/source_type，大小写不敏感，可组合取交集）+ 分页 `page`/`page_size`，响应含 `total` |
 | `POST` | `/api/v1/tasks/batch` | 批量导出 / 重跑 | body `{"action":"export"|"rerun","task_ids":[...]}`；export→把选中 completed 任务的 `note_path` 打包 zip（内按 task 区分）返回下载；rerun→为每个选中任务创建**复用其输入与配置**的新任务入队，原记录不变 |
 | `GET` | `/api/v1/tasks/{task_id}/products/{kind}` | 下载产物 | `kind` ∈ `note`/`srt`/`video`/`audio`/`mindmap`/`screenshot`；校验 `is_safe_path(DATA_ROOT, ...)` 后 FileResponse |
-| `GET` | `/api/v1/settings` | 读取全部设置 | 返回 §3.2 全部 key（凭证字段脱敏） |
-| `PUT` | `/api/v1/settings` | 更新设置 | body 为 key→value 子集；逐项校验（并发 1~3、保留策略枚举、pdf_mode 枚举…），非法拒并返回中文错误；立即持久化并对下一次清理生效；**仅对新任务生效**（不改历史任务） |
+| `GET` | `/api/v1/settings` | 读取全部设置 | 返回 §3.2 公开 key、Provider 注册表与凭证状态；不返回明文 |
+| `PUT` | `/api/v1/settings` | 更新设置 | 整体校验后原子写公开设置；**仅对新任务生效**（不改历史任务） |
+| `PUT/DELETE` | `/api/v1/settings/credentials` | 保存/清除凭证 | provider + field 白名单；空值不覆盖，清除需显式请求 |
+| `POST` | `/api/v1/settings/credentials/reveal` | 按需查看凭证 | 只返回一个白名单字段，`Cache-Control: no-store` |
+| `POST` | `/api/v1/settings/llm/{provider}/test` | 测试 LLM | 使用当前保存值发最小真实请求，响应错误必须分类脱敏 |
 | `GET` | `/api/v1/storage/stats` | 存储用量统计 | 返回 `retention.storage_stats()`：`total_bytes` + `by_kind`（五类）+ `top_tasks` |
 | `GET` | `/api/v1/health` | 健康检查 | 返 2xx；含 `yt-dlp`/`ffmpeg`/whisper.cpp 可执行性 + 引擎配置态（供前端引擎状态卡） |
 
@@ -277,7 +291,7 @@ conn.row_factory = sqlite3.Row
 | `POST /api/v1/upload/{srt,pdf,txt,task}` | **删除**，合并进 `POST /api/v1/tasks`（multipart：`source_url` 或 `file`，可选 `pdf`） |
 | `POST /api/v1/process/start`、`GET /api/v1/process/status/{id}`、`GET /api/v1/process/{id}/download[/mindmap]` | **删除**，由 `POST /api/v1/tasks`（创建即入队）、`GET /api/v1/tasks/{id}`、`GET /api/v1/tasks/{id}/products/{kind}` 替代 |
 | `GET/POST/DELETE /api/v1/queue/*`、`/api/v1/queue/stats` | **删除**，统计折叠进 `GET /api/v1/storage/stats` + 任务详情的 `queue_position` |
-| `GET /api/v1/config/*`（`api/config.py`） | **改造**为 `GET/PUT /api/v1/settings`（数据源从 config 文件改为 SQLite `settings` 表；基底 `config_manager` 可作为内核只读默认值来源，但权威态在 SQLite） |
+| `GET /api/v1/config/*`（`api/config.py`） | **删除/不挂载**，由 `/api/v1/settings` 文件权威态与凭证子接口替代 |
 | `GET /api/v1/logs/*`（`api/logs.py`） | 保留只读日志查看（任务级日志文件），或折叠进 SSE `log` 事件；Implement 时定 |
 
 > `src/api/__init__.py` 的 `api_router` 注册表相应更新；`main.py` 单容器化后移除 `CORSMiddleware`（design D1）。
@@ -350,7 +364,7 @@ conn.row_factory = sqlite3.Row
 > - `ctx.cancel.is_cancelled() -> bool`：取消信号。
 > - `ctx.product_path(kind: str, ext: str) -> Path`：返回 `<DATA_ROOT>/<kind>s/<task_id>/<safe_base>.<ext>` 绝对路径并确保父目录存在。
 > - `ctx.register_product(kind: str, rel_path: str, size_bytes: int) -> None`：登记产物（写顶层字段 + node_statuses）。
-> - `ctx.task`：当前 `Task` 快照；`ctx.settings`：`SettingsSnapshot`（从 SQLite settings 读出的强类型快照）。
+> - `ctx.task`：当前 `Task` 快照；`ctx.settings`：由文件权威态、环境默认值和注册表合并得到的 `SettingsSnapshot`。
 
 ### 6.1 `media_ingest/`（design D6 新增 / spec media-ingest）
 
@@ -396,7 +410,7 @@ class AsrEngine(ABC):
     @abstractmethod
     def transcribe(self, audio_path: str, ctx) -> list[Cue]: ...
 
-class AsrToolsEngine(AsrEngine): ...      # 在线（剪映/必剪），默认首选
+class BcutEngine(AsrEngine): ...          # 实验性在线 bcut，默认首选
 class WhisperCppEngine(AsrEngine): ...    # 本地 CPU + int8，MUST NOT 发网络请求
 class ExternalAsrEngine(AsrEngine): ...   # HTTP endpoint，地址来自配置
 
@@ -440,7 +454,7 @@ def embed_screenshots(ctx, markdown_text: str, srt_rel_path: str,
 class NoteOptions:
     extract_images: bool
     output_language: str   # zh / en
-    pdf_mode: str          # pypdf / mineru
+    pdf_mode: str          # 当前稳定版固定为 pypdf
 
 def generate(ctx, srt_rel_path: str, pdf_rel_path: str | None,
              llm, options: NoteOptions) -> str:
@@ -449,7 +463,7 @@ def generate(ctx, srt_rel_path: str, pdf_rel_path: str | None,
     2. kernel 注入防护（中和注入模式 + 转义尖括号 + 剥控制字符 + 长度截断）。
     3. 纯文本喂入（剥序号/时间戳行/HTML 标签）；extract_images=True 时带时间戳喂入。
     4. 无 PDF → kernel SimpleProcessor.process(srt, None)（generate_directly 分支）；
-       有 PDF → pdf_reference 解析后走 generate_with_pdf_reference 分支（复用 kernel 模板）。
+       有 PDF → kernel.PDFParser 解析后走 generate_with_pdf_reference 分支（复用 kernel 模板）。
     5. 清洗 LLM 输出（剥 ```markdown / ``` 包裹）。
     6. extract_images=True → screenshot.embed_screenshots(...)。
     7. 落盘 notes/<tid>/<safe>.md，ctx.register_product('note', ...)，返回相对路径。"""
@@ -555,8 +569,8 @@ async def stream(task_id: str):
 | 类别 | 模块 | 动作 | 关联契约节 |
 |---|---|---|---|
 | **内核（原样复用 + 微调）** | `llm/`、`prompts/`、`core/simple_processor`、`aligner`、`filter`、`generator`、`parsers/srt_parser`、`utils/security`+`core/security_constants`、`utils/srt_validator`、思维导图导出 | 经 `core/kernel` 导出；不改内部 | §0.2 |
-| **内核（微调）** | `db/database.py`、`db/task_repository.py`、`models/task.py` | 新 schema + WAL + settings 表 + 历史/位次/启动恢复方法 | §1、§3 |
-| **改造（换头/换实现）** | `api/*`（路由收编为 §4）、`core/worker.py`（线性→调 DagRunner）、`parsers/pdf_parser.py`（套 `PdfReferenceProvider`）、`main.py`（单容器、移除 CORS、启动恢复 + retention 扫描）、`config/manager.py`（默认值来源，权威让位 SQLite settings） | — | §4、§5.6、§0 |
-| **新增** | `media_ingest/`、`speech_to_text/`、`screenshot/`、`note_generation/`、`mindmap/`、`pdf_reference/`（pypdf/mineru/external 三 provider）、`pipeline/dag.py`、`retention/`、`sse/` | 严格按 §6 签名 | §6 |
+| **内核（微调）** | `db/database.py`、`db/task_repository.py`、`models/task.py` | 新 schema + WAL + 历史/位次/启动恢复方法；旧 settings 只作迁移源 | §1、§3 |
+| **改造（换头/换实现）** | `api/*`（路由收编为 §4）、`core/worker.py`（线性→调 DagRunner）、`parsers/pdf_parser.py`（基础 PDF 文本提取）、`main.py`（单容器、移除 CORS、启动恢复 + retention 扫描）、`runtime/settings*.py`（文件权威态 + 加密凭证） | — | §4、§5.6、§0 |
+| **新增** | `media_ingest/`、`speech_to_text/`、`screenshot/`、`note_generation/`、`mindmap/`、`pipeline/dag.py`、`retention/`、`sse/` | 严格按 §6 签名 | §6 |
 
 > 任何模块对外暴露的能力，其**函数名、参数名、参数顺序、返回类型、异常类型**以本契约 §6 为准；Implement agent 不得擅自改名或增删必选参数。如确需调整，先改本契约并经批准。

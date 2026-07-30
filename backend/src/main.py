@@ -7,7 +7,8 @@
 - startup:启动 worker + 启动恢复(残留 running 标 failed)+ 一次 retention 清理扫描。
 - shutdown:停止 worker。
 """
-import traceback
+import os
+import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -17,15 +18,20 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from .api.v1 import v1_router
-from .config import config_manager
-from .utils.logger import error as log_error
+from . import __version__
+from .utils.logger import exception as log_exception
 from .utils.rate_limiter import limiter
 
-# 服务监听配置(沿用内核 config_manager 的 server 段作为只读默认,契约 §4.2)
-_config = config_manager.load()
-PORT = _config.server.port
-HOST = _config.server.host
-DEBUG = _config.server.debug
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, str(default)))
+    except ValueError:
+        return default
+
+
+PORT = _env_int("SERVER_PORT", 8765)
+HOST = os.environ.get("SERVER_HOST", "127.0.0.1")
+DEBUG = os.environ.get("DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 @asynccontextmanager
@@ -76,7 +82,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="vid2note",
     description="视频 → Markdown 笔记 + 思维导图(单容器 Web 应用)",
-    version="1.0.0",
+    version=__version__,
     lifespan=lifespan,
 )
 
@@ -88,21 +94,43 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.include_router(v1_router)
 
 
+@app.middleware("http")
+async def add_security_headers(request, call_next):
+    """Set conservative browser defaults for the same-origin local app."""
+    response = await call_next(request)
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' https://cdn.jsdelivr.net; "
+        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "img-src 'self' data: blob: https://fastapi.tiangolo.com; "
+        "connect-src 'self'; frame-src 'self' blob:; object-src 'none'; "
+        "base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+    )
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    return response
+
+
 # 根路径 / 由 StaticFiles 托管(返回前端 index.html,design D1 单容器同源);服务信息见 /api/v1/health
 
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
-    """全局异常处理(中文兜底 500)。"""
-    error_detail = traceback.format_exc()
-    log_error(f"[API Error] {request.method} {request.url.path}: {exc}\n{error_detail}")
+    """全局异常处理：详细堆栈只写服务端日志。"""
+    request_id = uuid.uuid4().hex[:12]
+    log_exception(
+        f"[API Error] request_id={request_id} {request.method} {request.url.path}: {exc}"
+    )
     return JSONResponse(
         status_code=500,
         content={
             "error": "Internal Server Error",
-            "detail": str(exc),
-            "message": str(exc),
+            "detail": "服务器内部错误，请查看服务端日志",
+            "message": "服务器内部错误，请查看服务端日志",
             "path": request.url.path,
+            "request_id": request_id,
         },
     )
 

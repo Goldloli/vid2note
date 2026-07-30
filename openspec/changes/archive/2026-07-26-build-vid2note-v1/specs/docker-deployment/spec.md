@@ -2,7 +2,7 @@
 
 ### Requirement: Dockerfile 基础镜像与内置工具链
 
-Dockerfile MUST 基于 Python 官方镜像构建,并在单个镜像内 SHALL 内置视频处理六步流水线所需的全部命令行工具:yt-dlp(下载)、ffmpeg(音频提取)、whisper.cpp(ASR 引擎)、AsrTools(ASR 调度)。MinerU(PDF 对照)SHALL 作为可选层,通过构建参数开关,默认不构建进镜像以控制基础体积,仅在需要 PDF 对照能力时显式启用。
+Dockerfile MUST 基于 Python 官方镜像构建,并在单个镜像内 SHALL 内置视频处理六步流水线所需的全部命令行工具:yt-dlp(下载)、ffmpeg(音频提取)、whisper.cpp(ASR 引擎)、bcut 在线 ASR 兼容层。MinerU(PDF 对照)SHALL 作为可选层,通过构建参数开关,默认不构建进镜像以控制基础体积,仅在需要 PDF 对照能力时显式启用。
 
 #### Scenario: 镜像内置下载与音频工具
 
@@ -11,7 +11,7 @@ Dockerfile MUST 基于 Python 官方镜像构建,并在单个镜像内 SHALL 内
 
 #### Scenario: 镜像内置 ASR 工具链
 
-- **WHEN** 从构建好的镜像启动容器并执行 whisper.cpp 推理命令以及 AsrTools 的入口命令
+- **WHEN** 从构建好的镜像启动容器并执行 whisper.cpp 推理命令以及在线 ASR 依赖检查
 - **THEN** 两者均 SHALL 能被定位到可执行文件且无「command not found」
 
 #### Scenario: MinerU 作为可选构建层

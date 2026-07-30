@@ -97,6 +97,25 @@ class TestIdentifySource:
     def test_direct_link(self):
         assert identify_source("https://example.com/clip.mp4", None) == SourceType.DIRECT
 
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://localhost/video.mp4",
+            "http://127.0.0.1/video.mp4",
+            "http://10.0.0.8/video.mp4",
+            "http://169.254.169.254/latest/meta-data",
+            "http://[::1]/video.mp4",
+            "https://user:password@example.com/video.mp4",
+        ],
+    )
+    def test_private_or_credentialed_url_rejected(self, url):
+        with pytest.raises(ValueError):
+            identify_source(url, None)
+
+    def test_private_url_can_be_explicitly_enabled(self, monkeypatch):
+        monkeypatch.setenv("ALLOW_PRIVATE_URLS", "true")
+        assert identify_source("http://127.0.0.1/video.mp4", None) == SourceType.DIRECT
+
     def test_local_video_by_ext_and_mime(self):
         assert identify_source(None, UploadedFile("/p/a", "clip.mp4", "video/mp4", 1)) == SourceType.LOCAL_VIDEO
         # 扩展名缺失时退到 MIME 前缀

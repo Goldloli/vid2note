@@ -1,7 +1,7 @@
 # mindmap-export Specification
 
 ## Purpose
-TBD - created by archiving change build-vid2note-v1. Update Purpose after archive.
+定义从 Markdown 笔记生成、预览和导出思维导图的行为。确保 XMind、PNG 和 Markdown 大纲保持一致层级，并可由用户稳定下载。
 ## Requirements
 ### Requirement: 思维导图大纲以已生成笔记为唯一输入来源
 
@@ -149,4 +149,3 @@ v1 的思维导图能力 MUST 限定为文件导出(xmind / png / md)。系统 M
 
 - **WHEN** 用户对同一任务多次点击导出同一格式(或不同格式组合)
 - **THEN** 系统 SHALL 每次请求都重新产出对应的导出文件供下载,不得因未提供画布而限制导出次数或要求额外的交互状态
-
