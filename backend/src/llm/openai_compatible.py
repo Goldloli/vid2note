@@ -14,6 +14,46 @@ from openai import (
 from .base import BaseLLM
 
 
+def _safe_int(value: Any) -> int:
+    """把 usage 数值字段安全转为 int(缺失/非法值归 0)。"""
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def normalize_usage(usage: Any) -> Dict[str, int] | None:
+    """把各家 provider 的响应 usage 归一化为固定字段 dict(openspec「LLM 用量观测」)。
+
+    产出 ``{prompt_tokens, completion_tokens, cache_hit_tokens, cache_miss_tokens}``:
+    - DeepSeek 顶层 ``prompt_cache_hit_tokens`` / ``prompt_cache_miss_tokens`` 直接采用;
+    - OpenAI 系取嵌套 ``usage.prompt_tokens_details.cached_tokens`` 作为命中,
+      未命中按 ``prompt_tokens - cache_hit`` 兜底;
+    - 无任何缓存字段时命中记 0、未命中记全部输入;
+    - ``usage`` 为 None 时返回 None(本地模型 / mock 无用量场景)。
+
+    全部取值经 getattr + _safe_int 防御,本函数不抛异常。
+    """
+    if usage is None:
+        return None
+    prompt_tokens = _safe_int(getattr(usage, "prompt_tokens", 0))
+    completion_tokens = _safe_int(getattr(usage, "completion_tokens", 0))
+    cache_hit = getattr(usage, "prompt_cache_hit_tokens", None)
+    cache_miss = getattr(usage, "prompt_cache_miss_tokens", None)
+    if cache_hit is None:
+        details = getattr(usage, "prompt_tokens_details", None)
+        if details is not None:
+            cache_hit = getattr(details, "cached_tokens", None)
+    cache_hit = _safe_int(cache_hit)
+    cache_miss = _safe_int(cache_miss) if cache_miss is not None else prompt_tokens - cache_hit
+    return {
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "cache_hit_tokens": cache_hit,
+        "cache_miss_tokens": cache_miss,
+    }
+
+
 class OpenAICompatibleLLM(BaseLLM):
     """统一处理 Base URL、timeout、错误和 Chat Completions 请求。"""
 
@@ -46,6 +86,8 @@ class OpenAICompatibleLLM(BaseLLM):
         super().__init__(resolved_key, resolved_model, **kwargs)
         self.base_url = resolved_base_url
         self.timeout = float(timeout)
+        # 最近一次 chat() 的归一化用量(None 表示尚未调用或无用量)
+        self.last_usage: Dict[str, int] | None = None
         self.client = OpenAI(
             api_key=resolved_key or "not-required",
             base_url=self.base_url,
@@ -83,6 +125,8 @@ class OpenAICompatibleLLM(BaseLLM):
             else:
                 request["temperature"] = 0.3
             response = client.chat.completions.create(**request)
+            # 暂存本次调用的归一化用量(消费方须在下次 chat 前读取;全部调用串行)
+            self.last_usage = normalize_usage(getattr(response, "usage", None))
             return self.extract_content(response)
         except APIConnectionError as exc:
             raise RuntimeError(f"{self.provider_label} 连接失败") from exc
@@ -96,4 +140,4 @@ class OpenAICompatibleLLM(BaseLLM):
             raise RuntimeError(f"{self.provider_label} 调用失败：{exc}") from exc
 
 
-__all__ = ["OpenAICompatibleLLM"]
+__all__ = ["OpenAICompatibleLLM", "normalize_usage"]

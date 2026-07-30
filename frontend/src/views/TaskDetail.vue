@@ -212,6 +212,36 @@
           />
         </section>
       </div>
+
+      <section v-if="usageRows.length" class="surface llm-usage">
+        <SectionHeader :title="$t('task.llmUsageTitle')" :description="$t('task.llmUsageHint')" />
+        <div class="llm-usage-wrap">
+          <table class="llm-usage-table">
+            <thead>
+              <tr>
+                <th scope="col">{{ $t('task.llmUsageStage') }}</th>
+                <th scope="col" class="num">{{ $t('task.llmUsageCalls') }}</th>
+                <th scope="col" class="num">{{ $t('task.llmUsageInput') }}</th>
+                <th scope="col" class="num">{{ $t('task.llmUsageCacheHit') }}</th>
+                <th scope="col" class="num">{{ $t('task.llmUsageCacheMiss') }}</th>
+                <th scope="col" class="num">{{ $t('task.llmUsageOutput') }}</th>
+                <th scope="col" class="num">{{ $t('task.llmUsageHitRate') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in usageRows" :key="row.stage" :class="{ total: row.stage === 'total' }">
+                <td>{{ $t(`task.llmUsageStages.${row.stage}`) }}</td>
+                <td class="num">{{ formatTokenCount(row.calls) }}</td>
+                <td class="num">{{ formatTokenCount(row.prompt_tokens) }}</td>
+                <td class="num">{{ formatTokenCount(row.cache_hit_tokens) }}</td>
+                <td class="num">{{ formatTokenCount(row.cache_miss_tokens) }}</td>
+                <td class="num">{{ formatTokenCount(row.completion_tokens) }}</td>
+                <td class="num">{{ formatHitRate(llmUsageHitRate(row)) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
     </template>
   </div>
 </template>
@@ -228,6 +258,12 @@ import SectionHeader from '@/components/SectionHeader.vue'
 import { cancelTask, getProductUrl, getTask, rerunTask, streamTask } from '@/api'
 import { noteImageError, readProductText, rewriteTaskScreenshotLinks } from '@/artifacts'
 import { i18n } from '@/i18n'
+import {
+  formatHitRate,
+  formatTokenCount,
+  llmUsageHitRate,
+  llmUsageRows,
+} from '@/llmUsage'
 import { renderMarkdown } from '@/markdown'
 import {
   eventLogText,
@@ -262,6 +298,8 @@ const tabs = [
   { v: 'meta', l: 'task.tabMeta', icon: 'sliders' },
 ]
 const nodeStatuses = computed(() => task.value?.node_statuses || {})
+// 「LLM 消耗」表格行(getTask 响应与 SSE snapshot 合并均带 llm_usage,无需新 API)
+const usageRows = computed(() => llmUsageRows(task.value?.llm_usage))
 const statusText = status => i18n.global.t(`status.${status || 'pending'}`)
 const ring = computed(() => {
   const progress = (task.value?.progress || 0) / 100
@@ -751,6 +789,15 @@ onUnmounted(() => {
 .activity-list li.running .activity-icon{background:var(--accent-soft);color:var(--accent)}.activity-list li.completed .activity-icon{background:var(--success-soft);color:var(--success)}.activity-list li.failed .activity-icon{background:var(--danger-soft);color:var(--danger)}
 .activity-list strong{display:block;font-size:11.5px}.activity-list p{margin:3px 0;color:var(--text-2);font-size:10.5px;line-height:1.5}.activity-list time{color:var(--muted);font-family:var(--mono);font-size:9px}
 .activity-empty{min-height:350px;border:0;box-shadow:none}
+.llm-usage{margin-top:14px;overflow:hidden}
+.llm-usage :deep(.section-header){padding:16px 18px 12px}
+.llm-usage-wrap{padding:0 18px 16px;overflow-x:auto}
+.llm-usage-table{width:100%;border-collapse:collapse;font-size:11.5px}
+.llm-usage-table th{padding:6px 10px;border-bottom:1px solid var(--border);color:var(--muted);font-size:10px;font-weight:600;text-align:left;white-space:nowrap}
+.llm-usage-table td{padding:7px 10px;border-bottom:1px solid var(--border-2);color:var(--text-2);white-space:nowrap}
+.llm-usage-table tbody tr:last-child td{border-bottom:0}
+.llm-usage-table .num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+.llm-usage-table tr.total td{border-top:1px solid var(--border);color:var(--text);font-weight:650}
 
 @media (max-width:1179px){
   .task-summary{grid-template-columns:minmax(0,1fr) 170px}.next-step{grid-column:1/-1;padding-top:14px;border-top:1px solid var(--border)}
