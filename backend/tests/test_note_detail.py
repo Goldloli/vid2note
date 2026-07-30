@@ -14,12 +14,17 @@ from src.core.simple_processor import SimpleProcessor
 from src.prompts.detail_level import DETAIL_LEVEL_INSTRUCTIONS, normalize_detail_level
 
 
+def _snapshot_call(messages, kwargs):
+    """记录调用时的消息快照；链式调用会原地追加消息，必须拷贝，否则历史记录被后续追加污染。"""
+    return ([dict(message) for message in messages], kwargs)
+
+
 class RecordingLLM:
     def __init__(self) -> None:
         self.calls = []
 
     def chat(self, messages, **kwargs):
-        self.calls.append((messages, kwargs))
+        self.calls.append(_snapshot_call(messages, kwargs))
         return "# 测试笔记"
 
 
@@ -28,7 +33,7 @@ class UnderstandingPipelineLLM:
         self.calls = []
 
     def chat(self, messages, **kwargs):
-        self.calls.append((messages, kwargs))
+        self.calls.append(_snapshot_call(messages, kwargs))
         prompt = messages[-1]["content"]
         if "【阶段：语义证据提取】" in prompt:
             marker = prompt.split("证据命名空间：E", 1)[1].split("-", 1)[0]
@@ -219,7 +224,7 @@ def test_exhaustive_blueprint_repairs_missing_evidence_mapping_before_drafting()
                 "【阶段：全局知识蓝图】" in prompt
                 and "【阶段：修复知识蓝图】" not in prompt
             ):
-                self.calls.append((messages, kwargs))
+                self.calls.append(_snapshot_call(messages, kwargs))
                 blueprint = json.loads(self.blueprint_json(prompt))
                 all_ids = [
                     evidence_id
@@ -231,8 +236,10 @@ def test_exhaustive_blueprint_repairs_missing_evidence_mapping_before_drafting()
                     chapter["evidence_ids"] = []
                 return json.dumps(blueprint, ensure_ascii=False)
             if "【阶段：修复知识蓝图】" in prompt:
-                self.calls.append((messages, kwargs))
-                return self.blueprint_json(prompt)
+                self.calls.append(_snapshot_call(messages, kwargs))
+                # 链式修复：证据 ID 在链内前缀中，需从完整消息提取
+                full_prompt = "\n".join(m["content"] for m in messages)
+                return self.blueprint_json(full_prompt)
             return super().chat(messages, **kwargs)
 
     llm = IncompleteBlueprintLLM()
@@ -245,8 +252,8 @@ def test_exhaustive_blueprint_repairs_missing_evidence_mapping_before_drafting()
     result = processor._generate_exhaustive_with_understanding(source)
 
     prompts = [call[0][-1]["content"] for call in llm.calls]
-    assert sum("【阶段：全局知识蓝图】" in prompt for prompt in prompts) == 2
-    assert any("【阶段：修复知识蓝图】" in prompt for prompt in prompts)
+    assert sum("【阶段：全局知识蓝图】" in prompt for prompt in prompts) == 1
+    assert sum("【阶段：修复知识蓝图】" in prompt for prompt in prompts) == 1
     assert result.startswith("# 最终高质量笔记")
 
 
@@ -258,11 +265,13 @@ def test_exhaustive_blueprint_repairs_malformed_json_before_validation():
                 "【阶段：全局知识蓝图】" in prompt
                 and "【阶段：修复蓝图 JSON】" not in prompt
             ):
-                self.calls.append((messages, kwargs))
+                self.calls.append(_snapshot_call(messages, kwargs))
                 return '{"title": "未闭合蓝图"'
             if "【阶段：修复蓝图 JSON】" in prompt:
-                self.calls.append((messages, kwargs))
-                return self.blueprint_json(prompt)
+                self.calls.append(_snapshot_call(messages, kwargs))
+                # 链式修复：证据 ID 在链内前缀中，需从完整消息提取
+                full_prompt = "\n".join(m["content"] for m in messages)
+                return self.blueprint_json(full_prompt)
             return super().chat(messages, **kwargs)
 
     llm = MalformedBlueprintLLM()
@@ -311,6 +320,11 @@ def test_exhaustive_draft_and_review_keep_pdf_and_screenshot_semantics(with_pdf)
     review_prompts = [
         prompt for prompt in prompts if "【阶段：章节编辑审校】" in prompt
     ]
+    review_full_messages = [
+        "\n".join(message["content"] for message in call[0])
+        for call in llm.calls
+        if "【阶段：章节编辑审校】" in call[0][-1]["content"]
+    ]
     assert draft_prompts and review_prompts
     assert all(
         DETAIL_LEVEL_INSTRUCTIONS["exhaustive"] in prompt
@@ -321,7 +335,9 @@ def test_exhaustive_draft_and_review_keep_pdf_and_screenshot_semantics(with_pdf)
     if with_pdf:
         assert all("第一章结构" in prompt for prompt in draft_prompts)
         assert all("讲义参考正文" in prompt for prompt in draft_prompts)
-        assert all("第一章结构" in prompt for prompt in review_prompts)
+        # 审校改为链尾增量指令：讲义不再出现在指令本身，但必须在链内前缀中
+        assert all("第一章结构" not in prompt for prompt in review_prompts)
+        assert all("第一章结构" in full for full in review_full_messages)
     else:
         assert all("第一章结构" not in prompt for prompt in draft_prompts)
 
@@ -356,10 +372,10 @@ def test_exhaustive_evidence_missing_ids_gets_one_structural_repair():
                 and "【阶段：修复语义证据 ID】" not in prompt
                 and "证据命名空间：E01-" in prompt
             ):
-                self.calls.append((messages, kwargs))
+                self.calls.append(_snapshot_call(messages, kwargs))
                 return "## 本段证据\n- 主题：有内容但遗漏稳定 ID"
             if "【阶段：修复语义证据 ID】" in prompt:
-                self.calls.append((messages, kwargs))
+                self.calls.append(_snapshot_call(messages, kwargs))
                 return "## 语义证据 E01-001\n- 主题：修复后保留原内容"
             return super().chat(messages, **kwargs)
 
@@ -421,7 +437,7 @@ def test_exhaustive_empty_stage_output_fails(empty_stage, error_pattern):
                 "review": "【阶段：章节编辑审校】",
             }
             if stage_markers[empty_stage] in prompt:
-                self.calls.append((messages, kwargs))
+                self.calls.append(_snapshot_call(messages, kwargs))
                 return "   "
             return super().chat(messages, **kwargs)
 
@@ -440,7 +456,7 @@ def test_exhaustive_review_must_return_complete_markdown_structure():
         def chat(self, messages, **kwargs):
             prompt = messages[-1]["content"]
             if "【阶段：章节编辑审校】" in prompt:
-                self.calls.append((messages, kwargs))
+                self.calls.append(_snapshot_call(messages, kwargs))
                 return "只有一段正文"
             return super().chat(messages, **kwargs)
 
@@ -459,10 +475,10 @@ def test_exhaustive_internal_evidence_id_leak_gets_one_lossless_repair():
         def chat(self, messages, **kwargs):
             prompt = messages[-1]["content"]
             if "【阶段：章节编辑审校】" in prompt and "章节 ID：C03" in prompt:
-                self.calls.append((messages, kwargs))
+                self.calls.append(_snapshot_call(messages, kwargs))
                 return "## C03 审校终稿\n\n核心论证完整。（依据 E01-001）"
             if "【阶段：章节格式修复】" in prompt:
-                self.calls.append((messages, kwargs))
+                self.calls.append(_snapshot_call(messages, kwargs))
                 return "## C03 审校终稿\n\n核心论证完整，且正文内容原样保留。"
             return super().chat(messages, **kwargs)
 
@@ -492,13 +508,13 @@ def test_exhaustive_suspicious_asr_terms_get_a_fidelity_review():
         def chat(self, messages, **kwargs):
             prompt = messages[-1]["content"]
             if "【阶段：章节编辑审校】" in prompt and "章节 ID：C03" in prompt:
-                self.calls.append((messages, kwargs))
+                self.calls.append(_snapshot_call(messages, kwargs))
                 return (
                     "## C03 审校终稿\n\n"
                     "Claude 会创建死丢（Store），使用 FIS5，并持续自我侵化。"
                 )
             if "【阶段：术语保真审校】" in prompt:
-                self.calls.append((messages, kwargs))
+                self.calls.append(_snapshot_call(messages, kwargs))
                 return (
                     "## C03 审校终稿\n\n"
                     "Hermes Agent 会创建和更新 Skill，使用 FTS5，"
@@ -515,14 +531,19 @@ def test_exhaustive_suspicious_asr_terms_get_a_fidelity_review():
 
     result = processor._generate_exhaustive_with_understanding(source)
 
-    fidelity_prompts = [
-        call[0][-1]["content"]
+    fidelity_calls = [
+        call
         for call in llm.calls
         if "【阶段：术语保真审校】" in call[0][-1]["content"]
     ]
-    assert len(fidelity_prompts) == 1
-    assert "不得概括、删减或扩写正文事实" in fidelity_prompts[0]
-    assert "死丢（Store）" in fidelity_prompts[0]
+    assert len(fidelity_calls) == 1
+    fidelity_instruction = fidelity_calls[0][0][-1]["content"]
+    assert "不得概括、删减或扩写正文事实" in fidelity_instruction
+    # 待校对章节不再重发于指令，而是链内的上一条 assistant 回复
+    fidelity_full = "\n".join(m["content"] for m in fidelity_calls[0][0])
+    assert "死丢（Store）" in fidelity_full
+    assert fidelity_calls[0][0][-2]["role"] == "assistant"
+    assert "死丢（Store）" in fidelity_calls[0][0][-2]["content"]
     assert "Hermes Agent 会创建和更新 Skill" in result
     assert "死丢" not in result
     assert "FIS5" not in result
@@ -570,12 +591,16 @@ def test_exhaustive_full_source_is_not_cut_at_legacy_50000_character_limit():
     draft_prompt = "\n".join(
         prompt for prompt in prompts if "【阶段：章节深写】" in prompt
     )
-    review_prompt = "\n".join(
-        prompt for prompt in prompts if "【阶段：章节编辑审校】" in prompt
+    # 审校为链尾增量指令：完整原文经深写 prompt 进入链内前缀
+    review_full = "\n".join(
+        message["content"]
+        for call in llm.calls
+        if "【阶段：章节编辑审校】" in call[0][-1]["content"]
+        for message in call[0]
     )
     assert len(source) > 50000
     assert "最后主题不可丢" in draft_prompt
-    assert "最后主题不可丢" in review_prompt
+    assert "最后主题不可丢" in review_full
 
 
 def test_sanitizer_preserves_structured_line_breaks_but_removes_control_bytes():
@@ -587,3 +612,108 @@ def test_sanitizer_preserves_structured_line_breaks_but_removes_control_bytes():
     )
 
     assert "## 主题\n- 证据 A\t补充内容\n- 证据 B" == result
+
+
+def test_exhaustive_chapter_prompts_share_byte_identical_prefix_through_blueprint():
+    """跨章深写 prompt 到变量区前必须逐字节相同（前缀缓存友好）。"""
+    processor = SimpleProcessor(
+        RecordingLLM(),
+        config={"note_detail_level": "exhaustive"},
+    )
+    blueprint = {
+        "title": "课程",
+        "course_overview": "主线",
+        "learning_outcomes": ["目标"],
+        "terminology": [
+            {"canonical": "Skill", "variants": ["死丢"], "confidence": "high", "kind": "概念", "note": ""}
+        ],
+        "chapters": [],
+    }
+
+    def chapter(cid):
+        return {
+            "chapter_id": cid,
+            "title": f"章节 {cid}",
+            "purpose": "论证",
+            "evidence_ids": ["E01-001"],
+            "source_chunks": [1],
+            "required_points": ["结论"],
+        }
+
+    prompt_c01 = processor._build_exhaustive_chapter_prompt(
+        chapter("C01"),
+        blueprint=blueprint,
+        source_text="第一章原始字幕",
+        evidence_text="第一章证据",
+        pdf_structure=None,
+        extract_images=False,
+    )
+    prompt_c02 = processor._build_exhaustive_chapter_prompt(
+        chapter("C02"),
+        blueprint=blueprint,
+        source_text="完全不同的第二章原始字幕",
+        evidence_text="完全不同的第二章证据",
+        pdf_structure=None,
+        extract_images=False,
+    )
+
+    boundary = "【当前章节】"
+    assert prompt_c01.split(boundary)[0] == prompt_c02.split(boundary)[0]
+    # 蓝图 JSON 必须出现在变量区之前
+    assert prompt_c01.index("【全局蓝图 JSON】") < prompt_c01.index(boundary)
+
+
+def test_exhaustive_evidence_prompts_share_byte_identical_fixed_prefix():
+    """跨段证据 prompt 的固定说明部分必须逐字节相同（前缀缓存友好）。"""
+    processor = SimpleProcessor(
+        RecordingLLM(),
+        config={"note_detail_level": "exhaustive"},
+    )
+    prompt_first = processor._build_exhaustive_evidence_prompt(
+        "第一段正文",
+        index=0,
+        total=2,
+        previous_context="",
+        next_context="第一段结尾",
+    )
+    prompt_second = processor._build_exhaustive_evidence_prompt(
+        "完全不同的第二段正文",
+        index=1,
+        total=2,
+        previous_context="第二段开头",
+        next_context="",
+    )
+
+    boundary = "【本段定位】"
+    assert prompt_first.split(boundary)[0] == prompt_second.split(boundary)[0]
+    assert "第 1/2 段" in prompt_first
+    assert "第 2/2 段" in prompt_second
+    assert "证据命名空间：E01-" in prompt_first
+    assert "证据命名空间：E02-" in prompt_second
+
+
+def test_exhaustive_review_uses_chapter_message_chain_without_resending_material():
+    """审校必须以深写消息为前缀发起，且增量指令不重发蓝图与原文。"""
+    llm = UnderstandingPipelineLLM()
+    processor = SimpleProcessor(
+        llm,
+        config={"note_detail_level": "exhaustive"},
+    )
+    source = " ".join(f"链式内容{i:04d}" for i in range(1800))
+
+    processor._generate_exhaustive_with_understanding(source)
+
+    review_calls = [
+        call
+        for call in llm.calls
+        if "【阶段：章节编辑审校】" in call[0][-1]["content"]
+    ]
+    assert review_calls
+    for messages, _kwargs in review_calls:
+        roles = [message["role"] for message in messages]
+        # 链结构：system + user(深写 prompt) + assistant(初稿) + user(审校指令)
+        assert roles == ["system", "user", "assistant", "user"]
+        assert "【阶段：章节深写】" in messages[1]["content"]
+        review_instruction = messages[-1]["content"]
+        assert "【全局蓝图 JSON】" not in review_instruction
+        assert "【当前章节全部原始字幕】" not in review_instruction
