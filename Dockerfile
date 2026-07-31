@@ -1,12 +1,9 @@
-# syntax=docker/dockerfile:1
-
 # 阶段 1：前端构建
 FROM node:22-alpine AS fe
 WORKDIR /fe
 COPY frontend/package*.json ./
-ARG NPM_REGISTRY=https://registry.npmjs.org
-RUN --mount=type=cache,target=/root/.npm \
-    npm ci --registry="${NPM_REGISTRY}" --prefer-offline --no-audit --no-fund
+ARG NPM_REGISTRY=https://registry.npmmirror.com
+RUN npm ci --registry="${NPM_REGISTRY}" --prefer-offline --no-audit --no-fund
 COPY frontend/ ./
 RUN npm run build
 
