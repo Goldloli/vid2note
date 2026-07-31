@@ -120,9 +120,10 @@ class Database:
         """获取线程本地连接(契约 §3.3:建连后设置 PRAGMA)"""
         if not hasattr(self._local, 'connection') or self._local.connection is None:
             conn = sqlite3.connect(self.db_path, check_same_thread=False)
-            # WAL:提高并发写容忍;synchronous=NORMAL:WAL 下安全且更快;
-            # foreign_keys=ON:启用外键(当前 schema 无 FK,保持契约一致性)。
-            conn.execute("PRAGMA journal_mode=WAL")
+            # journal_mode=DELETE:不用 WAL。Docker Desktop bind mount(osxfs/virtiofs)对
+            # WAL 的 -shm/-wal(mmap+文件锁)支持不可靠,会触发 "disk I/O error" 使任务读写
+            # 失败;DELETE 用 rollback journal,兼容 bind mount。synchronous=NORMAL 安全且快。
+            conn.execute("PRAGMA journal_mode=DELETE")
             conn.execute("PRAGMA synchronous=NORMAL")
             conn.execute("PRAGMA foreign_keys=ON")
             conn.row_factory = sqlite3.Row
