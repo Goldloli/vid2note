@@ -8,11 +8,19 @@ from __future__ import annotations
 import json
 import logging
 import os
+import random
 import time
 from typing import Optional
 
 import requests
+from requests.adapters import HTTPAdapter
 
+try:  # urllib3 新旧版本参数名兼容
+    from urllib3.util.retry import Retry
+except ImportError:  # pragma: no cover
+    from requests.packages.urllib3.util.retry import Retry
+
+from . import asr_cache
 from .engine import (
     REASON_AUTH_FAILED,
     REASON_INVALID_RESPONSE,
@@ -61,6 +69,28 @@ def _raise_for_status(resp: requests.Response, action: str) -> None:
         )
 
 
+def _build_session() -> requests.Session:
+    """带有限重试的 Session：对 429/5xx 自动重试（连接复用）。
+
+    重试由 urllib3 在底层执行；用尽后仍按 ``_raise_for_status`` 抛结构化 ``AsrError``
+    触发 pipeline 降级（保留 vid2note 现有错误分类，不倒退）。
+    """
+    session = requests.Session()
+    retry_kwargs = dict(
+        total=3,
+        backoff_factor=0.5,
+        status_forcelist=[429, 500, 502, 503, 504],
+    )
+    try:
+        retry = Retry(allowed_methods=frozenset(["GET", "PUT", "POST"]), **retry_kwargs)
+    except TypeError:  # 旧 urllib3 用 method_whitelist
+        retry = Retry(method_whitelist=frozenset(["GET", "PUT", "POST"]), **retry_kwargs)
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    return session
+
+
 class _BcutClient:
     """bcut 在线 ASR HTTP 客户端。"""
 
@@ -72,6 +102,7 @@ class _BcutClient:
 
     def __init__(self, timeout: float) -> None:
         self.timeout = timeout
+        self._session = _build_session()
         self.task_id: Optional[str] = None
         self._in_boss_key = None
         self._resource_id = None
@@ -83,7 +114,7 @@ class _BcutClient:
     def _post(self, path: str, payload: dict) -> dict:
         url = f"{self.BASE}{path}"
         try:
-            resp = requests.post(
+            resp = self._session.post(
                 url,
                 data=json.dumps(payload),
                 headers=self.HEADERS,
@@ -139,7 +170,7 @@ class _BcutClient:
             start = clip * self._per_size
             end = (clip + 1) * self._per_size
             try:
-                resp = requests.put(
+                resp = self._session.put(
                     upload_url,
                     data=binary[start:end],
                     headers=self.HEADERS,
@@ -195,7 +226,7 @@ class _BcutClient:
     def result(self, task_id: Optional[str] = None) -> dict:
         url = f"{self.BASE}/task/result"
         try:
-            resp = requests.get(
+            resp = self._session.get(
                 url,
                 params={"model_id": 7, "task_id": task_id or self.task_id},
                 headers=self.HEADERS,
@@ -232,12 +263,18 @@ class BcutEngine(AsrEngine):
     def __init__(
         self,
         timeout: float = 120.0,
-        query_interval: float = 2.0,
+        query_interval: float = 1.0,
         query_max_wait: float = 600.0,
+        cache_enabled: bool = True,
+        cache_dir: Optional[str] = None,
+        max_retries: int = 2,
     ) -> None:
         self.timeout = timeout
-        self.query_interval = query_interval
-        self.query_max_wait = query_max_wait
+        self.query_interval = max(0.5, float(query_interval))
+        self.query_max_wait = float(query_max_wait)
+        self.cache_enabled = bool(cache_enabled)
+        self.cache_dir = cache_dir
+        self.max_retries = max(0, int(max_retries))
 
     def transcribe(
         self,
@@ -261,28 +298,52 @@ class BcutEngine(AsrEngine):
         with open(audio_path, "rb") as file:
             binary = file.read()
 
-        client = _BcutClient(self.timeout)
-        if on_progress:
-            on_progress(15, "上传音频（bcut）")
-        client.upload(binary)
-        if on_progress:
-            on_progress(50, "提交转写任务（bcut）")
-        client.create_task()
-        if on_progress:
-            on_progress(65, "获取转写结果（bcut）")
+        # crc32 文件级缓存：同音频命中跳过上传+轮询（借鉴 社区 bcut 参考实现 BaseASR）
+        key = asr_cache.cache_key(self.name, binary, lang="")
+        if self.cache_enabled:
+            cached = asr_cache.get(self.cache_dir, key)
+            if cached is not None:
+                return cached
 
-        deadline = time.time() + self.query_max_wait
-        while True:
-            task_response = client.result()
-            if task_response.get("state") == 4:
-                return self._parse_result(task_response)
-            if time.time() > deadline:
-                raise AsrError(
-                    "bcut 转写轮询超时",
-                    reason=REASON_TIMEOUT,
-                    engine=self.name,
-                )
-            time.sleep(self.query_interval)
+        # 上传 + 轮询（带重试：bcut 间歇失败重试 max_retries 次，避免轻易降级本地慢引擎）
+        last_exc: Optional[AsrError] = None
+        for attempt in range(self.max_retries + 1):
+            client = _BcutClient(self.timeout)
+            try:
+                if on_progress:
+                    on_progress(15, "上传音频（bcut）")
+                client.upload(binary)
+                if on_progress:
+                    on_progress(50, "提交转写任务（bcut）")
+                client.create_task()
+                if on_progress:
+                    on_progress(65, "获取转写结果（bcut）")
+                deadline = time.time() + self.query_max_wait
+                interval = self.query_interval
+                while True:
+                    task_response = client.result()
+                    if task_response.get("state") == 4:
+                        cues = self._parse_result(task_response)
+                        if self.cache_enabled:
+                            asr_cache.put(self.cache_dir, key, cues)
+                        return cues
+                    if time.time() > deadline:
+                        raise AsrError(
+                            "bcut 转写轮询超时",
+                            reason=REASON_TIMEOUT,
+                            engine=self.name,
+                        )
+                    # 指数退避 + 抖动（起步 query_interval，上限 8s），替代固定 2s
+                    time.sleep(min(interval, 8.0) + random.uniform(0, 0.3))
+                    interval = min(interval * 2, 8.0)
+            except AsrError as exc:
+                last_exc = exc
+                if attempt < self.max_retries:
+                    _LOGGER.info("bcut 失败（%s），重试 %d/%d", exc.reason, attempt + 1, self.max_retries)
+                    continue
+        raise last_exc if last_exc else AsrError(
+            "bcut 转写失败", reason=REASON_INVALID_RESPONSE, engine=self.name
+        )
 
     @staticmethod
     def _parse_result(task_response: dict) -> list[Cue]:

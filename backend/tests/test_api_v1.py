@@ -128,7 +128,7 @@ class TestSettings:
         assert state == {"configured": True, "masked": "••••••••a1b2", "source": "encrypted"}
         serialized = __import__("json").dumps(body, ensure_ascii=False)
         assert "sk-secret-a1b2" not in serialized
-        assert body["settings"]["concurrency.max"] == "1"
+        assert body["settings"]["concurrency.max"] == "2"
         assert "settings.json" in body["storage"]["settings_path"]
         assert "credentials.enc" in body["storage"]["credentials_path"]
 
@@ -147,7 +147,7 @@ class TestSettings:
         r = client.put("/api/v1/settings", json={"concurrency.max": 9})
         assert r.status_code == 400
         current = client.get("/api/v1/settings").json()["settings"]
-        assert current["concurrency.max"] == "1"
+        assert current["concurrency.max"] == "2"
 
     def test_put_invalid_enum_rejected(self, client):
         r = client.put("/api/v1/settings", json={"pdf.mode": "weird"})
@@ -421,10 +421,10 @@ class TestTasksCrud:
 # --------------------------------------------------------------------------- #
 class TestQueueFull:
     def test_create_when_queue_full_429(self, client):
-        assert client.post("/api/v1/tasks", data={"source_url": "https://youtu.be/q1"}).status_code == 201
-        assert client.post("/api/v1/tasks", data={"source_url": "https://youtu.be/q2"}).status_code == 201
-        # 容量已满(2 个 pending,无 worker 消费)→ 第 3 个 429
-        r = client.post("/api/v1/tasks", data={"source_url": "https://youtu.be/q3"})
+        # 队列容量 = concurrency(默认 2) × 2 = 4（_queue_full）；4 个 pending 后第 5 个 429
+        for i in range(1, 5):
+            assert client.post("/api/v1/tasks", data={"source_url": f"https://youtu.be/q{i}"}).status_code == 201
+        r = client.post("/api/v1/tasks", data={"source_url": "https://youtu.be/q5"})
         assert r.status_code == 429
 
 

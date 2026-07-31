@@ -35,7 +35,7 @@ DEFAULT_SETTINGS: Dict[str, str] = {
     "pdf.mode": "pypdf",
     # 兼容旧调用；新文件永不持久化该键。
     "bilibili.cookie": "{}",
-    "concurrency.max": "1",
+    "concurrency.max": "2",
     "note.output_language": "zh",
     "note.detail_level": "balanced",
     "note.extract_images": "false",
@@ -55,10 +55,10 @@ DEFAULT_SETTINGS: Dict[str, str] = {
 
 MIN_CONCURRENCY = 1
 MAX_CONCURRENCY = 3
-DEFAULT_CONCURRENCY = 1
+DEFAULT_CONCURRENCY = 2
 _RETENTION_VALUES = frozenset({"permanent", "7d", "30d"})
 _LANGUAGES = frozenset({"zh", "en"})
-_DETAIL_LEVELS = frozenset({"concise", "balanced", "detailed", "exhaustive"})
+_DETAIL_LEVELS = frozenset({"concise", "balanced", "detailed", "thorough", "exhaustive"})
 _PDF_MODES = frozenset({"pypdf"})
 _ASR_ENGINES = frozenset({"bcut", "whisper_cpp", "external"})
 

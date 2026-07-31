@@ -92,9 +92,14 @@ class AsrConfig:
     # VAD 与并发（design D3 / D8）
     vad_threshold_seconds: float = 300.0         # > 5 分钟才触发分段
     vad_target_segment_seconds: Optional[float] = None
-    concurrency: int = 1
+    concurrency: int = 2  # design D6：默认 2 让本地 whisper 多段并行真正生效
     # 单次 HTTP/转写超时上限（用于 VAD 分段内调用）
     request_timeout: float = 120.0
+    # bcut 在线：轮询退避起步间隔 / 最大等待 / crc32 结果缓存
+    query_interval: float = 1.0
+    query_max_wait: float = 600.0
+    cache_enabled: bool = True
+    cache_dir: str = ""
 
     @classmethod
     def from_settings(cls, settings: dict) -> "AsrConfig":
@@ -135,8 +140,12 @@ class AsrConfig:
             vad_target_segment_seconds=(
                 float(cfg["vad_target_segment_seconds"]) if cfg.get("vad_target_segment_seconds") else None
             ),
-            concurrency=max(1, int(cfg.get("concurrency", settings.get("concurrency.max", 1)) or 1)),
+            concurrency=max(1, int(cfg.get("concurrency", settings.get("concurrency.max", 2)) or 2)),
             request_timeout=float(cfg.get("request_timeout", 120.0) or 120.0),
+            query_interval=max(0.5, float(cfg.get("query_interval", 1.0) or 1.0)),
+            query_max_wait=float(cfg.get("query_max_wait", 600.0) or 600.0),
+            cache_enabled=bool(cfg.get("cache_enabled", True)),
+            cache_dir=str(cfg.get("cache_dir", "") or ""),
         )
 
 
@@ -150,6 +159,10 @@ def build_engines(config: AsrConfig) -> dict[str, AsrEngine]:
     return {
         ENGINE_BCUT: BcutEngine(
             timeout=config.bcut_timeout,
+            query_interval=config.query_interval,
+            query_max_wait=config.query_max_wait,
+            cache_enabled=config.cache_enabled,
+            cache_dir=config.cache_dir or None,
         ),
         ENGINE_WHISPER: WhisperCppEngine(
             model_path=config.whisper_model_path,
@@ -187,6 +200,11 @@ def resolve_engine_order(config: AsrConfig) -> list[str]:
     if ENGINE_WHISPER not in order:
         order.append(ENGINE_WHISPER)
     return order
+
+
+# 在线引擎失败多为间歇（限流/抖动/服务端 data=null），不应让单段失败永久跳过它，
+# 否则一段失败会把后续所有段一起塌方到慢速本地引擎。
+_ONLINE_ENGINE_NAMES = frozenset({ENGINE_BCUT, ENGINE_EXTERNAL})
 
 
 # --------------------------------------------------------------------------- #
@@ -281,14 +299,20 @@ class _EngineResolver:
             try:
                 cues = engine.transcribe(audio_path, on_progress=on_progress)
                 with self._lock:
-                    self._preferred = name
+                    # 只把在线引擎记为 preferred：本地降级成功不锁定 preferred，否则
+                    # 一段在线间歇失败会让后续所有段都锁定在慢速本地引擎上
+                    if name in _ONLINE_ENGINE_NAMES:
+                        self._preferred = name
                 return cues
             except CancelledError:
                 raise
             except AsrError as e:
                 last_error = e
-                with self._lock:
-                    self._failed.add(name)
+                # 在线引擎失败多为间歇，不永久标记：后续段仍尝试在线，避免一段失败
+                # 全局塌方到慢速本地引擎；本地引擎失败（模型缺失等）才永久标记
+                if name not in _ONLINE_ENGINE_NAMES:
+                    with self._lock:
+                        self._failed.add(name)
                 # single 策略：不降级，直接以该引擎失败结束
                 if self._strategy == STRATEGY_SINGLE:
                     raise
@@ -302,8 +326,9 @@ class _EngineResolver:
                 )
             except Exception as e:  # 引擎实现意外异常，归一为 AsrError 后降级
                 last_error = AsrError(f"引擎 {name} 异常：{e}", reason="unknown", engine=name)
-                with self._lock:
-                    self._failed.add(name)
+                if name not in _ONLINE_ENGINE_NAMES:
+                    with self._lock:
+                        self._failed.add(name)
                 if self._strategy == STRATEGY_SINGLE:
                     raise last_error
                 nxt = self._next_available(name, order)
@@ -374,7 +399,10 @@ def transcribe_audio(
             on_log("info", "音频较短或时长未知，整段转录（不触发 VAD 分段）")
         return resolver.transcribe(audio_path, on_progress=on_progress)
 
-    # 长音频 → VAD 静音切分 + 并行转录
+    # 长音频 → VAD 静音切分 + 并行转录（design D1 修订：bcut 整段上限 ~6min——实测
+    # 6min 成功 / 8min 失败，故长音频一律分段）。每段 < vad_threshold（默认 5min），
+    # 在线引擎每段整段必成功；concurrency 默认 2 让多段并行。MUST NOT 对长音频整段
+    # 尝试（注定失败且浪费数分钟轮询）。
     if work_dir is None:
         work_dir = os.path.join(os.path.dirname(os.path.abspath(audio_path)), f".asr_segments_{os.getpid()}")
     if on_log:

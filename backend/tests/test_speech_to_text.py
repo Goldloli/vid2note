@@ -303,3 +303,136 @@ class TestContractEntry:
             transcribe(ctx, "audio/task_t/nope.wav", srt_rel,
                        AsrConfig(strategy="single", engine="whisper_cpp", whisper_model_path="/tmp/x"))
         assert not (tmp_path / srt_rel).exists()
+
+
+# ----------------------------- 在线整段 vs 本地 VAD 分流（optimize-asr-throughput）----------------------------- #
+
+
+class TestLongAudioVadSplit:
+    """长音频一律 VAD 分段并行（design D1 修订：bcut 整段上限 ~6min，长音频整段必失败）。"""
+
+    def _long_wav(self, tmp_path):
+        p = tmp_path / "long.wav"
+        p.write_bytes(b"fake-audio-bytes")
+        return str(p)
+
+    def test_online_long_audio_uses_vad_split(self, tmp_path, monkeypatch):
+        """在线引擎 + 长音频 → VAD 分段（不再整段尝试，避免整段上限浪费）。"""
+        monkeypatch.setattr(P, "get_audio_duration_seconds", lambda p: 7200.0)
+        split = {"called": False}
+        wav = self._long_wav(tmp_path)
+        monkeypatch.setattr(P, "split_audio_by_silence",
+                            lambda *a, **k: split.__setitem__("called", True) or [AudioSegment(0, 60, wav)])
+        monkeypatch.setattr(P, "build_engines",
+                            lambda cfg: {"bcut": _StubOnline(), "whisper_cpp": _StubLocal()})
+        P.transcribe_audio(wav, AsrConfig(strategy="online_first", engine="bcut"))
+        assert split["called"] is True
+
+    def test_local_long_audio_uses_vad_split(self, tmp_path, monkeypatch):
+        """本地引擎 + 长音频 → VAD 分段并行。"""
+        monkeypatch.setattr(P, "get_audio_duration_seconds", lambda p: 7200.0)
+        split = {"called": False}
+        wav = self._long_wav(tmp_path)
+        monkeypatch.setattr(P, "split_audio_by_silence",
+                            lambda *a, **k: split.__setitem__("called", True) or [AudioSegment(0, 60, wav)])
+        monkeypatch.setattr(P, "build_engines", lambda cfg: {"whisper_cpp": _StubLocal()})
+        P.transcribe_audio(wav, AsrConfig(strategy="single", engine="whisper_cpp"))
+        assert split["called"] is True
+
+
+# ----------------------------- crc32 文件级缓存（optimize-asr-throughput）----------------------------- #
+
+
+class _StubBcutClient:
+    """绕过真实 HTTP 的 bcut 客户端：上传计数、result 立即返回完成。"""
+    def __init__(self, timeout, payload_text="缓存测试"):
+        self._payload = payload_text
+    def upload(self, binary):
+        _StubBcutClient.uploads += 1
+    def create_task(self):
+        return "tid"
+    def result(self):
+        return {"state": 4, "result": '{"utterances":[{"start_time":0,"end_time":1000,"transcript":"%s"}]}' % self._payload}
+
+
+class TestAsrCache:
+    def test_cache_hit_skips_second_upload(self, tmp_path, monkeypatch):
+        from src.speech_to_text import bcut as bcut_mod
+        _StubBcutClient.uploads = 0
+        monkeypatch.setattr(bcut_mod, "_BcutClient", _StubBcutClient)
+        wav = tmp_path / "a.wav"
+        wav.write_bytes(b"\x01\x02\x03\x04")
+        eng = BcutEngine(cache_enabled=True, cache_dir=str(tmp_path / "cache"))
+        first = eng.transcribe(str(wav))
+        second = eng.transcribe(str(wav))  # 命中缓存，跳过上传
+        assert _StubBcutClient.uploads == 1
+        assert first == second
+        assert first[0].text == "缓存测试"
+
+    def test_different_audio_not_cached(self, tmp_path, monkeypatch):
+        from src.speech_to_text import bcut as bcut_mod
+        _StubBcutClient.uploads = 0
+        monkeypatch.setattr(bcut_mod, "_BcutClient", _StubBcutClient)
+        a = tmp_path / "a.wav"; a.write_bytes(b"\x01\x02")
+        b = tmp_path / "b.wav"; b.write_bytes(b"\x03\x04\x05")
+        eng = BcutEngine(cache_enabled=True, cache_dir=str(tmp_path / "cache"))
+        eng.transcribe(str(a))
+        eng.transcribe(str(b))
+        assert _StubBcutClient.uploads == 2
+
+    def test_cache_disabled_uploads_both(self, tmp_path, monkeypatch):
+        from src.speech_to_text import bcut as bcut_mod
+        _StubBcutClient.uploads = 0
+        monkeypatch.setattr(bcut_mod, "_BcutClient", _StubBcutClient)
+        wav = tmp_path / "a.wav"
+        wav.write_bytes(b"\x01\x02\x03")
+        eng = BcutEngine(cache_enabled=False, cache_dir=str(tmp_path / "cache"))
+        eng.transcribe(str(wav))
+        eng.transcribe(str(wav))
+        assert _StubBcutClient.uploads == 2
+
+
+class TestResilience:
+    """长视频分段 ASR 韧性：bcut 间歇失败不全局塌方到 whisper + bcut 内部重试。"""
+
+    def test_online_failure_does_not_globally_disable_bcut(self):
+        """bcut 单段失败：该段降级 whisper，但下一段仍尝试 bcut（不永久锁定 whisper）。"""
+        attempts = {"bcut": 0}
+
+        class FlakyBcut(AsrEngine):
+            name = "bcut"
+            def transcribe(self, ap, on_progress=None):
+                attempts["bcut"] += 1
+                if attempts["bcut"] == 1:
+                    raise AsrError("间歇失败", reason="invalid_response", engine="bcut")
+                return [Cue(0.0, 1.0, "bcut 段")]
+
+        engines = {"bcut": FlakyBcut(), "whisper_cpp": _StubLocal()}
+        resolver = P._EngineResolver(engines, ["bcut", "whisper_cpp"], strategy="online_first")
+        cues1 = resolver.transcribe("a.wav")   # 第 1 段 bcut 失败 → whisper 兜底
+        assert cues1[0].text == "本地字幕"
+        cues2 = resolver.transcribe("a.wav")   # 第 2 段仍试 bcut（未永久禁用）→ 成功
+        assert cues2[0].text == "bcut 段"
+        assert attempts["bcut"] == 2
+
+    def test_bcut_retries_intermittent_failure(self, tmp_path, monkeypatch):
+        """bcut 单段失败时内部重试，重试成功则不降级。"""
+        from src.speech_to_text import bcut as bcut_mod
+        attempts = {"upload": 0}
+
+        class RetryClient:
+            def __init__(self, timeout): pass
+            def upload(self, binary):
+                attempts["upload"] += 1
+                if attempts["upload"] == 1:
+                    raise AsrError("间歇", reason="invalid_response", engine="bcut")
+            def create_task(self): return "tid"
+            def result(self):
+                return {"state": 4, "result": '{"utterances":[{"start_time":0,"end_time":1000,"transcript":"重试成功"}]}'}
+
+        monkeypatch.setattr(bcut_mod, "_BcutClient", RetryClient)
+        wav = tmp_path / "a.wav"; wav.write_bytes(b"\x01\x02\x03")
+        eng = BcutEngine(cache_enabled=False, max_retries=2)
+        cues = eng.transcribe(str(wav))
+        assert cues[0].text == "重试成功"
+        assert attempts["upload"] == 2  # 第 1 次失败 + 重试成功
