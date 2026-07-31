@@ -124,7 +124,12 @@ class OpenAICompatibleLLM(BaseLLM):
                 request["temperature"] = kwargs["temperature"]
             else:
                 request["temperature"] = 0.3
-            response = client.chat.completions.create(**request)
+            # DeepSeek-v4 默认开思考模式，复杂任务思考会很长、耗尽 max_tokens 使答案
+            # (content) 来不及生成；vid2note 的 prompt 工程已给明确指令，关思考让模型
+            # 直接输出答案。实测 thinking={"type":"disabled"}（或 reasoning_effort=none）
+            # 可关；enable_thinking 无效。其他 provider 不含 deepseek base_url 时传空。
+            extra_body = {"thinking": {"type": "disabled"}} if "deepseek" in (self.base_url or "").lower() else {}
+            response = client.chat.completions.create(**request, extra_body=extra_body)
             # 暂存本次调用的归一化用量(消费方须在下次 chat 前读取;全部调用串行)
             self.last_usage = normalize_usage(getattr(response, "usage", None))
             return self.extract_content(response)
