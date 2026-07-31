@@ -31,7 +31,7 @@ _ENUM_ALLOWED: Dict[str, frozenset[str]] = {
     "pdf.mode": frozenset({"pypdf"}),
     "note.output_language": frozenset({"zh", "en"}),
     "note.detail_level": frozenset(
-        {"concise", "balanced", "detailed", "exhaustive"}
+        {"concise", "balanced", "detailed", "thorough", "exhaustive"}
     ),
     "note.image_quality": frozenset({"low", "medium", "high"}),
     "retention.video": frozenset({"permanent", "7d", "30d"}),

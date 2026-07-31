@@ -45,6 +45,15 @@ EXHAUSTIVE_BLUEPRINT_MAX_TOKENS = 24000
 EXHAUSTIVE_DRAFT_MAX_TOKENS = 32000
 EXHAUSTIVE_REVIEW_MAX_TOKENS = 32000
 
+# thorough 档（比较详细）：全文常驻上下文的双钴引擎（理解→分章深写→机械组装）。
+# 2-3 小时课程字幕约 2.5 万 token，远低于 DeepSeek-v4 的 1M 上下文；超过此字符阈值
+# 则退回 exhaustive 分段引擎，避免单次上下文装不下导致静默截断丢内容。
+THOROUGH_FULLCONTEXT_MAX_CHARS = 500000
+THOROUGH_OUTLINE_MAX_TOKENS = 6000
+THOROUGH_CHAPTER_MAX_TOKENS = 6000
+THOROUGH_MIN_CHAPTERS = 6
+THOROUGH_MAX_CHAPTERS = 8
+
 # 截图嵌入 prompt 指令(extract_images=True 时追加到笔记 prompt;openspec 截图 bug 修复)
 SCREENSHOT_INSTRUCTION = """
 【关键帧截图(已开启)】
@@ -195,7 +204,13 @@ class SimpleProcessor:
         if pdf_structure:
             self.logger.info("使用PDF参考生成笔记")
             try:
-                if self._requires_exhaustive_chunking(subtitle_text):
+                if self.note_detail_level == "thorough":
+                    result = self._generate_thorough_with_fullcontext(
+                        subtitle_text,
+                        pdf_structure=pdf_structure,
+                        extract_images=extract_images,
+                    )
+                elif self._requires_exhaustive_chunking(subtitle_text):
                     result = self._generate_exhaustive_with_understanding(
                         subtitle_text,
                         pdf_structure=pdf_structure,
@@ -211,7 +226,12 @@ class SimpleProcessor:
         else:
             self.logger.info("直接生成笔记")
             try:
-                if self._requires_exhaustive_chunking(subtitle_text):
+                if self.note_detail_level == "thorough":
+                    result = self._generate_thorough_with_fullcontext(
+                        subtitle_text,
+                        extract_images=extract_images,
+                    )
+                elif self._requires_exhaustive_chunking(subtitle_text):
                     result = self._generate_exhaustive_with_understanding(
                         subtitle_text,
                         extract_images=extract_images,
@@ -1705,6 +1725,251 @@ class SimpleProcessor:
             pdf_structure=pdf_structure,
             extract_images=extract_images,
         )
+
+    # ------------------------------------------------------------------ #
+    # thorough 档（比较详细）：全文常驻上下文的双钴引擎
+    # ------------------------------------------------------------------ #
+    def _generate_thorough_with_fullcontext(
+        self,
+        subtitle_text: str,
+        *,
+        pdf_structure: Optional[Dict[str, Any]] = None,
+        extract_images: bool = False,
+    ) -> str:
+        """比较详细档：全文常驻上下文的双钴引擎。
+
+        依赖 LLM 长上下文把全部字幕常驻于每次调用，消灭 map-reduce 的重复发送；
+        跨章稳定前缀命中前缀缓存。流程：全局理解(1 次) → 分章深写(M 次) → 机械组装。
+        字幕超长时退回 exhaustive 分段引擎兜底，MUST NOT 静默截断。
+        """
+        body = str(subtitle_text or "").strip()
+        if not body:
+            raise ValueError("比较详细笔记生成失败：字幕正文为空")
+        if len(body) > THOROUGH_FULLCONTEXT_MAX_CHARS:
+            self.logger.warning(
+                f"比较详细字幕超长({len(body)} 字符 > {THOROUGH_FULLCONTEXT_MAX_CHARS})，"
+                "退回 exhaustive 分段引擎"
+            )
+            return self._generate_exhaustive_with_understanding(
+                body,
+                pdf_structure=pdf_structure,
+                extract_images=extract_images,
+            )
+
+        self.logger.info(f"比较详细启用全文常驻引擎：输入 {len(body)} 字符")
+        system_message = (
+            "你是资深课程笔记专家。先充分理解全文并规划结构，再据此撰写高质量深度笔记。"
+        )
+        # outline_prompt 在阶段 1 与阶段 2 复用同一字符串，保证跨章前缀逐字节稳定以命中缓存
+        outline_prompt = self._build_thorough_outline_prompt(
+            body, pdf_structure=pdf_structure
+        )
+        outline_messages = [
+            {"role": "system", "content": system_message},
+            {"role": "user", "content": outline_prompt},
+        ]
+        outline = self._call_llm(
+            outline_messages,
+            max_tokens=THOROUGH_OUTLINE_MAX_TOKENS,
+            timeout=300,
+            operation_name="比较详细字幕理解(1/1)",
+        ).strip()
+        if not outline:
+            raise RuntimeError("比较详细全局理解输出为空")
+        try:
+            outline_data = self._parse_thorough_outline(outline)
+        except RuntimeError as parse_error:
+            # JSON 修复接在理解链尾，不重发全文（全文已在链内前缀中）
+            outline_messages.append({"role": "assistant", "content": outline})
+            outline_messages.append(
+                {
+                    "role": "user",
+                    "content": self._build_thorough_outline_repair_instruction(
+                        str(parse_error)
+                    ),
+                }
+            )
+            outline = self._call_llm(
+                outline_messages,
+                max_tokens=THOROUGH_OUTLINE_MAX_TOKENS,
+                timeout=300,
+                operation_name="比较详细字幕理解(1/1)",
+            ).strip()
+            if not outline:
+                raise RuntimeError("比较详细全局理解修复输出为空")
+            outline_data = self._parse_thorough_outline(outline)
+
+        chapters = outline_data["chapters"]
+        chapter_total = len(chapters)
+        # 复用通用进度上报（understand/draft phase 与现有 _note_stage_progress 对齐）
+        self._report_exhaustive_progress("understand", 1, 1)
+
+        chapter_notes: list[str] = []
+        for idx, chapter in enumerate(chapters, start=1):
+            instruction = self._build_thorough_chapter_instruction(
+                chapter, idx=idx, total=chapter_total, extract_images=extract_images
+            )
+            chapter_messages = [
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": outline_prompt},      # 命中阶段 1 前缀
+                {"role": "assistant", "content": outline},         # 命中阶段 1 输出
+                {"role": "user", "content": instruction},
+            ]
+            chapter_md = self._clean_markdown_output(
+                self._call_llm(
+                    chapter_messages,
+                    max_tokens=THOROUGH_CHAPTER_MAX_TOKENS,
+                    timeout=600,
+                    operation_name=f"比较详细章节初稿({idx}/{chapter_total})",
+                )
+            )
+            if not chapter_md:
+                raise RuntimeError(
+                    f"比较详细章节初稿 {idx}/{chapter_total} 输出为空"
+                )
+            chapter_notes.append(chapter_md)
+            self._report_exhaustive_progress("draft", idx, chapter_total)
+
+        final_markdown = self._assemble_thorough_note(outline_data, chapter_notes)
+        self.logger.info(
+            f"比较详细笔记完成：输入 {len(body)} 字符，章节 {chapter_total} 个，"
+            f"终稿 {len(final_markdown)} 字符"
+        )
+        return final_markdown
+
+    def _build_thorough_outline_prompt(
+        self,
+        body: str,
+        *,
+        pdf_structure: Optional[Dict[str, Any]],
+    ) -> str:
+        """阶段 1 全局理解 prompt：全文 → 大纲 JSON + 术语表。
+
+        该字符串在阶段 1 与阶段 2（分章深写前缀）逐字节复用，故不得包含每次调用
+        变化的字段；正文与讲义参考经确定性清洗，跨调用稳定。
+        """
+        pdf_context = self._exhaustive_reference_context(pdf_structure)
+        return f"""
+{detail_instruction("thorough")}
+
+以下是一份课程字幕的完整正文（可能来自直播，含寒暄、点名、口头禅等噪声）。请充分理解全文，只输出一个严格 JSON 对象（不要 ``` 代码块围栏）：
+{{
+  "title": "准确、具体的课程标题",
+  "course_overview": "中心问题、核心论点链与最终结论",
+  "terminology": [{{"canonical": "规范专名", "variants": ["字幕中的音译或错拼"], "confidence": "high 或 uncertain", "note": "裁决依据"}}],
+  "chapters": [{{"title": "逻辑章节标题", "purpose": "本章在全局论证中的作用", "key_points": ["必须深入展开的细分要点（含数据/案例/边界）"]}}]
+}}
+
+规划要求：
+- 合并跨时段重复主题；区分概念与产品；ASR 无法确认的专名标 uncertain；不得捏造外部事实
+- 设计 {THOROUGH_MIN_CHAPTERS}-{THOROUGH_MAX_CHAPTERS} 个逻辑章节（不要少于 {THOROUGH_MIN_CHAPTERS}），每章 key_points 列出 5-8 个必须展开的细分要点
+- 章节顺序服从理解和教学逻辑，不服从字幕时间顺序；术语只做高置信拼写校对
+
+{pdf_context}
+
+【课程字幕全文】
+{self._sanitize_content(body, max_length=None)}
+""".strip()
+
+    def _build_thorough_outline_repair_instruction(self, parse_error: str) -> str:
+        """阶段 1 JSON 修复的链尾增量指令；全文已在链内前缀中。"""
+        return f"""
+【阶段：修复大纲 JSON】
+你上一则回复包含有价值的规划内容，但 JSON 语法或完整性未通过严格解析。请依据全文返回一份完整、可解析的大纲 JSON。
+
+解析错误：{self._sanitize_content(parse_error, max_length=None)}
+
+要求：
+- 沿用原 schema（title / course_overview / terminology / chapters），chapters 含 {THOROUGH_MIN_CHAPTERS}-{THOROUGH_MAX_CHAPTERS} 章，每章含 purpose 与 key_points
+- 不得遗漏术语裁决；不得捏造字幕中不存在的事实
+- 只返回严格 JSON，不要 Markdown 围栏或说明文字
+""".strip()
+
+    def _parse_thorough_outline(self, content: str) -> Dict[str, Any]:
+        """解析并校验全局理解大纲 JSON，拒绝无法机械验证的自由文本。"""
+        raw = str(content or "").strip()
+        if raw.startswith("```"):
+            lines = raw.splitlines()[1:]
+            if lines and lines[-1].strip().startswith("```"):
+                lines.pop()
+            raw = "\n".join(lines).strip()
+        start = raw.find("{")
+        end = raw.rfind("}")
+        if start < 0 or end < 0 or end <= start:
+            raise RuntimeError("比较详细大纲未找到 JSON 对象")
+        try:
+            data = json.loads(raw[start : end + 1])
+        except Exception as exc:  # noqa: BLE001 - 统一抛 RuntimeError 由上层修复
+            raise RuntimeError(f"比较详细大纲 JSON 解析失败：{exc}") from exc
+        for field in ("title", "course_overview", "chapters"):
+            if not data.get(field):
+                raise RuntimeError(f"比较详细大纲缺少字段：{field}")
+        chapters = data["chapters"]
+        if not isinstance(chapters, list) or len(chapters) < THOROUGH_MIN_CHAPTERS:
+            raise RuntimeError(
+                f"比较详细大纲章节数不足（需至少 {THOROUGH_MIN_CHAPTERS} 章）"
+            )
+        for chapter in chapters:
+            if not chapter.get("title") or not chapter.get("key_points"):
+                raise RuntimeError("比较详细大纲章节缺少 title 或 key_points")
+        return data
+
+    def _build_thorough_chapter_instruction(
+        self,
+        chapter: Dict[str, Any],
+        *,
+        idx: int,
+        total: int,
+        extract_images: bool,
+    ) -> str:
+        """阶段 2 分章深写的增量指令；全文与大纲已在链内前缀中。"""
+        title = str(chapter.get("title") or "").strip()
+        purpose = str(chapter.get("purpose") or "").strip()
+        points = chapter.get("key_points") or []
+        point_lines = "\n".join(f"- {p}" for p in points) or (
+            "-（大纲未给出要点，请据本章主题自行展开）"
+        )
+        instruction = f"""
+现在请只撰写第 {idx}/{total} 章：「{title}」。
+
+本章在全局论证中的作用：{purpose}
+
+必须深入展开的要点（每一项都要写成完整段落，含具体数据、案例、推导、反例与边界，不得概述）：
+{point_lines}
+
+硬性要求：
+- 这是「比较详细」深度笔记，务必充分展开；保留字幕中所有具体数字、产品名、价格、案例与时间点
+- 围绕论点组织，合并跨时段同主题为连贯论证，不按字幕时间流水账
+- 必须使用全局 terminology 中 confidence=high 的 canonical 专名，不得保留已裁决的 ASR 音译，不得混淆概念与产品
+- 只使用字幕和讲义可支持的内容；专名或数字无法确认时明确标记不确定
+- 规范 Markdown：以 `## ` 开头（本章标题），其下用必要的 `### ` 子节、列表、表格、加粗
+- 只输出本章内容，不要 H1、不要代码块围栏、不要解释
+""".strip()
+        if extract_images:
+            instruction += (
+                "\n\n"
+                + SCREENSHOT_INSTRUCTION.strip()
+                + "\n这是逐章写作：本章仅在确有高信息量画面时保留 0-1 个标记，避免全篇截图过密。\n"
+            )
+        return instruction
+
+    def _assemble_thorough_note(
+        self,
+        outline: Dict[str, Any],
+        chapter_notes: list[str],
+    ) -> str:
+        """按大纲机械组装终稿；此处不再调用模型或压缩章节。"""
+        title = re.sub(r"^#+\s*", "", str(outline.get("title") or "")).strip()
+        if not title:
+            title = "课程笔记"
+        overview = str(outline.get("course_overview") or "").strip()
+        parts = [f"# {title}\n"]
+        if overview:
+            parts.append(f"> {overview}\n")
+        parts.append("---\n")
+        for note in chapter_notes:
+            parts.append(note.strip() + "\n\n---\n")
+        return "\n".join(parts).rstrip() + "\n"
 
     def _build_exhaustive_evidence_prompt(
         self,

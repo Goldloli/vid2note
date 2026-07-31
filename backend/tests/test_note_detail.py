@@ -10,7 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.core.simple_processor import SimpleProcessor
+from src.core.simple_processor import SimpleProcessor, THOROUGH_FULLCONTEXT_MAX_CHARS
 from src.prompts.detail_level import DETAIL_LEVEL_INSTRUCTIONS, normalize_detail_level
 
 
@@ -101,14 +101,15 @@ class UnderstandingPipelineLLM:
         )
 
 
-def test_four_detail_levels_are_distinct_and_share_grounding_guard():
+def test_five_detail_levels_are_distinct_and_share_grounding_guard():
     assert list(DETAIL_LEVEL_INSTRUCTIONS) == [
         "concise",
         "balanced",
         "detailed",
+        "thorough",
         "exhaustive",
     ]
-    assert len(set(DETAIL_LEVEL_INSTRUCTIONS.values())) == 4
+    assert len(set(DETAIL_LEVEL_INSTRUCTIONS.values())) == 5
     for instruction in DETAIL_LEVEL_INSTRUCTIONS.values():
         assert "不得捏造" in instruction
         assert "字幕" in instruction
@@ -717,3 +718,134 @@ def test_exhaustive_review_uses_chapter_message_chain_without_resending_material
         review_instruction = messages[-1]["content"]
         assert "【全局蓝图 JSON】" not in review_instruction
         assert "【当前章节全部原始字幕】" not in review_instruction
+
+
+# --------------------------------------------------------------------------- #
+# thorough 档（比较详细）：双钴引擎契约测试
+# --------------------------------------------------------------------------- #
+class ThoroughPipelineLLM:
+    """双钴引擎 mock：理解阶段返回大纲 JSON，分章深写返回章节 Markdown。"""
+
+    def __init__(self, chapter_count: int = 6) -> None:
+        self.calls = []
+        self.chapters = [
+            {
+                "title": f"第{i + 1}章 标题",
+                "purpose": f"第{i + 1}章 在全局论证中的作用",
+                "key_points": [f"要点 {i + 1}-a", f"要点 {i + 1}-b"],
+            }
+            for i in range(chapter_count)
+        ]
+
+    def chat(self, messages, **kwargs):
+        self.calls.append(_snapshot_call(messages, kwargs))
+        last = messages[-1]["content"]
+        if "严格 JSON" in last and "chapters" in last:
+            return json.dumps(
+                {
+                    "title": "测试课程标题",
+                    "course_overview": "课程中心问题与最终结论",
+                    "terminology": [
+                        {
+                            "canonical": "示例专名",
+                            "variants": ["示列"],
+                            "confidence": "high",
+                            "note": "测试术语",
+                        }
+                    ],
+                    "chapters": self.chapters,
+                },
+                ensure_ascii=False,
+            )
+        match = re.search(r"第 (\d+)/(\d+) 章", last)
+        title = self.chapters[int(match.group(1)) - 1]["title"] if match else "章节"
+        return f"## {title}\n\n### 核心要点\n本章深写内容，保留数据与案例。"
+
+
+def test_thorough_engine_understanding_then_chapter_drafts():
+    """双钴引擎：1 次理解 + N 次分章深写，每章消息链为 system+大纲prompt+大纲+本章指令。"""
+    llm = ThoroughPipelineLLM(chapter_count=6)
+    processor = SimpleProcessor(llm, config={"note_detail_level": "thorough"})
+    result = processor._generate_thorough_with_fullcontext("一段课程字幕正文，" * 20)
+
+    assert len(llm.calls) == 7  # 1 理解 + 6 深写
+    assert result.count("# 测试课程标题") == 1  # 机械组装的唯一 H1
+    assert result.count("\n## ") == 6  # 各章 H2
+
+    understand_messages = llm.calls[0][0]
+    assert [m["role"] for m in understand_messages] == ["system", "user"]
+    assert "严格 JSON" in understand_messages[1]["content"]
+
+    for chapter_call in llm.calls[1:]:
+        msgs = chapter_call[0]
+        assert [m["role"] for m in msgs] == ["system", "user", "assistant", "user"]
+        assert "现在请只撰写第" in msgs[3]["content"]
+
+
+def test_thorough_chapter_calls_share_byte_stable_prefix():
+    """每章深写的 [system, outline_prompt, outline] 前缀跨章逐字节相同（命中前缀缓存的前提）。"""
+    llm = ThoroughPipelineLLM(chapter_count=6)
+    processor = SimpleProcessor(llm, config={"note_detail_level": "thorough"})
+    processor._generate_thorough_with_fullcontext("一段课程字幕正文，" * 20)
+
+    prefixes = []
+    for chapter_call in llm.calls[1:]:
+        msgs = chapter_call[0]
+        prefixes.append((msgs[0]["content"], msgs[1]["content"], msgs[2]["content"]))
+    assert len(set(prefixes)) == 1
+
+
+def test_thorough_oversize_subtitle_falls_back_to_exhaustive(monkeypatch):
+    """超过 THOROUGH_FULLCONTEXT_MAX_CHARS 退回 exhaustive 引擎，不静默截断。"""
+    llm = ThoroughPipelineLLM()
+    processor = SimpleProcessor(llm, config={"note_detail_level": "thorough"})
+    fallback = {"invoked": False}
+
+    def fake_exhaustive(text, **kwargs):
+        fallback["invoked"] = True
+        return "# 兜底笔记"
+
+    monkeypatch.setattr(
+        processor, "_generate_exhaustive_with_understanding", fake_exhaustive
+    )
+    big = "字" * (THOROUGH_FULLCONTEXT_MAX_CHARS + 1)
+    result = processor._generate_thorough_with_fullcontext(big)
+    assert fallback["invoked"] is True
+    assert result == "# 兜底笔记"
+
+
+def test_thorough_empty_subtitle_raises():
+    llm = ThoroughPipelineLLM()
+    processor = SimpleProcessor(llm, config={"note_detail_level": "thorough"})
+    with pytest.raises(ValueError):
+        processor._generate_thorough_with_fullcontext("   ")
+
+
+def test_thorough_outline_parse_failure_triggers_chain_repair():
+    """大纲首次返回残缺文本时，接链尾修复并复用同一前缀，最终成功组装。"""
+    llm = ThoroughPipelineLLM()
+    processor = SimpleProcessor(llm, config={"note_detail_level": "thorough"})
+    original_chat = llm.chat
+    state = {"n": 0}
+
+    def patched_chat(messages, **kwargs):
+        state["n"] += 1
+        if state["n"] == 1:
+            llm.calls.append(_snapshot_call(messages, kwargs))
+            return "这不是完整 JSON 的残缺文本 { 不完整"
+        return original_chat(messages, **kwargs)
+
+    llm.chat = patched_chat
+    result = processor._generate_thorough_with_fullcontext("一段课程字幕正文，" * 20)
+    # 残缺理解 + 修复理解 + 6 次深写
+    assert len(llm.calls) == 8
+    assert "# 测试课程标题" in result
+    # 修复调用复用理解链前缀（system + outline_prompt），未重发全文为新 prompt
+    repair_messages = llm.calls[1][0]
+    assert [m["role"] for m in repair_messages] == [
+        "system",
+        "user",
+        "assistant",
+        "user",
+    ]
+    assert "修复大纲 JSON" in repair_messages[-1]["content"]

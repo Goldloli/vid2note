@@ -101,6 +101,7 @@
             <option value="concise">{{ $t('settings.detail.concise') }}</option>
             <option value="balanced">{{ $t('settings.detail.balanced') }}</option>
             <option value="detailed">{{ $t('settings.detail.detailed') }}</option>
+            <option value="thorough">{{ $t('settings.detail.thorough') }}</option>
             <option value="exhaustive">{{ $t('settings.detail.exhaustive') }}</option>
           </select>
         </label>

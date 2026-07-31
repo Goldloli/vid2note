@@ -168,6 +168,7 @@ export default {
       concise: '简洁', conciseHint: '结论、核心概念、关键数据与必要步骤。',
       balanced: '适中', balancedHint: '主要论点、解释、代表性示例与结论。',
       detailed: '详细', detailedHint: '增加上下文、推导、例子、注意事项和小结。',
+      thorough: '比较详细', thoroughHint: '全文常驻深度引擎，质量近超详细，成本约其 1/7。',
       exhaustive: '超详细', exhaustiveHint: '尽量保留推导链、反例、边界与术语说明。',
     },
     lang: '输出语言', outputLanguageHint: '生成笔记时使用的主要语言。',

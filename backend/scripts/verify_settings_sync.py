@@ -22,7 +22,7 @@ SETTING_KEYS = (
     "asr.engine",
 )
 BACKGROUND_VALUES = ("mesh", "static", "plain")
-DETAIL_VALUES = ("concise", "balanced", "detailed", "exhaustive")
+DETAIL_VALUES = ("concise", "balanced", "detailed", "thorough", "exhaustive")
 LANGUAGE_VALUES = ("zh", "en")
 ASR_VALUES = ("bcut", "whisper_cpp", "external")
 

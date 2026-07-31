@@ -167,6 +167,7 @@ export default {
       concise: 'Concise', conciseHint: 'Conclusions, core concepts, key data, and required steps.',
       balanced: 'Balanced', balancedHint: 'Main arguments, explanations, representative examples, and conclusions.',
       detailed: 'Detailed', detailedHint: 'Adds context, derivations, examples, cautions, and summaries.',
+      thorough: 'Thorough', thoroughHint: 'Full-context deep engine; near-exhaustive quality at ~1/7 cost.',
       exhaustive: 'Exhaustive', exhaustiveHint: 'Retains reasoning chains, counterexamples, boundaries, and terminology.',
     },
     lang: 'Output language', outputLanguageHint: 'Primary language used for generated notes.',

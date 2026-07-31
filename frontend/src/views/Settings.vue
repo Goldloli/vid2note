@@ -377,6 +377,7 @@ const detailLevels = [
   { value: 'concise', label: 'settings.detail.concise', hint: 'settings.detail.conciseHint' },
   { value: 'balanced', label: 'settings.detail.balanced', hint: 'settings.detail.balancedHint' },
   { value: 'detailed', label: 'settings.detail.detailed', hint: 'settings.detail.detailedHint' },
+  { value: 'thorough', label: 'settings.detail.thorough', hint: 'settings.detail.thoroughHint' },
   { value: 'exhaustive', label: 'settings.detail.exhaustive', hint: 'settings.detail.exhaustiveHint' },
 ]
 const retentionKinds = ['video', 'audio', 'srt', 'note', 'screenshot']
