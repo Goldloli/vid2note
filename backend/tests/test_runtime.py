@@ -124,7 +124,7 @@ class TestSettings:
         assert snap["llm.model"] == "deepseek-v4-flash"
         assert snap["asr.engine"] == "bcut"
         assert snap["pdf.mode"] == "pypdf"
-        assert snap["concurrency.max"] == "1"
+        assert snap["concurrency.max"] == "2"
         assert snap["note.output_language"] == "zh"
         assert snap["note.detail_level"] == "balanced"
         assert snap["note.extract_images"] == "false"
@@ -157,8 +157,8 @@ class TestSettings:
         assert clamp_concurrency(0) == MIN_CONCURRENCY == 1
         assert clamp_concurrency(5) == MAX_CONCURRENCY == 3
         assert clamp_concurrency("2") == 2
-        assert clamp_concurrency("bad") == DEFAULT_CONCURRENCY == 1
-        assert clamp_concurrency(None) == 1
+        assert clamp_concurrency("bad") == DEFAULT_CONCURRENCY == 2
+        assert clamp_concurrency(None) == 2
 
     @pytest.mark.parametrize(
         ("phase", "completed", "total", "percent", "message"),
