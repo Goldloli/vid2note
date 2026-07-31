@@ -137,13 +137,13 @@ _USAGE_NUMERIC_FIELDS: tuple[str, ...] = (
 def classify_llm_operation(operation_name: str) -> str:
     """把 LLM 操作名归类为用量阶段键。
 
-    understand(超详细字幕理解/语义证据)→ blueprint(蓝图及修复)→
+    understand(字幕理解/语义证据,涵盖超详细与比较详细)→ blueprint(蓝图及修复)→
     draft(章节初稿)→ review(章节审校/格式修复/术语保真)→
     mindmap(思维导图)→ other(PDF 结构分析、普通笔记生成等)。
     判断顺序先精确后宽泛,命中即返回。
     """
     name = str(operation_name or "")
-    if "超详细字幕理解" in name or "语义证据" in name:
+    if "字幕理解" in name or "语义证据" in name:
         return "understand"
     if "蓝图" in name:
         return "blueprint"

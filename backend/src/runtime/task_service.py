@@ -42,7 +42,7 @@ _SUPPORTED_ASR_ENGINES = frozenset({"bcut", "whisper_cpp", "external"})
 _SUPPORTED_PDF_MODES = frozenset({"pypdf"})
 _SUPPORTED_OUTPUT_LANGUAGES = frozenset({"zh", "en"})
 _SUPPORTED_NOTE_DETAIL_LEVELS = frozenset(
-    {"concise", "balanced", "detailed", "exhaustive"}
+    {"concise", "balanced", "detailed", "thorough", "exhaustive"}
 )
 _SUPPORTED_MINDMAP_FORMATS = frozenset({"xmind", "png", "md"})
 
