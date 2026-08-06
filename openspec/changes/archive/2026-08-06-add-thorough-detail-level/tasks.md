@@ -30,4 +30,4 @@
 - [x] 4.3 `openspec validate add-thorough-detail-level --strict` 通过
 - [x] 4.4 `cd backend && .venv/bin/python -m pytest` 全绿
 - [x] 4.5 `cd frontend && npm run build` 通过
-- [ ] 4.6 docker 重建后跑真实 `thorough` 任务（同一份长字幕），核对 `tasks.llm_usage`：见 `understand`+`draft` stage、成本 ≈¥0.09、调用 ≈9 次、命中率 >80%；并排对比 thorough 与 exhaustive 笔记质量
+- [x] 4.6 已由后续 `reduce-note-cost-and-asr-latency` 取代：产品决定删除新任务的 `thorough`，历史值映射为 `exhaustive`，因此不再执行已失去产品入口的对比基准

@@ -305,12 +305,17 @@
 
 ### Requirement: 设置页处理选项
 
-设置中心 MUST 在对应页签提供界面语言、背景、输出语言、四档笔记详细程度、图片提取与质量、PDF 模式、并发任务数（1~3）、分块大小、Temperature、最大重试次数和五类保留策略。截图嵌入 SHALL 继续作为新建任务的逐任务选项，但设置页可提供新任务默认值。PDF 只展示当前稳定的 `pypdf`，MUST NOT 展示未实现的 MinerU 选择。
+设置中心 MUST 在对应页签提供界面语言、背景、输出语言、四档笔记详细程度、图片提取与质量、PDF 模式、并发任务数（1~3）、分块大小、Temperature、最大重试次数和五类保留策略。详细程度 MUST 只显示「简洁 / 适中 / 详细 / 超详细」，MUST NOT 显示「比较详细」。截图嵌入 SHALL 继续作为新建任务的逐任务选项。PDF 只展示当前稳定的 `pypdf`。
 
 #### Scenario: 笔记详细程度四档可选
 
 - **WHEN** 用户在笔记生成页签选择「简洁 / 适中 / 详细 / 超详细」之一并保存
 - **THEN** `note.detail_level` MUST 保存为对应合法值，页面 MUST 解释该档位对覆盖率和 token/耗时的影响，后续新建任务 MUST 使用该默认档位
+
+#### Scenario: 历史比较详细值加载
+
+- **WHEN** 设置文件或历史任务暴露旧 `thorough` 值
+- **THEN** 设置页 MUST 将其显示为超详细兼容状态，下一次保存 MUST 写入 `exhaustive`
 
 #### Scenario: 截图嵌入逐任务选择
 
@@ -450,17 +455,17 @@
 
 ### Requirement: ASR 管理页
 
-系统 MUST 保留一个经侧栏到达的独立 ASR 管理页，并采用「引擎 / Whisper 本地 / 外部 ASR / 转录策略」四个内部页签。页面 MUST 集中承载三种引擎的说明、默认选择、配置和诊断。实验性在线 ASR 的用户可见名称 MUST 为「bcut」，不得暗示官方、稳定或保证免费，也不得暴露内部兼容实现名。
+系统 MUST 保留一个经侧栏到达的独立 ASR 管理页，并采用「引擎 / Whisper 本地 / 外部 ASR / 转录策略」四个内部页签。页面 MUST 集中承载三种引擎的用途、默认选择、配置和诊断。在线引擎的用户可见名称 MUST 为「bcut」；前端只展示在线识别用途、无需本地模型及自动切换行为，MUST NOT 展示实验性、稳定性判断、内部额度或未经真实探活的恒定就绪状态。
 
 #### Scenario: 四个 ASR 页签职责清晰
 
 - **WHEN** 用户依次切换四个 ASR 页签
 - **THEN** 引擎页 MUST 展示三引擎卡片与总览，Whisper 页 MUST 展示本地模型参数，外部页 MUST 展示 endpoint/凭证，策略页 MUST 展示降级/VAD/并发参数
 
-#### Scenario: 三引擎说明可见
+#### Scenario: 三引擎用途可见
 
 - **WHEN** 用户打开 ASR 的引擎页签
-- **THEN** 页面 MUST 展示 bcut（在线、实验性、无需本地 GPU）、Whisper 本地（离线、CPU）与外部 ASR（自建 HTTP）三张卡片，每张 MUST 含适用场景、当前状态和测试入口
+- **THEN** 页面 MUST 展示 bcut（在线、无需本地模型）、Whisper 本地（离线、CPU）与外部 ASR（自建 HTTP）三张卡片；bcut MUST 通过用户主动测试反馈连通性，MUST NOT 默认显示为就绪
 
 #### Scenario: 默认引擎与策略持久化
 
@@ -482,10 +487,29 @@
 - **WHEN** 用户对某个引擎点击「测试连接」
 - **THEN** 前端 MUST 调用后端测试接口并反馈成功耗时或失败原因，MUST NOT 在未测试时声称连接可用
 
+#### Scenario: 在线与本地策略分开展示
+
+- **WHEN** 用户打开转录策略页签
+- **THEN** 页面 MUST 分别显示在线并发与本地并发，并展示在线目标分段、缓存开关和临时音频格式
+
 #### Scenario: 页面响应式可用
 
 - **WHEN** 页面宽度缩小到手机尺寸
 - **THEN** 页签、引擎卡片、表单与操作按钮 MUST 重排为单列或可滚动布局，MUST NOT 出现水平页面溢出或被遮挡的保存按钮
+
+### Requirement: 任务详情展示 ASR 性能摘要
+
+任务详情在 ASR 节点含性能 metadata 时 MUST 展示缓存状态、分段数、并发数、上传大小和总耗时；历史任务无 metadata 时 MUST 保持现有节点展示且不出现空错误区块。
+
+#### Scenario: 冷启动性能摘要
+
+- **WHEN** 已完成任务的 ASR metadata 表明未命中缓存
+- **THEN** 页面 MUST 显示冷启动、分段数、worker 数、上传大小和转录总耗时
+
+#### Scenario: 热缓存性能摘要
+
+- **WHEN** metadata 表明整段缓存命中
+- **THEN** 页面 MUST 明确显示缓存命中和零上传，不得将秒级结果误标为在线冷启动速度
 
 ### Requirement: 笔记与思维导图全量浏览页
 
@@ -725,4 +749,3 @@
 
 - **WHEN** 浏览器启用 `prefers-reduced-motion: reduce`
 - **THEN** 背景移动、进入动画、脉冲和非必要平滑过渡 MUST 被关闭或显著缩短，功能状态变化 MUST 仍清晰可见
-

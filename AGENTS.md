@@ -132,42 +132,47 @@ bd prime                # 刷新 beads 上下文
 > **vid2note**:视频链接 / 本地文件 → Markdown 笔记 + 思维导图的**本地 Docker Web 应用**(`:8761`),个人自用,无登录。
 
 ### 技术栈
-- **后端**:Python 3 + FastAPI(容器内 `:8765`,宿主映射 `:8761`)。基底 **fork 自 ai_srt2md**,内核原样复用:LLM 8 家适配 / prompt 库 / `SimpleProcessor`(字幕→笔记) / 注入防护 / SRT 校验 / 思维导图导出 / SQLite
+- **后端**:Python 3 + FastAPI(容器内 `:8765`,宿主映射 `:8761`)。基底 **fork 自 ai_srt2md**，复用并扩展 LLM 8 家适配 / prompt 库 / `SimpleProcessor`(字幕→笔记) / 注入防护 / SRT 校验 / 思维导图导出 / SQLite
 - **前端**:Vue3 + Vite(清晰普通版:实色卡片 + 标准组件,详见 `DESIGN.md`)
 - **部署**:Docker 单容器(`docker compose up`,FastAPI 同源托管 API + 前端静态)
 
 ### 六步流水线
-`下载(yt-dlp 整段高清,bilibili 带 cookie)→ 提取音频(ffmpeg)→ ASR(实验性在线 bcut 优先 / 本地 whisper.cpp 兜底,长音频 VAD 切片并行)→ LLM 笔记(纯文本喂,默认 DeepSeek deepseek-v4-flash,8 家适配)→ 思维导图(xmind/png/md)→ 清理(按保留策略)`
+`下载(yt-dlp 整段高清,bilibili 带 cookie)→ 提取音频(ffmpeg)→ ASR(bcut 在线优先 / 本地 Whisper CPU 兜底,VAD 分段+整段缓存+限流冷却)→ LLM 笔记(纯文本,默认 DeepSeek deepseek-v4-flash 且关闭 thinking,8 家适配)→ 思维导图(xmind/png/md)→ 清理(按保留策略)`
 
 ### 关键架构决策(摘自 design D1–D10)
 - **D1 单容器**:弃双容器,FastAPI 同源托管前后端,`:8761` 一端口
-- **D2 ASR 抽象**:`AsrEngine` 接口 + bcut(实验性在线)/ whisper.cpp(本地 CPU int8)/ external(扩展位),在线优先降级
-- **D3 VAD 切片并行**:长音频按静音切分并行转录 + 时间戳偏移拼回单调 SRT
+- **D2 ASR 抽象**:`AsrEngine` 接口 + bcut(在线)/ whisper.cpp(本地 CPU int8)/ external(扩展位),在线优先降级；前端仅中性描述 bcut 用途，不展示实验性、稳定性判断、内部额度或未经探活的就绪状态
+- **D3 ASR 性能档案**:bcut 默认 280s 目标分段(295s 硬上限)、MP3 64kbps、在线并发 3；Whisper 本地并发 1。VAD 前先查整段内容缓存，分段结果按偏移拼回单调 SRT
 - **D4 截图嵌入**:LLM 标记 `[IMG:ts]`,后端 ffmpeg 截帧(默认关)
 - **D5 MinerU 可选**:PDF 拆解,默认 pypdf,MinerU 可选构建层(`ENABLE_MINERU`)
 - **D6 fork 内核复用**:ai_srt2md 内核原样复用,改造输入端(视频链接)+ 编排(DAG)+ 前端
 - **D8 并发**:1–3 可配 + 节点级重跑(复用上游产物)
 - **D9 retention**:五类产物(视频/音频/SRT/笔记/截图)各自独立保留(permanent/7d/30d)
 - **D10 SSE**:节点状态「先落 SQLite 再推 SSE」,容器重启不悬空
+- **D11 ASR 运行时协调**:bcut 首个真实分段单飞探测；412/429 触发进程级+持久化 12h 共享冷却并只记录一次降级。本地 CPU Whisper 使用容量 1 的跨任务执行槽，等待可取消且异常必须释放；在线成功路径不受本地槽限制
+- **D12 笔记档位与门禁**:新任务仅 `concise/balanced/detailed/exhaustive` 四档，默认 `balanced`；历史 `thorough` 只兼容映射到 `exhaustive`。三档证据预算 18/30/42，超详细走分段证据→全局蓝图→逐章写作→问题章按需修复，禁止全篇 LLM 重写
 
-### 能力域(openspec 9 capability,specs 在 `openspec/specs/`)
-`media-ingest`(下载)/ `speech-to-text`(ASR)/ `note-generation`(笔记+截图)/ `pdf-reference`(PDF 对照)/ `mindmap-export`(导图)/ `task-pipeline`(六步 DAG + SSE + 并发 + 重跑 + 历史)/ `storage-retention`(存储 + 保留)/ `web-frontend`(前端)/ `docker-deployment`(部署)
+### 能力域(openspec 10 capability,specs 在 `openspec/specs/`)
+`media-ingest`(下载)/ `speech-to-text`(ASR)/ `note-generation`(笔记+截图)/ `pdf-reference`(PDF 对照)/ `mindmap-export`(导图)/ `task-pipeline`(六步 DAG + SSE + 并发 + 重跑 + 历史)/ `settings-management`(设置+凭证)/ `storage-retention`(存储 + 保留)/ `web-frontend`(前端)/ `docker-deployment`(部署)
 
 ### 开发约定
 - **import**:`from src.xxx`(`src` 是包,`backend` 在 PYTHONPATH;基底 `simple_processor` 用 relative `from ..prompts`,要求 src 作包)
 - **内核门面**:`from src.core.kernel import SimpleProcessor, LLMFactory, TaskQueue, SRTParser, TaskRepository, ...` —— v1 新模块只从门面取内核,**不穿透内部**
-- **测试**:`cd backend && .venv/bin/python -m pytest`(⚠️ 勿用 `source .venv/bin/activate`,会被 ai_srt2md 的 venv 干扰)
+- **测试**:`cd backend && .venv/bin/python -m pytest`(当前 443 项；⚠️ 勿用 `source .venv/bin/activate`,会被 ai_srt2md 的 venv 干扰)；前端完整门禁用 `cd frontend && npm run check`
 - **前端**:清晰普通版(实色卡片 + 标准组件),**无玻璃/渐变/inset/hover-scale**,遵循 `DESIGN.md`
+- **笔记质量**:长内容必须覆盖后半段主题；数字/单位、来源边界、ASR 不确定实体、连续复读、同词括注、重复章节和低价值行政内容走确定性门禁。合格章节原样进入终稿，只修问题章；质量评估看主题/证据/论证/边界/重复/模板泄漏，不以字数单判
+- **成本验收**:保留逐次 LLM usage、stage/operation 聚合与缓存命中统计。约 150 分钟超详细基线为 32 次、¥0.469；优化不得通过遗漏内容、关闭统计或牺牲语言质量达成
+- **ASR 可观测**:ASR node metadata 保持 `srt_path` 顶层兼容，并记录缓存命中、音频/上传字节、分段/worker、切分/转录/总耗时、在线探测、冷却跳过与本地槽等待
 - **任务追踪**:`bd`(beads),不用 TodoWrite/TaskCreate/markdown TODO;持久知识用 `bd remember`
-- **git**:保守档(默认不 commit/push/Dolt sync,除非明确授权)
+- **git**:保守档(默认不 commit/push/Dolt sync,除非明确授权)；长期只保留本地 `main` 与远端 `origin/main`，临时分支合入后删除
 
 ### 构建 / 测试 / 部署
 ```bash
-# 后端测试(234+ 单测)
+# 后端测试(当前 443 项)
 cd backend && .venv/bin/python -m pytest
 
-# 前端构建
-cd frontend && npm install && npm run build
+# 前端测试 + lint + 构建
+cd frontend && npm install && npm run check
 
 # Docker 部署(:8761)
 cp .env.example .env            # 填 DeepSeek key
