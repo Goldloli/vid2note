@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-08-06
+
 ### 新增
 
 - 开源项目治理文件、贡献指南、安全策略、Issue/PR 模板。
@@ -32,4 +34,5 @@
 - 生产环境 500 响应不再泄露内部异常。
 - LLM Key、外部 ASR Key 与 Bilibili Cookie 改为 Fernet 认证加密文件；密钥查看按字段白名单、显式操作和禁止缓存处理。
 
-[Unreleased]: https://github.com/Goldloli/vid2note/commits/main
+[Unreleased]: https://github.com/Goldloli/vid2note/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/Goldloli/vid2note/releases/tag/v1.0.0
