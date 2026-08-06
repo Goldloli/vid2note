@@ -26,5 +26,5 @@
 - [x] 5.1 运行后端全量测试、前端 check、pip/npm 审计、OpenSpec strict validate、生产 Docker 构建和完整密钥复扫
 - [x] 5.2 由所有者确认是否接受历史 Gmail；若不接受，确认 noreply 地址后单独重写历史并复验远端
 - [x] 5.3 所有者确认后提交并推送修复，将仓库切换为 Public，启用 GitHub 安全功能与 `main` 保护
-- [ ] 5.4 复跑 GitHub CI、CodeQL、Secret Scanning 和 Dependabot；全部通过后创建 `v1.0.0` 标签与 GHCR 发布
-- [ ] 5.5 同步主规格、严格校验并归档 `prepare-public-release` change
+- [x] 5.4 复跑 GitHub CI、CodeQL、Secret Scanning 和 Dependabot；全部通过后创建 `v1.0.0` 标签与 GHCR 发布
+- [x] 5.5 同步主规格、严格校验并归档 `prepare-public-release` change
