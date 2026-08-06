@@ -20,6 +20,7 @@
 - 实验性在线 ASR 的引擎 ID、实现、界面、API 和文档统一为 `bcut`；删除旧在线 provider 与签名服务分支，并明确不保证外部服务持续可用。
 - 默认模型更新为各服务商当前常用模型 ID，同时仍允许用户直接编辑模型。
 - 公开设置从 SQLite 迁移到可备份的 `data/config/settings.json`；旧设置会在首次启动时幂等迁移。
+- CI 与发布门禁显式安装 FFmpeg，并升级到 GitHub Node 24 兼容的官方 Actions 主版本。
 
 ### 安全
 

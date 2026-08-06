@@ -65,7 +65,7 @@ Playwright 脚本继续保留为显式执行的端到端入口，但模块导入
 
 回滚时可恢复依赖锁文件和 PDFParser 实现；公开可见性、历史重写和凭据撤销属于外部状态操作，必须单独记录并在执行前再次核对目标。
 
-## Open Questions
+## Resolved Questions
 
-- 现有提交中的 Gmail 是否可以公开；若不可以，需要所有者确认用于重写的 GitHub noreply 地址。
-- 全部门禁通过后，是否由本次任务直接把现有仓库切换为 Public，还是先保留 Private 供所有者人工复核。
+- 所有者确认使用 `39011904+Goldloli@users.noreply.github.com` 改写 `main` 的 146 个历史提交，并接受 8 个 GitHub 托管的关闭 PR 引用仍可能保留旧 Gmail 元数据。
+- 所有者确认由本次任务直接把仓库切换为 Public，并继续完成安全强化和首个版本发布。
