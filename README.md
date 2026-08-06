@@ -223,8 +223,6 @@ vid2note/
 
 欢迎 Bug 修复、Provider、测试、文档和易用性改进。提交 PR 前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 和 [行为准则](CODE_OF_CONDUCT.md)。
 
-## 致谢与许可证
-
-vid2note 由同一作者的 `ai_srt2md` 演进而来，继承其字幕解析、Prompt、LLM、笔记生成和思维导图内核，并新增视频输入、ASR、DAG、Web UI 和容器部署。详情见 [NOTICE](NOTICE)。
+## 许可证
 
 项目以 [MIT License](LICENSE) 开源。

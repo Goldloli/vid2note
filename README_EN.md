@@ -117,5 +117,4 @@ external service and may stop working without notice. Video-platform
 availability is likewise not guaranteed. Only process content you are
 authorized to use and follow applicable platform terms and law.
 
-vid2note evolved from `ai_srt2md`, an earlier project by the same author. See
-[NOTICE](NOTICE). Licensed under the [MIT License](LICENSE).
+Licensed under the [MIT License](LICENSE).
