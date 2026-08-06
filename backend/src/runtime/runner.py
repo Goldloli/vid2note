@@ -138,7 +138,7 @@ def classify_llm_operation(operation_name: str) -> str:
     """把 LLM 操作名归类为用量阶段键。
 
     understand(字幕理解/语义证据,涵盖超详细与比较详细)→ blueprint(蓝图及修复)→
-    draft(章节初稿)→ review(章节审校/格式修复/术语保真)→
+    draft(章节初稿)→ review(全局质量审计/问题章节修复/历史审校)→
     mindmap(思维导图)→ other(PDF 结构分析、普通笔记生成等)。
     判断顺序先精确后宽泛,命中即返回。
     """
@@ -149,7 +149,13 @@ def classify_llm_operation(operation_name: str) -> str:
         return "blueprint"
     if "章节初稿" in name:
         return "draft"
-    if "章节审校" in name or "章节格式修复" in name or "术语保真" in name:
+    if (
+        "质量审计" in name
+        or "问题章节修复" in name
+        or "章节审校" in name
+        or "章节格式修复" in name
+        or "术语保真" in name
+    ):
         return "review"
     if "思维导图" in name:
         return "mindmap"
@@ -410,6 +416,7 @@ def _make_executors(
                 "note_detail_level": getattr(
                     task, "note_detail_level", "balanced"
                 ),
+                "source_title": getattr(task, "title", ""),
                 "progress_callback": _report_note_stage,
                 "usage_callback": llm_usage_aggregator.record,
             },
@@ -419,7 +426,12 @@ def _make_executors(
         ctx.emit_progress(30, "调用 LLM 生成笔记")
         # 无 PDF 走 generate_directly 分支;有 PDF 走 generate_with_pdf_reference 分支
         # (SimpleProcessor.process 内部据 pdf_file 是否为空自动分流)
-        markdown = processor.process(str(srt_abs), str(pdf_abs) if pdf_abs else None, extract_images=bool(getattr(task, "extract_images", False)))
+        try:
+            markdown = processor.process(str(srt_abs), str(pdf_abs) if pdf_abs else None, extract_images=bool(getattr(task, "extract_images", False)))
+        finally:
+            # 远端调用成功后已经产生费用；即使后续 JSON / 终稿门禁失败也必须把
+            # 已采集 usage 写入任务详情，避免失败任务的成本不可见。
+            _flush_llm_usage()
         markdown = _strip_code_fence(markdown)
         ctx.emit_progress(88, "高质量笔记生成完成，准备落盘")
 

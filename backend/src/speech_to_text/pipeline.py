@@ -23,8 +23,10 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -33,6 +35,7 @@ from typing import Callable, Optional
 
 from .engine import (
     REASON_MODEL_MISSING,
+    REASON_RATE_LIMITED,
     AsrEngine,
     AsrError,
     CancelledError,
@@ -43,6 +46,8 @@ from .engine import (
     sanitize_cues,
 )
 from .bcut import BcutEngine
+from . import asr_cache
+from . import bcut_budget
 from .external import ExternalAsrEngine
 from .vad import AudioSegment, split_audio_by_silence
 from .whisper_local import WhisperCppEngine
@@ -68,6 +73,12 @@ LogCallback = Callable[[str, str], None]
 # 取消检查签名：() -> bool（对接 DAG ctx.cancel.is_cancelled）
 CancelCheck = Callable[[], bool]
 
+# faster-whisper 的 CPU 推理会占满宿主机核心。槽位按 resolver（即任务）生命周期
+# 持有，避免多个长任务按分段轮流抢占，导致每条任务一起变慢。
+_LOCAL_TASK_SLOT = threading.BoundedSemaphore(1)
+# 多任务的首个真实 bcut 分段串行探测，防止远端额度耗尽时同时撞 412。
+_BCUT_PROBE_LOCK = threading.Lock()
+
 
 @dataclass
 class AsrConfig:
@@ -91,8 +102,15 @@ class AsrConfig:
     external_api_key: str = ""
     # VAD 与并发（design D3 / D8）
     vad_threshold_seconds: float = 300.0         # > 5 分钟才触发分段
+    # 旧字段仅保留给代码级兼容；新设置分别使用在线/本地档案。
     vad_target_segment_seconds: Optional[float] = None
-    concurrency: int = 2  # design D6：默认 2 让本地 whisper 多段并行真正生效
+    concurrency: Optional[int] = None
+    online_target_segment_seconds: float = 280.0
+    local_target_segment_seconds: float = 120.0
+    online_concurrency: int = 3
+    local_concurrency: int = 1
+    online_audio_format: str = "mp3"
+    online_audio_bitrate_kbps: int = 64
     # 单次 HTTP/转写超时上限（用于 VAD 分段内调用）
     request_timeout: float = 120.0
     # bcut 在线：轮询退避起步间隔 / 最大等待 / crc32 结果缓存
@@ -100,6 +118,19 @@ class AsrConfig:
     query_max_wait: float = 600.0
     cache_enabled: bool = True
     cache_dir: str = ""
+
+    def effective_concurrency(self, *, online: bool) -> int:
+        if self.concurrency is not None:
+            return max(1, min(3, int(self.concurrency)))
+        value = self.online_concurrency if online else self.local_concurrency
+        return max(1, min(3, int(value)))
+
+    def effective_target_segment_seconds(self, *, online: bool) -> float:
+        if self.vad_target_segment_seconds is not None:
+            return float(self.vad_target_segment_seconds)
+        return float(
+            self.online_target_segment_seconds if online else self.local_target_segment_seconds
+        )
 
     @classmethod
     def from_settings(cls, settings: dict) -> "AsrConfig":
@@ -124,6 +155,20 @@ class AsrConfig:
             v = cfg.get(key, default)
             return "" if v is None else str(v)
 
+        def _cfg_bool(key, default=True):
+            value = cfg.get(key, default)
+            if isinstance(value, bool):
+                return value
+            return str(value).strip().lower() not in {"false", "0", "no", "off"}
+
+        legacy_concurrency = cfg.get("concurrency")
+        legacy_target = cfg.get("vad_target_segment_seconds")
+        default_data_root = os.environ.get("DATA_ROOT") or str(
+            Path(__file__).resolve().parents[2] / "data"
+        )
+        online_format = str(cfg.get("online_audio_format", "mp3") or "mp3").lower()
+        if online_format not in {"mp3", "wav"}:
+            online_format = "mp3"
         return cls(
             strategy=strategy if strategy in (STRATEGY_ONLINE_FIRST, STRATEGY_SINGLE) else STRATEGY_ONLINE_FIRST,
             engine=engine if engine in (ENGINE_BCUT, ENGINE_WHISPER, ENGINE_EXTERNAL) else ENGINE_BCUT,
@@ -137,15 +182,25 @@ class AsrConfig:
             external_timeout=float(cfg.get("external_timeout", 120.0) or 120.0),
             external_api_key=_cfg_str("external_api_key") or _cfg_str("api_key"),
             vad_threshold_seconds=float(cfg.get("vad_threshold_seconds", 300.0) or 300.0),
-            vad_target_segment_seconds=(
-                float(cfg["vad_target_segment_seconds"]) if cfg.get("vad_target_segment_seconds") else None
+            online_target_segment_seconds=float(
+                cfg.get("online_target_segment_seconds", legacy_target or 280.0) or 280.0
             ),
-            concurrency=max(1, int(cfg.get("concurrency", settings.get("concurrency.max", 2)) or 2)),
+            local_target_segment_seconds=float(
+                cfg.get("local_target_segment_seconds", legacy_target or 120.0) or 120.0
+            ),
+            online_concurrency=max(1, int(
+                cfg.get("online_concurrency", legacy_concurrency or 3) or 3
+            )),
+            local_concurrency=max(1, int(cfg.get("local_concurrency", 1) or 1)),
+            online_audio_format=online_format,
+            online_audio_bitrate_kbps=max(32, int(
+                cfg.get("online_audio_bitrate_kbps", 64) or 64
+            )),
             request_timeout=float(cfg.get("request_timeout", 120.0) or 120.0),
             query_interval=max(0.5, float(cfg.get("query_interval", 1.0) or 1.0)),
             query_max_wait=float(cfg.get("query_max_wait", 600.0) or 600.0),
-            cache_enabled=bool(cfg.get("cache_enabled", True)),
-            cache_dir=str(cfg.get("cache_dir", "") or ""),
+            cache_enabled=_cfg_bool("cache_enabled", True),
+            cache_dir=str(cfg.get("cache_dir", "") or Path(default_data_root) / "asr_cache"),
         )
 
 
@@ -259,6 +314,7 @@ class _EngineResolver:
         task_id: str = "",
         on_log: Optional[LogCallback] = None,
         is_cancelled: Optional[CancelCheck] = None,
+        on_rate_limited: Optional[Callable[[], None]] = None,
     ) -> None:
         self._engines = engines
         self._order = order
@@ -266,9 +322,18 @@ class _EngineResolver:
         self._task_id = task_id
         self._on_log = on_log
         self._is_cancelled = is_cancelled
+        self._on_rate_limited = on_rate_limited
         self._failed: set[str] = set()
         self._attempted: list[str] = []  # 实际尝试过的引擎名（按顺序，含成功者）
+        self._success_counts: dict[str, int] = {}
+        self._degradation_count = 0
         self._lock = threading.Lock()
+        self._local_semaphore = threading.Semaphore(1)
+        self._local_acquire_lock = threading.Lock()
+        self._local_slot_acquired = False
+        self._local_slot_ever_acquired = False
+        self._local_wait_seconds = 0.0
+        self._closed = False
         # 记录本次 resolver 最终成功的引擎，供后续段直接命中（避免每次都从头试）
         self._preferred: Optional[str] = None
 
@@ -297,22 +362,37 @@ class _EngineResolver:
                 if name not in self._attempted:
                     self._attempted.append(name)
             try:
-                cues = engine.transcribe(audio_path, on_progress=on_progress)
+                if name == ENGINE_WHISPER:
+                    self._acquire_local_slot()
+                    with self._local_semaphore:
+                        cues = engine.transcribe(audio_path, on_progress=on_progress)
+                else:
+                    cues = engine.transcribe(audio_path, on_progress=on_progress)
                 with self._lock:
                     # 只把在线引擎记为 preferred：本地降级成功不锁定 preferred，否则
                     # 一段在线间歇失败会让后续所有段都锁定在慢速本地引擎上
                     if name in _ONLINE_ENGINE_NAMES:
                         self._preferred = name
+                    self._success_counts[name] = self._success_counts.get(name, 0) + 1
                 return cues
             except CancelledError:
                 raise
             except AsrError as e:
                 last_error = e
-                # 在线引擎失败多为间歇，不永久标记：后续段仍尝试在线，避免一段失败
-                # 全局塌方到慢速本地引擎；本地引擎失败（模型缺失等）才永久标记
-                if name not in _ONLINE_ENGINE_NAMES:
+                # 412/429 代表滚动额度或远端限流：本任务剩余分段不再继续撞接口。
+                # 其他在线抖动仍按段恢复；本地引擎失败则永久标记。
+                first_terminal_failure = True
+                if name not in _ONLINE_ENGINE_NAMES or e.reason == REASON_RATE_LIMITED:
                     with self._lock:
+                        first_terminal_failure = name not in self._failed
                         self._failed.add(name)
+                if (
+                    name == ENGINE_BCUT
+                    and e.reason == REASON_RATE_LIMITED
+                    and first_terminal_failure
+                    and self._on_rate_limited is not None
+                ):
+                    self._on_rate_limited()
                 # single 策略：不降级，直接以该引擎失败结束
                 if self._strategy == STRATEGY_SINGLE:
                     raise
@@ -320,10 +400,13 @@ class _EngineResolver:
                 nxt = self._next_available(name, order)
                 if nxt is None:
                     break
-                _emit_degradation(
-                    name, nxt, e.reason,
-                    status_code=e.status_code, task_id=self._task_id, on_log=self._on_log,
-                )
+                if first_terminal_failure:
+                    with self._lock:
+                        self._degradation_count += 1
+                    _emit_degradation(
+                        name, nxt, e.reason,
+                        status_code=e.status_code, task_id=self._task_id, on_log=self._on_log,
+                    )
             except Exception as e:  # 引擎实现意外异常，归一为 AsrError 后降级
                 last_error = AsrError(f"引擎 {name} 异常：{e}", reason="unknown", engine=name)
                 if name not in _ONLINE_ENGINE_NAMES:
@@ -334,6 +417,8 @@ class _EngineResolver:
                 nxt = self._next_available(name, order)
                 if nxt is None:
                     break
+                with self._lock:
+                    self._degradation_count += 1
                 _emit_degradation(name, nxt, "unknown", task_id=self._task_id, on_log=self._on_log)
 
         # 全部不可用
@@ -344,6 +429,52 @@ class _EngineResolver:
             f"无可用 ASR 引擎（已尝试：{tried}）",
             reason=REASON_MODEL_MISSING, engine="speech_to_text",
         )
+
+    def metrics_snapshot(self) -> dict:
+        with self._lock:
+            return {
+                "engine_attempts": list(self._attempted),
+                "engine_success_counts": dict(self._success_counts),
+                "degradation_count": self._degradation_count,
+                "local_slot_acquired": self._local_slot_ever_acquired,
+                "local_slot_wait_seconds": round(self._local_wait_seconds, 3),
+            }
+
+    def disable_engine(self, name: str) -> None:
+        """在发起请求前停用已被共享协调层确认不可用的引擎。"""
+        with self._lock:
+            self._failed.add(name)
+
+    def is_engine_disabled(self, name: str) -> bool:
+        with self._lock:
+            return name in self._failed
+
+    def _acquire_local_slot(self) -> None:
+        if self._local_slot_acquired:
+            return
+        with self._local_acquire_lock:
+            if self._local_slot_acquired:
+                return
+            started = time.perf_counter()
+            while True:
+                if self._is_cancelled and self._is_cancelled():
+                    self._local_wait_seconds += time.perf_counter() - started
+                    raise CancelledError("等待本地 ASR 执行槽时被取消")
+                if _LOCAL_TASK_SLOT.acquire(timeout=0.05):
+                    self._local_wait_seconds += time.perf_counter() - started
+                    self._local_slot_acquired = True
+                    self._local_slot_ever_acquired = True
+                    return
+
+    def close(self) -> None:
+        """幂等释放任务级本地执行槽；由 ``transcribe_audio`` 的 finally 调用。"""
+        with self._local_acquire_lock:
+            if self._closed:
+                return
+            self._closed = True
+            if self._local_slot_acquired:
+                self._local_slot_acquired = False
+                _LOCAL_TASK_SLOT.release()
 
     def _next_available(self, after: str, order: list[str]) -> Optional[str]:
         with self._lock:
@@ -371,56 +502,230 @@ def transcribe_audio(
     is_cancelled: Optional[CancelCheck] = None,
     task_id: str = "",
     work_dir: Optional[str] = None,
+    metrics: Optional[dict] = None,
 ) -> list[Cue]:
     """选引擎（含在线降级）+ VAD 分段并行 + 时间戳偏移拼回，返回完整 ``list[Cue]``。
 
     分段与拼合对调用方透明（design D3）。短音频（≤ ``vad_threshold_seconds``）不分段、
     直接整段转录。
     """
+    started = time.perf_counter()
+    measured = metrics if metrics is not None else {}
+    measured.update({
+        "schema_version": 1,
+        "cache_hit": False,
+        "segment_count": 0,
+        "worker_count": 0,
+        "source_bytes": 0,
+        "upload_bytes": 0,
+        "split_seconds": 0.0,
+        "transcribe_seconds": 0.0,
+        "retry_count": 0,
+        "bcut_budget_allowed": None,
+        "bcut_budget_tracked": None,
+        "degradation_count": 0,
+        "online_probe_used": False,
+        "bcut_cooldown_skipped": False,
+        "local_slot_acquired": False,
+        "local_slot_wait_seconds": 0.0,
+    })
     if not os.path.exists(audio_path):
         raise AsrError(
             f"音频文件不存在：{audio_path}", reason="invalid_response", engine="speech_to_text"
         )
 
-    engines = build_engines(config)
     order = resolve_engine_order(config)
-    resolver = _EngineResolver(
-        engines, order,
-        strategy=config.strategy, task_id=task_id,
-        on_log=on_log, is_cancelled=is_cancelled,
-    )
+    online_profile = bool(order and order[0] in _ONLINE_ENGINE_NAMES)
+    measured["engine_order"] = order
+    measured["source_bytes"] = os.path.getsize(audio_path)
+    measured["segment_format"] = config.online_audio_format if online_profile else "wav"
 
-    duration = get_audio_duration_seconds(audio_path)
-    threshold = config.vad_threshold_seconds
+    cache_key: Optional[str] = None
+    resolver: Optional[_EngineResolver] = None
+    engines: dict[str, AsrEngine] = {}
+    transcribe_started: Optional[float] = None
+    try:
+        if config.cache_enabled and config.cache_dir:
+            cache_started = time.perf_counter()
+            result_profile = json.dumps(
+                {
+                    "threshold": config.vad_threshold_seconds,
+                    "target": config.effective_target_segment_seconds(online=online_profile),
+                    "format": measured["segment_format"],
+                    "bitrate": config.online_audio_bitrate_kbps if online_profile else None,
+                    "external_endpoint": config.external_endpoint,
+                    "whisper_model_path": config.whisper_model_path,
+                    "whisper_compute_type": config.whisper_compute_type,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            try:
+                cache_key = asr_cache.whole_file_cache_key(
+                    ",".join(order),
+                    audio_path,
+                    lang=config.whisper_language,
+                    result_profile=result_profile,
+                )
+                cached = asr_cache.get(config.cache_dir, cache_key)
+            except OSError:
+                _LOGGER.warning("ASR 整段缓存查询失败，转为冷启动", exc_info=True)
+                cached = None
+            measured["cache_lookup_seconds"] = round(time.perf_counter() - cache_started, 3)
+            if cached is not None:
+                measured.update({
+                    "cache_hit": True,
+                    "segment_count": 0,
+                    "worker_count": 0,
+                    "audio_duration_seconds": round(max((cue.end for cue in cached), default=0.0), 3),
+                    "cue_count": len(cached),
+                })
+                if on_log:
+                    on_log("ok", f"ASR 整段缓存命中，跳过 VAD 与在线转录（{len(cached)} 条字幕）")
+                return cached
 
-    # 无法探知时长或短于阈值 → 整段转录（MUST NOT 误切，spec「短音频不触发分段」）
-    if duration is None or duration <= threshold:
-        if on_log:
-            on_log("info", "音频较短或时长未知，整段转录（不触发 VAD 分段）")
-        return resolver.transcribe(audio_path, on_progress=on_progress)
+        engines = build_engines(config)
+        resolver = _EngineResolver(
+            engines, order,
+            strategy=config.strategy, task_id=task_id,
+            on_log=on_log, is_cancelled=is_cancelled,
+            on_rate_limited=lambda: bcut_budget.mark_rate_limited(
+                config.cache_dir or None
+            ),
+        )
 
-    # 长音频 → VAD 静音切分 + 并行转录（design D1 修订：bcut 整段上限 ~6min——实测
-    # 6min 成功 / 8min 失败，故长音频一律分段）。每段 < vad_threshold（默认 5min），
-    # 在线引擎每段整段必成功；concurrency 默认 2 让多段并行。MUST NOT 对长音频整段
-    # 尝试（注定失败且浪费数分钟轮询）。
-    if work_dir is None:
-        work_dir = os.path.join(os.path.dirname(os.path.abspath(audio_path)), f".asr_segments_{os.getpid()}")
-    if on_log:
-        on_log("info", f"音频较长（{duration:.0f}s），触发 VAD 静音切分并行转录")
-    segments = split_audio_by_silence(
-        audio_path, duration, work_dir,
-        max_segment_sec=threshold,
-        target_segment_sec=config.vad_target_segment_seconds,
-    )
+        duration_started = time.perf_counter()
+        duration = get_audio_duration_seconds(audio_path)
+        measured["duration_probe_seconds"] = round(time.perf_counter() - duration_started, 3)
+        measured["audio_duration_seconds"] = round(float(duration or 0.0), 3)
+        threshold = config.vad_threshold_seconds
 
-    # 单段（VAD 未能切出多段）→ 退化为整段
-    if len(segments) <= 1:
-        return resolver.transcribe(audio_path, on_progress=on_progress)
+        # bcut 是未承诺 SLA 的公益接口。整项任务开始前按公开参考客户端的滚动窗口
+        # 一次性预留预算，避免长视频做到一半才 412，产生前后识别风格不同的混合字幕。
+        if order and order[0] == ENGINE_BCUT:
+            target = min(
+                config.effective_target_segment_seconds(online=True),
+                295.0,
+            )
+            expected_calls = 1 if duration is None or duration <= threshold else max(
+                1, math.ceil(float(duration) / max(1.0, target))
+            )
+            decision = bcut_budget.reserve(
+                config.cache_dir or None,
+                calls=expected_calls,
+                audio_seconds=float(duration or 0.0),
+            )
+            measured.update({
+                f"bcut_budget_{key}": value
+                for key, value in decision.to_dict().items()
+            })
+            if not decision.allowed:
+                retry_minutes = math.ceil(decision.retry_after_seconds / 60)
+                message = (
+                    "bcut 滚动额度不足，整项任务不再使用在线分段"
+                    f"（预计 {expected_calls} 次 / {float(duration or 0.0) / 60:.1f} 分钟，"
+                    f"约 {retry_minutes} 分钟后恢复）"
+                )
+                if on_log:
+                    on_log("warn", message)
+                _LOGGER.warning(message)
+                if decision.reason == "remote_rate_limited":
+                    measured["bcut_cooldown_skipped"] = True
+                if config.strategy == STRATEGY_SINGLE:
+                    raise AsrError(
+                        message,
+                        reason=REASON_RATE_LIMITED,
+                        engine=ENGINE_BCUT,
+                        status_code=429,
+                    )
+                order = [name for name in order if name != ENGINE_BCUT]
+                online_profile = bool(order and order[0] in _ONLINE_ENGINE_NAMES)
+                measured["engine_order"] = order
+                measured["segment_format"] = (
+                    config.online_audio_format if online_profile else "wav"
+                )
+                engines = build_engines(config)
+                resolver.close()
+                resolver = _EngineResolver(
+                    engines,
+                    order,
+                    strategy=config.strategy,
+                    task_id=task_id,
+                    on_log=on_log,
+                    is_cancelled=is_cancelled,
+                    on_rate_limited=lambda: bcut_budget.mark_rate_limited(
+                        config.cache_dir or None
+                    ),
+                )
+                # 不把整项本地降级结果写进原 bcut 档案的整段缓存键。
+                cache_key = None
 
-    cues = _transcribe_segments_parallel(
-        segments, resolver, config, on_progress, on_log, is_cancelled
-    )
-    return cues
+        # 无法探知时长或短于阈值 → 整段转录（MUST NOT 误切）
+        if duration is None or duration <= threshold:
+            measured.update({"segment_count": 1, "worker_count": 1})
+            if on_log:
+                on_log("info", "音频较短或时长未知，整段转录（不触发 VAD 分段）")
+            transcribe_started = time.perf_counter()
+            cues = resolver.transcribe(audio_path, on_progress=on_progress)
+        else:
+            if work_dir is None:
+                work_dir = os.path.join(
+                    os.path.dirname(os.path.abspath(audio_path)),
+                    f".asr_segments_{os.getpid()}",
+                )
+            if on_log:
+                on_log("info", f"音频较长（{duration:.0f}s），触发 VAD 静音切分并行转录")
+            split_started = time.perf_counter()
+            output_format = config.online_audio_format if online_profile else "wav"
+            max_segment = min(threshold, 295.0) if online_profile else threshold
+            segments = split_audio_by_silence(
+                audio_path,
+                duration,
+                work_dir,
+                max_segment_sec=max_segment,
+                target_segment_sec=config.effective_target_segment_seconds(online=online_profile),
+                output_format=output_format,
+                bitrate_kbps=config.online_audio_bitrate_kbps,
+            )
+            measured["split_seconds"] = round(time.perf_counter() - split_started, 3)
+            measured["segment_count"] = len(segments)
+            measured["segment_bytes"] = sum(
+                os.path.getsize(seg.path) for seg in segments if os.path.exists(seg.path)
+            )
+            transcribe_started = time.perf_counter()
+            if len(segments) <= 1:
+                measured["worker_count"] = 1
+                cues = resolver.transcribe(audio_path, on_progress=on_progress)
+            else:
+                cues = _transcribe_segments_parallel(
+                    segments,
+                    resolver,
+                    config,
+                    on_progress,
+                    on_log,
+                    is_cancelled,
+                    online_profile=online_profile,
+                    probe_bcut=bool(order and order[0] == ENGINE_BCUT),
+                    bcut_cache_dir=config.cache_dir or None,
+                    metrics=measured,
+                )
+        measured["transcribe_seconds"] = round(time.perf_counter() - transcribe_started, 3)
+        measured["cue_count"] = len(cues)
+        if cache_key and config.cache_enabled:
+            asr_cache.put(config.cache_dir, cache_key, cues)
+        return cues
+    finally:
+        if transcribe_started is not None and not measured.get("transcribe_seconds"):
+            measured["transcribe_seconds"] = round(time.perf_counter() - transcribe_started, 3)
+        if resolver is not None:
+            try:
+                measured.update(resolver.metrics_snapshot())
+            finally:
+                resolver.close()
+        bcut_engine = engines.get(ENGINE_BCUT)
+        if isinstance(bcut_engine, BcutEngine):
+            measured.update(bcut_engine.metrics_snapshot())
+        measured["total_seconds"] = round(time.perf_counter() - started, 3)
 
 
 def _transcribe_segments_parallel(
@@ -430,13 +735,20 @@ def _transcribe_segments_parallel(
     on_progress: Optional[ProgressCallback],
     on_log: Optional[LogCallback],
     is_cancelled: Optional[CancelCheck],
+    *,
+    online_profile: bool = False,
+    probe_bcut: bool = False,
+    bcut_cache_dir: Optional[str] = None,
+    metrics: Optional[dict] = None,
 ) -> list[Cue]:
     """对 VAD 各段并行调用引擎，段内时间戳叠加段起始偏移，拼回单调 SRT。"""
     if is_cancelled and is_cancelled():
         raise CancelledError("ASR 转录被取消")
 
     total = len(segments)
-    workers = max(1, min(config.concurrency, total))
+    workers = max(1, min(config.effective_concurrency(online=online_profile), total))
+    if metrics is not None:
+        metrics["worker_count"] = workers
     # 每段独立进度，按完成数映射整体百分比
     done_state = {"done": 0}
     progress_lock = threading.Lock()
@@ -460,24 +772,62 @@ def _transcribe_segments_parallel(
         ]
         return idx, applied
 
+    def _record_completed(idx: int, applied: list[Cue]) -> None:
+        results[idx] = applied
+        with progress_lock:
+            done_state["done"] += 1
+            if on_progress:
+                on_progress(
+                    int(done_state["done"] / total * 100),
+                    f"已转录 {done_state['done']}/{total} 段",
+                )
+            if on_log:
+                on_log(
+                    "info",
+                    f"分段转录完成：{done_state['done']}/{total}"
+                    f"（起始偏移 {segments[idx].start_offset:.0f}s）",
+                )
+
     try:
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            future_to_idx = {pool.submit(_worker, i, seg): i for i, seg in enumerate(segments)}
+        first_pending = 0
+        if probe_bcut:
+            probe_completed = False
+            with _BCUT_PROBE_LOCK:
+                remaining = bcut_budget.cooldown_remaining(bcut_cache_dir)
+                if remaining > 0:
+                    resolver.disable_engine(ENGINE_BCUT)
+                    if metrics is not None:
+                        metrics["bcut_cooldown_skipped"] = True
+                else:
+                    if metrics is not None:
+                        metrics["online_probe_used"] = True
+                    idx, applied = _worker(0, segments[0])
+                    _record_completed(idx, applied)
+                    probe_completed = True
+            if not probe_completed:
+                idx, applied = _worker(0, segments[0])
+                _record_completed(idx, applied)
+            first_pending = 1
+            if resolver.is_engine_disabled(ENGINE_BCUT):
+                workers = max(
+                    1,
+                    min(config.effective_concurrency(online=False), total),
+                )
+                if metrics is not None:
+                    metrics["worker_count"] = workers
+
+        pending = list(enumerate(segments[first_pending:], start=first_pending))
+        with ThreadPoolExecutor(max_workers=min(workers, max(1, len(pending)))) as pool:
+            future_to_idx = {pool.submit(_worker, i, seg): i for i, seg in pending}
             for fut in as_completed(future_to_idx):
                 idx, applied = fut.result()
-                results[idx] = applied
-                with progress_lock:
-                    done_state["done"] += 1
-                    if on_progress:
-                        on_progress(int(done_state["done"] / total * 100), f"已转录 {done_state['done']}/{total} 段")
-                    if on_log:
-                        on_log("info", f"分段转录完成：{done_state['done']}/{total}（起始偏移 {segments[idx].start_offset:.0f}s）")
+                _record_completed(idx, applied)
     finally:
         # 清理临时分段文件（保留原音频）
         for seg in segments:
             try:
-                if seg.path and os.path.exists(seg.path) and seg.path != segments[0].path:
-                    # 仅删除我们抽出的临时 WAV（非原音频）
+                if seg.path and os.path.exists(seg.path):
+                    # 仅删除我们抽出的 segment_* 临时文件（非原音频）
                     p = os.path.abspath(seg.path)
                     if p.startswith(os.path.abspath(os.path.dirname(seg.path))) and os.path.basename(p).startswith("segment_"):
                         os.remove(seg.path)
@@ -618,15 +968,26 @@ def transcribe(
     else:
         work_dir = str(data_root / "temp" / (task_id or "anon") / "asr_segments")
 
-    cues = transcribe_audio(
-        str(audio_abs),
-        asr_config,
-        on_progress=on_progress,
-        on_log=on_log,
-        is_cancelled=is_cancelled,
-        task_id=task_id,
-        work_dir=work_dir,
-    )
+    metrics: dict = {}
+    try:
+        cues = transcribe_audio(
+            str(audio_abs),
+            asr_config,
+            on_progress=on_progress,
+            on_log=on_log,
+            is_cancelled=is_cancelled,
+            task_id=task_id,
+            work_dir=work_dir,
+            metrics=metrics,
+        )
+    except Exception:
+        register_metadata = getattr(ctx, "register_node_metadata", None)
+        if callable(register_metadata) and metrics:
+            try:
+                register_metadata(metrics)
+            except Exception:
+                _LOGGER.debug("register_node_metadata 失败，已忽略", exc_info=True)
+        raise
 
     srt_text = cues_to_srt(cues)
     srt_abs = _resolve_abs(data_root, srt_out_rel_path)
@@ -651,6 +1012,13 @@ def transcribe(
             register("srt", rel_for_db, size_bytes)
         except Exception:
             _LOGGER.debug("register_product 失败，已忽略", exc_info=True)
+
+    register_metadata = getattr(ctx, "register_node_metadata", None)
+    if callable(register_metadata):
+        try:
+            register_metadata(metrics)
+        except Exception:
+            _LOGGER.debug("register_node_metadata 失败，已忽略", exc_info=True)
 
     if on_log:
         on_log("ok", f"ASR 转写完成，SRT 已写入（{len(cues)} 条字幕，{size_bytes} 字节）")

@@ -31,7 +31,7 @@ _ENUM_ALLOWED: Dict[str, frozenset[str]] = {
     "pdf.mode": frozenset({"pypdf"}),
     "note.output_language": frozenset({"zh", "en"}),
     "note.detail_level": frozenset(
-        {"concise", "balanced", "detailed", "thorough", "exhaustive"}
+        {"concise", "balanced", "detailed", "exhaustive"}
     ),
     "note.image_quality": frozenset({"low", "medium", "high"}),
     "retention.video": frozenset({"permanent", "7d", "30d"}),
@@ -63,11 +63,38 @@ _ASR_CONFIG_FIELDS = frozenset(
         "external_endpoint",
         "external_timeout",
         "vad_threshold_seconds",
+        # 旧字段仅作为兼容输入，响应与后续保存会迁移到新字段。
         "vad_target_segment_seconds",
         "concurrency",
+        "online_target_segment_seconds",
+        "local_target_segment_seconds",
+        "online_concurrency",
+        "local_concurrency",
+        "online_audio_format",
+        "online_audio_bitrate_kbps",
+        "cache_enabled",
         "request_timeout",
     }
 )
+_ASR_CONFIG_DEFAULTS: dict[str, Any] = {
+    "bcut_timeout": 120.0,
+    "whisper_model_path": "",
+    "whisper_binary": "",
+    "whisper_device": "cpu",
+    "whisper_compute_type": "int8",
+    "whisper_language": "zh",
+    "external_endpoint": "",
+    "external_timeout": 120.0,
+    "vad_threshold_seconds": 300.0,
+    "online_target_segment_seconds": 280.0,
+    "local_target_segment_seconds": 120.0,
+    "online_concurrency": 3,
+    "local_concurrency": 1,
+    "online_audio_format": "mp3",
+    "online_audio_bitrate_kbps": 64,
+    "cache_enabled": True,
+    "request_timeout": 120.0,
+}
 _INTERNAL_KEYS = frozenset(
     {
         "llm.credentials",
@@ -225,6 +252,19 @@ def _validate_asr_config(incoming: Any, current: dict[str, Any]) -> dict[str, An
         candidate["external_endpoint"] = (
             _validate_url(endpoint, "external_endpoint") if endpoint else ""
         )
+    if "online_audio_format" in incoming:
+        audio_format = str(incoming["online_audio_format"] or "").strip().lower()
+        if audio_format not in {"mp3", "wav"}:
+            raise ValueError("online_audio_format 仅允许 mp3/wav")
+        candidate["online_audio_format"] = audio_format
+    if "cache_enabled" in incoming:
+        raw_cache = incoming["cache_enabled"]
+        if isinstance(raw_cache, bool):
+            candidate["cache_enabled"] = raw_cache
+        elif str(raw_cache).strip().lower() in {"true", "false", "1", "0"}:
+            candidate["cache_enabled"] = str(raw_cache).strip().lower() in {"true", "1"}
+        else:
+            raise ValueError("cache_enabled 必须是布尔值")
 
     numeric_rules = {
         "bcut_timeout": (1.0, 600.0, float),
@@ -232,6 +272,11 @@ def _validate_asr_config(incoming: Any, current: dict[str, Any]) -> dict[str, An
         "vad_threshold_seconds": (30.0, 7200.0, float),
         "vad_target_segment_seconds": (10.0, 1800.0, float),
         "concurrency": (1, 3, int),
+        "online_target_segment_seconds": (10.0, 295.0, float),
+        "local_target_segment_seconds": (10.0, 1800.0, float),
+        "online_concurrency": (1, 3, int),
+        "local_concurrency": (1, 3, int),
+        "online_audio_bitrate_kbps": (32, 128, int),
         "request_timeout": (1.0, 3600.0, float),
     }
     for key, (lower, upper, cast) in numeric_rules.items():
@@ -247,17 +292,35 @@ def _validate_asr_config(incoming: Any, current: dict[str, Any]) -> dict[str, An
         if not lower <= value <= upper:
             raise ValueError(f"{key} 取值越界（允许 {lower}~{upper}）")
         candidate[key] = value
+    if "concurrency" in incoming:
+        candidate["online_concurrency"] = candidate.pop("concurrency")
+    if "vad_target_segment_seconds" in incoming:
+        legacy_target = candidate.pop("vad_target_segment_seconds", None)
+        if legacy_target is not None:
+            candidate["online_target_segment_seconds"] = legacy_target
+            candidate["local_target_segment_seconds"] = legacy_target
     return candidate
 
 
 def _normalize_asr_config(value: Any) -> dict[str, Any]:
     """把旧 ``model_path`` 键收敛为当前公开契约并移除未知字段。"""
     config = parse_json_object(value)
-    normalized = {
-        key: item for key, item in config.items() if key in _ASR_CONFIG_FIELDS
-    }
+    normalized = dict(_ASR_CONFIG_DEFAULTS)
+    normalized.update({
+        key: item
+        for key, item in config.items()
+        if key in _ASR_CONFIG_FIELDS and key not in {"concurrency", "vad_target_segment_seconds"}
+    })
     if not normalized.get("whisper_model_path") and config.get("model_path"):
         normalized["whisper_model_path"] = config["model_path"]
+    if "online_concurrency" not in config and config.get("concurrency") is not None:
+        normalized["online_concurrency"] = config["concurrency"]
+    if config.get("vad_target_segment_seconds") is not None:
+        legacy_target = config["vad_target_segment_seconds"]
+        if "online_target_segment_seconds" not in config:
+            normalized["online_target_segment_seconds"] = legacy_target
+        if "local_target_segment_seconds" not in config:
+            normalized["local_target_segment_seconds"] = legacy_target
     return normalized
 
 

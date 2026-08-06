@@ -7,7 +7,7 @@
 
 实现：复用镜像内已有的 ``ffmpeg``，用其 ``silencedetect`` 滤镜扫描静音边界，
 随后按「目标段长（默认 ≤ 单次转写阈值）」在静音中点贪心选切点、再用 ``ffmpeg`` 抽
-16kHz 单声道 WAV 分段。无额外依赖（torch / silero-vad 等不进 v1 镜像）。
+16kHz 单声道 WAV 或低码率 MP3 分段。无额外依赖（torch / silero-vad 等不进 v1 镜像）。
 
 分段与拼合对本模块调用方而言是底层细节；时间戳偏移拼回由 ``pipeline`` 完成。
 """
@@ -118,16 +118,27 @@ def compute_split_points(
     return points
 
 
-def _extract_segment(audio_path: str, start: float, end: float, out_path: str) -> bool:
-    """``ffmpeg -ss <start> -t <dur>`` 抽 16kHz 单声道 WAV；成功 True。"""
+def _extract_segment(
+    audio_path: str,
+    start: float,
+    end: float,
+    out_path: str,
+    *,
+    output_format: str = "wav",
+    bitrate_kbps: int = 64,
+) -> bool:
+    """``ffmpeg -ss <start> -t <dur>`` 抽 16kHz 单声道音频；成功 True。"""
     dur = max(0.0, end - start)
     if dur <= 0:
         return False
     cmd = [
         "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
         "-ss", f"{start:.3f}", "-t", f"{dur:.3f}", "-i", audio_path,
-        "-ar", "16000", "-ac", "1", out_path,
+        "-ar", "16000", "-ac", "1",
     ]
+    if output_format == "mp3":
+        cmd.extend(["-codec:a", "libmp3lame", "-b:a", f"{int(bitrate_kbps)}k"])
+    cmd.append(out_path)
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     except (FileNotFoundError, subprocess.TimeoutExpired) as e:
@@ -147,6 +158,8 @@ def split_audio_by_silence(
     target_segment_sec: Optional[float] = None,
     noise_floor_db: float = -25.0,
     min_silence_sec: float = 0.6,
+    output_format: str = "wav",
+    bitrate_kbps: int = 64,
 ) -> list[AudioSegment]:
     """按静音切分长音频为多个分段。
 
@@ -161,6 +174,9 @@ def split_audio_by_silence(
         按 ``start_offset`` 升序的 ``AudioSegment`` 列表；切分失败时回退为「整段」单元素列表
         （让 pipeline 退化为整段转录，优于整体失败）。
     """
+    output_format = str(output_format or "wav").lower()
+    if output_format not in {"wav", "mp3"}:
+        raise ValueError(f"不支持的 VAD 分段格式：{output_format}")
     os.makedirs(work_dir, exist_ok=True)
     if duration <= max_segment_sec:
         return [AudioSegment(start_offset=0.0, duration=duration, path=audio_path)]
@@ -183,8 +199,15 @@ def split_audio_by_silence(
                 prev = segments[-1]
                 prev.duration = end - prev.start_offset
                 continue
-        out_path = os.path.join(work_dir, f"segment_{idx:04d}.wav")
-        if not _extract_segment(audio_path, start, end, out_path):
+        out_path = os.path.join(work_dir, f"segment_{idx:04d}.{output_format}")
+        if not _extract_segment(
+            audio_path,
+            start,
+            end,
+            out_path,
+            output_format=output_format,
+            bitrate_kbps=bitrate_kbps,
+        ):
             _LOGGER.warning("分段 %d 抽取失败，跳过（start=%.2f）", idx, start)
             continue
         segments.append(AudioSegment(start_offset=start, duration=end - start, path=out_path))

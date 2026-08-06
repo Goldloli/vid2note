@@ -30,6 +30,7 @@ from src.llm.deepseek import DeepSeekLLM
 from src.llm.openai_compatible import normalize_usage
 from src.models.task import Task
 from src.runtime import task_service as task_service_mod
+from src.runtime import runner as runner_mod
 from src.runtime.runner import LlmUsageAggregator, classify_llm_operation
 
 
@@ -130,7 +131,6 @@ class TestChatLastUsage:
         llm = DeepSeekLLM(api_key="sk-test")
         assert llm.chat([{"role": "user", "content": "hi"}]) == "ok"
         assert llm.last_usage is None
-
 
 # --------------------------------------------------------------------------- #
 # _call_llm 用量上报
@@ -304,6 +304,60 @@ class TestRepositoryLlmUsage:
         usage = {"total": _usage() | {"calls": 1}, "by_stage": {}, "by_operation": {}}
         repo.create(Task(id="t-usage-2", source_type="direct", llm_usage=usage))
         assert repo.get_by_id("t-usage-2").llm_usage == usage
+
+
+def test_note_executor_flushes_usage_when_generation_fails(tmp_path, monkeypatch):
+    """远端已经计费后即使终稿门禁失败，任务详情也必须保留 usage。"""
+    data_root = tmp_path / "data"
+    srt_rel = "srt/t-failed-note/subtitle.srt"
+    srt_path = data_root / srt_rel
+    srt_path.parent.mkdir(parents=True)
+    srt_path.write_text("1\n00:00:00,000 --> 00:00:01,000\n测试\n", encoding="utf-8")
+    task = Task(
+        id="t-failed-note",
+        source_type="direct",
+        srt_path=srt_rel,
+        note_detail_level="concise",
+    )
+
+    class MemoryRepo:
+        def __init__(self):
+            self.task = task
+
+        def update(self, _task_id, **kwargs):
+            for key, value in kwargs.items():
+                setattr(self.task, key, value)
+            return True
+
+    class NoteCtx:
+        def __init__(self):
+            self._state = SimpleNamespace(artifact=lambda kind: srt_rel if kind == "srt" else None)
+
+        def emit_log(self, *_args, **_kwargs):
+            pass
+
+        def emit_progress(self, *_args, **_kwargs):
+            pass
+
+    llm = _UsageLLM(usage=_usage(prompt=10, completion=5, hit=4, miss=6))
+    repo = MemoryRepo()
+    monkeypatch.setattr(runner_mod, "_build_llm", lambda *_args, **_kwargs: llm)
+
+    def paid_then_fail(processor_self, *_args, **_kwargs):
+        processor_self._call_llm(
+            [{"role": "user", "content": "已计费请求"}],
+            operation_name="简洁章节初稿(1/1)",
+        )
+        raise RuntimeError("终稿门禁失败")
+
+    monkeypatch.setattr(SimpleProcessor, "process", paid_then_fail)
+    executors = runner_mod._make_executors(task, {}, data_root, repo)
+
+    with pytest.raises(RuntimeError, match="终稿门禁失败"):
+        executors[runner_mod.NodeName.NOTE](NoteCtx())
+
+    assert repo.task.llm_usage["total"]["calls"] == 1
+    assert repo.task.llm_usage["by_stage"]["draft"]["prompt_tokens"] == 10
 
 
 class TestMigrateLlmUsageColumn:

@@ -1,0 +1,159 @@
+{
+  "schema_version": 1,
+  "phase": "after",
+  "captured_at": "2026-08-04T22:05:00+08:00",
+  "implementation": "profiled-full-map-batched-draft-bounded-audit",
+  "model": "deepseek-v4-flash",
+  "pricing_cny_per_million_tokens": {
+    "cache_hit_input": 0.02,
+    "cache_miss_input": 1.0,
+    "output": 2.0,
+    "source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing"
+  },
+  "common_parameters": {
+    "asr_engine": "bcut",
+    "asr_strategy_effective": "online_first-budget-precheck-to-whisper_cpp",
+    "llm_provider": "deepseek",
+    "output_language": "zh",
+    "extract_images": false,
+    "mindmap_formats": ["md"]
+  },
+  "tasks": [
+    {
+      "detail_level": "concise",
+      "task_id": "task_a80349921317",
+      "source_file": "【一百九十三回】Codex合并进入ChatGPT，OpenAI在下什么棋.mp4",
+      "generated_title": "Codex并入ChatGPT：OpenAI的生态位卡位与AI行业格局",
+      "video_duration_seconds": 9022.88,
+      "subtitle_text_chars": 38052,
+      "srt_chars": 152289,
+      "note_chars": 3034,
+      "note_bytes": 8082,
+      "markdown": {
+        "h1": 1,
+        "h2": 4,
+        "h3": 14,
+        "table_lines": 0,
+        "internal_marker_hits": 0,
+        "duplicate_paragraphs": 0,
+        "duplicate_headings": 0
+      },
+      "llm_usage_observed": {
+        "calls": 2,
+        "prompt_tokens": 52567,
+        "cache_hit_tokens": 49152,
+        "cache_miss_tokens": 3415,
+        "completion_tokens": 3163,
+        "estimated_cost_cny": 0.010724,
+        "operations": [
+          {"name": "简洁字幕理解与内容地图", "prompt": 24635, "hit": 24576, "miss": 59, "output": 1510},
+          {"name": "简洁章节初稿(1/1)", "prompt": 27932, "hit": 24576, "miss": 3356, "output": 1653}
+        ]
+      },
+      "cold_normalization": {
+        "reason": "同一任务开发期重跑使首个地图调用命中 24576 token；公平基准将该首调用改计未命中，保留任务内后续缓存命中",
+        "cache_hit_tokens": 24576,
+        "cache_miss_tokens": 27991,
+        "estimated_cost_cny": 0.034809
+      },
+      "estimated_cost_cny": 0.034809,
+      "note_seconds": 27.928,
+      "asr": {
+        "total_seconds": 197.353,
+        "cache_hit": false,
+        "segment_count": 59,
+        "worker_count": 1,
+        "engine_order": ["whisper_cpp"]
+      }
+    },
+    {
+      "detail_level": "balanced",
+      "task_id": "task_275b24a35c86",
+      "source_file": "【一百八十六回】AI落地的两级分化.mp4",
+      "generated_title": "AI落地的两级分化：胜负手与个人生存指南",
+      "video_duration_seconds": 9189.599,
+      "subtitle_text_chars": 40609,
+      "srt_chars": 167950,
+      "note_chars": 7595,
+      "note_bytes": 20340,
+      "markdown": {
+        "h1": 1,
+        "h2": 6,
+        "h3": 26,
+        "table_lines": 0,
+        "internal_marker_hits": 0,
+        "duplicate_paragraphs": 0,
+        "duplicate_headings": 0
+      },
+      "llm_usage": {
+        "calls": 3,
+        "prompt_tokens": 87689,
+        "cache_hit_tokens": 54400,
+        "cache_miss_tokens": 33289,
+        "completion_tokens": 6836,
+        "operations": [
+          {"name": "适中字幕理解与内容地图", "prompt": 26414, "hit": 0, "miss": 26414, "output": 2484},
+          {"name": "适中章节初稿(1/2)", "prompt": 30862, "hit": 26368, "miss": 4494, "output": 2122},
+          {"name": "适中章节初稿(2/2)", "prompt": 30413, "hit": 28032, "miss": 2381, "output": 2230}
+        ]
+      },
+      "estimated_cost_cny": 0.048049,
+      "note_seconds": 60.357,
+      "asr": {
+        "total_seconds": 194.155,
+        "cache_hit": false,
+        "segment_count": 59,
+        "worker_count": 1,
+        "engine_order": ["whisper_cpp"]
+      }
+    },
+    {
+      "detail_level": "detailed",
+      "task_id": "task_ce37f0cb26b2",
+      "source_file": "【一百九十一回】vibe coding从0-1解读课伴.mp4",
+      "generated_title": "vibe coding从0到1：课程伴侣产品全流程实战",
+      "video_duration_seconds": 9325.366,
+      "subtitle_text_chars": 37013,
+      "srt_chars": 152730,
+      "note_chars": 13208,
+      "note_bytes": 35886,
+      "markdown": {
+        "h1": 1,
+        "h2": 8,
+        "h3": 45,
+        "table_lines": 5,
+        "internal_marker_hits": 0,
+        "duplicate_paragraphs": 0,
+        "duplicate_headings": 1
+      },
+      "llm_usage": {
+        "calls": 10,
+        "prompt_tokens": 272314,
+        "cache_hit_tokens": 226944,
+        "cache_miss_tokens": 45370,
+        "completion_tokens": 13838,
+        "operations": [
+          {"name": "详细字幕理解与内容地图", "prompt": 23757, "hit": 0, "miss": 23757, "output": 2732},
+          {"name": "详细字幕理解章节映射补丁", "prompt": 26830, "hit": 23680, "miss": 3150, "output": 834},
+          {"name": "详细章节初稿(1/4)", "prompt": 28807, "hit": 27648, "miss": 1159, "output": 904},
+          {"name": "详细章节格式修复", "prompt": 29822, "hit": 29696, "miss": 126, "output": 1705},
+          {"name": "详细章节初稿(2/4)", "prompt": 28844, "hit": 27648, "miss": 1196, "output": 2399},
+          {"name": "详细章节初稿(3/4)", "prompt": 28720, "hit": 27648, "miss": 1072, "output": 1792},
+          {"name": "详细章节初稿(4/4)", "prompt": 28716, "hit": 27648, "miss": 1068, "output": 1579},
+          {"name": "详细全局质量审计", "prompt": 12053, "hit": 0, "miss": 12053, "output": 134},
+          {"name": "详细问题章节修复(1/8)", "prompt": 32348, "hit": 31488, "miss": 860, "output": 958},
+          {"name": "详细问题章节修复(2/8)", "prompt": 32417, "hit": 31488, "miss": 929, "output": 801}
+        ]
+      },
+      "estimated_cost_cny": 0.077585,
+      "note_seconds": 103.157,
+      "asr": {
+        "total_seconds": 173.101,
+        "cache_hit": false,
+        "segment_count": 61,
+        "worker_count": 1,
+        "engine_order": ["whisper_cpp"]
+      }
+    }
+  ]
+}

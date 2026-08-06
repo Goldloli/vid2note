@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import random
+import threading
 import time
 from typing import Optional
 
@@ -46,9 +47,9 @@ def _ext(path: str) -> str:
 def _raise_for_status(resp: requests.Response, action: str) -> None:
     """把 HTTP 错误翻译成可供降级策略识别的 ``AsrError``。"""
     code = resp.status_code
-    if code == 429:
+    if code in (412, 429):
         raise AsrError(
-            f"{action}被限流（HTTP 429）",
+            f"{action}被限流或会话被拒绝（HTTP {code}）",
             reason=REASON_RATE_LIMITED,
             engine="bcut",
             status_code=code,
@@ -77,14 +78,14 @@ def _build_session() -> requests.Session:
     """
     session = requests.Session()
     retry_kwargs = dict(
-        total=3,
+        total=2,
         backoff_factor=0.5,
         status_forcelist=[429, 500, 502, 503, 504],
     )
     try:
-        retry = Retry(allowed_methods=frozenset(["GET", "PUT", "POST"]), **retry_kwargs)
+        retry = Retry(allowed_methods=frozenset(["GET", "PUT"]), **retry_kwargs)
     except TypeError:  # 旧 urllib3 用 method_whitelist
-        retry = Retry(method_whitelist=frozenset(["GET", "PUT", "POST"]), **retry_kwargs)
+        retry = Retry(method_whitelist=frozenset(["GET", "PUT"]), **retry_kwargs)
     adapter = HTTPAdapter(max_retries=retry)
     session.mount("http://", adapter)
     session.mount("https://", adapter)
@@ -100,9 +101,9 @@ class _BcutClient:
         "Content-Type": "application/json",
     }
 
-    def __init__(self, timeout: float) -> None:
+    def __init__(self, timeout: float, session: Optional[requests.Session] = None) -> None:
         self.timeout = timeout
-        self._session = _build_session()
+        self._session = session or _build_session()
         self.task_id: Optional[str] = None
         self._in_boss_key = None
         self._resource_id = None
@@ -142,14 +143,15 @@ class _BcutClient:
                 engine="bcut",
             ) from exc
 
-    def upload(self, binary: bytes) -> None:
+    def upload(self, binary: bytes, file_ext: str = "mp3") -> None:
+        normalized_ext = file_ext if file_ext in _SUPPORTED_FORMATS else "mp3"
         data = self._post(
             "/resource/create",
             {
                 "type": 2,
-                "name": "audio.mp3",
+                "name": f"audio.{normalized_ext}",
                 "size": len(binary),
-                "ResourceFileType": "mp3",
+                "ResourceFileType": normalized_ext,
                 "model_id": "8",
             },
         ).get("data") or {}
@@ -267,7 +269,7 @@ class BcutEngine(AsrEngine):
         query_max_wait: float = 600.0,
         cache_enabled: bool = True,
         cache_dir: Optional[str] = None,
-        max_retries: int = 2,
+        max_retries: int = 1,
     ) -> None:
         self.timeout = timeout
         self.query_interval = max(0.5, float(query_interval))
@@ -275,6 +277,24 @@ class BcutEngine(AsrEngine):
         self.cache_enabled = bool(cache_enabled)
         self.cache_dir = cache_dir
         self.max_retries = max(0, int(max_retries))
+        self._thread_local = threading.local()
+        self._metrics_lock = threading.Lock()
+        self._retry_count = 0
+        self._upload_bytes = 0
+
+    def _worker_session(self) -> requests.Session:
+        session = getattr(self._thread_local, "session", None)
+        if session is None:
+            session = _build_session()
+            self._thread_local.session = session
+        return session
+
+    def metrics_snapshot(self) -> dict[str, int]:
+        with self._metrics_lock:
+            return {
+                "retry_count": self._retry_count,
+                "upload_bytes": self._upload_bytes,
+            }
 
     def transcribe(
         self,
@@ -308,11 +328,13 @@ class BcutEngine(AsrEngine):
         # 上传 + 轮询（带重试：bcut 间歇失败重试 max_retries 次，避免轻易降级本地慢引擎）
         last_exc: Optional[AsrError] = None
         for attempt in range(self.max_retries + 1):
-            client = _BcutClient(self.timeout)
+            client = _BcutClient(self.timeout, session=self._worker_session())
             try:
                 if on_progress:
                     on_progress(15, "上传音频（bcut）")
-                client.upload(binary)
+                with self._metrics_lock:
+                    self._upload_bytes += len(binary)
+                client.upload(binary, ext)
                 if on_progress:
                     on_progress(50, "提交转写任务（bcut）")
                 client.create_task()
@@ -333,12 +355,17 @@ class BcutEngine(AsrEngine):
                             reason=REASON_TIMEOUT,
                             engine=self.name,
                         )
-                    # 指数退避 + 抖动（起步 query_interval，上限 8s），替代固定 2s
-                    time.sleep(min(interval, 8.0) + random.uniform(0, 0.3))
-                    interval = min(interval * 2, 8.0)
+                    # 指数退避 + 抖动（起步 query_interval，上限 4s）
+                    time.sleep(min(interval, 4.0) + random.uniform(0, 0.3))
+                    interval = min(interval * 2, 4.0)
             except AsrError as exc:
                 last_exc = exc
+                # 412/429 通常表示滚动公益额度或远端限流；立即重试只会继续消耗请求。
+                if exc.reason == REASON_RATE_LIMITED:
+                    break
                 if attempt < self.max_retries:
+                    with self._metrics_lock:
+                        self._retry_count += 1
                     _LOGGER.info("bcut 失败（%s），重试 %d/%d", exc.reason, attempt + 1, self.max_retries)
                     continue
         raise last_exc if last_exc else AsrError(

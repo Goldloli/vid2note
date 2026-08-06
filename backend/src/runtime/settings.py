@@ -58,7 +58,7 @@ MAX_CONCURRENCY = 3
 DEFAULT_CONCURRENCY = 2
 _RETENTION_VALUES = frozenset({"permanent", "7d", "30d"})
 _LANGUAGES = frozenset({"zh", "en"})
-_DETAIL_LEVELS = frozenset({"concise", "balanced", "detailed", "thorough", "exhaustive"})
+_DETAIL_LEVELS = frozenset({"concise", "balanced", "detailed", "exhaustive"})
 _PDF_MODES = frozenset({"pypdf"})
 _ASR_ENGINES = frozenset({"bcut", "whisper_cpp", "external"})
 
@@ -181,8 +181,11 @@ def get_settings_snapshot(repo: Any = None) -> Dict[str, str]:
     snapshot["note.output_language"] = _coerce_enum(
         snapshot.get("note.output_language"), _LANGUAGES, "zh"
     )
-    snapshot["note.detail_level"] = _coerce_enum(
-        snapshot.get("note.detail_level"), _DETAIL_LEVELS, "balanced"
+    raw_detail_level = str(snapshot.get("note.detail_level") or "").strip().lower()
+    snapshot["note.detail_level"] = (
+        "exhaustive"
+        if raw_detail_level == "thorough"
+        else _coerce_enum(raw_detail_level, _DETAIL_LEVELS, "balanced")
     )
     snapshot["note.extract_images"] = (
         "true" if _as_bool(snapshot.get("note.extract_images")) else "false"

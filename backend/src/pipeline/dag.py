@@ -384,6 +384,24 @@ class NodeContext:
             {"node": self.node.value, "kind": kind, "path": rel_path, "size_bytes": int(size_bytes or 0)},
         )
 
+    def register_node_metadata(self, metadata: dict[str, Any]) -> None:
+        """把 JSON-safe 性能信息合并到当前节点 ``product.metadata`` 并持久化。
+
+        历史节点的 product 可能为空；此方法不改变顶层产物指针，也不会覆盖既有 path/size。
+        """
+        product = dict(self._state.nodes[self.node].product or {})
+        current = dict(product.get("metadata") or {})
+        current.update(metadata or {})
+        product["metadata"] = current
+        self._state.nodes[self.node].product = product
+        _try_persist(self._repo, self.task_id, self._state)
+        _try_publish(
+            self._bus,
+            self.task_id,
+            "node-metadata",
+            {"node": self.node.value, "metadata": current},
+        )
+
     # ----- 进度 / 日志 -----
     def emit_progress(self, percent: int, message: Optional[str] = None) -> None:
         """推送节点进度(先落库 ``node_statuses[node].progress`` 再推 ``node-progress``)。"""

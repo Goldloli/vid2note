@@ -300,6 +300,7 @@ const tabs = [
 const nodeStatuses = computed(() => task.value?.node_statuses || {})
 // 「LLM 消耗」表格行(getTask 响应与 SSE snapshot 合并均带 llm_usage,无需新 API)
 const usageRows = computed(() => llmUsageRows(task.value?.llm_usage))
+const asrMetrics = computed(() => task.value?.node_statuses?.asr?.product?.metadata || null)
 const statusText = status => i18n.global.t(`status.${status || 'pending'}`)
 const ring = computed(() => {
   const progress = (task.value?.progress || 0) / 100
@@ -427,19 +428,49 @@ const artifactEmptyHint = computed(() => {
 })
 const metaRows = computed(() => {
   const currentTask = task.value || {}
-  return [
+  const rows = [
     { k: 'task.metaId', v: currentTask.id },
     { k: 'task.metaSource', v: currentTask.source_url || currentTask.source_type },
     { k: 'task.metaAsr', v: i18n.global.t(`engine.short.${currentTask.asr_engine || 'bcut'}`) },
     { k: 'task.metaLlm', v: `${currentTask.llm_provider || ''}/${currentTask.llm_model || ''}` },
     { k: 'task.metaLang', v: currentTask.output_language },
-    { k: 'task.metaDetail', v: currentTask.note_detail_level ? i18n.global.t(`settings.detail.${currentTask.note_detail_level}`) : '' },
+    { k: 'task.metaDetail', v: currentTask.note_detail_level ? i18n.global.t(`settings.detail.${currentTask.note_detail_level === 'thorough' ? 'exhaustive' : currentTask.note_detail_level}`) : '' },
     { k: 'task.metaShot', v: currentTask.extract_images ? i18n.global.t('task.shotOn') : i18n.global.t('task.shotOff') },
     { k: 'task.metaShotCount', v: String((currentTask.screenshot_paths || []).length) },
     { k: 'task.metaCreated', v: formatDate(currentTask.created_at) },
     { k: 'task.metaFinished', v: formatDate(currentTask.finished_at) },
     { k: 'task.metaError', v: currentTask.error || '' },
-  ].filter(row => row.v)
+  ]
+  const metrics = asrMetrics.value
+  if (metrics) {
+    rows.push(
+      {
+        k: 'task.asrPerfCache',
+        v: metrics.cache_hit ? i18n.global.t('task.asrCacheHit') : i18n.global.t('task.asrCacheMiss'),
+      },
+      {
+        k: 'task.asrPerfSegments',
+        v: i18n.global.t('task.asrSegmentsValue', {
+          count: metrics.segment_count ?? 0,
+          workers: metrics.worker_count ?? 0,
+          format: String(metrics.segment_format || '-').toUpperCase(),
+        }),
+      },
+      {
+        k: 'task.asrPerfTraffic',
+        v: `${formatBytes(metrics.source_bytes)} → ${formatBytes(metrics.upload_bytes)}`,
+      },
+      {
+        k: 'task.asrPerfTiming',
+        v: i18n.global.t('task.asrTimingValue', {
+          split: formatMetricSeconds(metrics.split_seconds),
+          transcribe: formatMetricSeconds(metrics.transcribe_seconds),
+          total: formatMetricSeconds(metrics.total_seconds),
+        }),
+      },
+    )
+  }
+  return rows.filter(row => row.v)
 })
 
 function durationBetween(start, end) {
@@ -457,6 +488,10 @@ function formatBytes(bytes) {
   if (value < 1024) return `${value} B`
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
   return `${(value / 1024 / 1024).toFixed(1)} MB`
+}
+function formatMetricSeconds(seconds) {
+  const value = Number(seconds || 0)
+  return `${value < 10 ? value.toFixed(1) : Math.round(value)}s`
 }
 function formatDate(date) {
   return date ? String(date).replace('T', ' ').slice(0, 19) : '-'

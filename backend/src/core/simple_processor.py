@@ -14,7 +14,12 @@ from ..prompts import (
 )
 from ..utils.logger import TaskLogger
 from ..utils.srt_validator import SRTValidator
-from ..prompts.detail_level import detail_instruction, normalize_detail_level
+from ..prompts.detail_level import (
+    DETAIL_LEVEL_PROFILES,
+    DetailProfile,
+    detail_instruction,
+    normalize_detail_level,
+)
 from .security_constants import (
     PROMPT_INJECTION_PATTERNS,
     DANGEROUS_CHARACTERS,
@@ -41,13 +46,17 @@ MAX_FILE_SIZE = 100 * 1024 * 1024
 EXHAUSTIVE_CHUNK_SIZE = 12000
 EXHAUSTIVE_BOUNDARY_CONTEXT = 600
 EXHAUSTIVE_EVIDENCE_MAX_TOKENS = 6000
-EXHAUSTIVE_BLUEPRINT_MAX_TOKENS = 24000
-EXHAUSTIVE_DRAFT_MAX_TOKENS = 32000
-EXHAUSTIVE_REVIEW_MAX_TOKENS = 32000
+EXHAUSTIVE_BLUEPRINT_MAX_TOKENS = 12000
+EXHAUSTIVE_DRAFT_MAX_TOKENS = 12000
+EXHAUSTIVE_AUDIT_MAX_TOKENS = 6000
+EXHAUSTIVE_REPAIR_MAX_TOKENS = 12000
 
-# thorough 档（比较详细）：全文常驻上下文的双钴引擎（理解→分章深写→机械组装）。
-# 2-3 小时课程字幕约 2.5 万 token，远低于 DeepSeek-v4 的 1M 上下文；超过此字符阈值
-# 则退回 exhaustive 分段引擎，避免单次上下文装不下导致静默截断丢内容。
+# 三种非超详细档位只在中长字幕启用分层生成；短内容保留一次生成，避免为了结构
+# 增加不必要调用。全文上限与曾经实测的 thorough 链路一致，超过时明确失败而非截断。
+PROFILE_LAYERED_MIN_CHARS = 12000
+PROFILE_FULL_CONTEXT_MAX_CHARS = 500000
+
+# 历史 thorough 已映射到 exhaustive；下列常量只供旧内部方法兼容，生产入口不再调用。
 THOROUGH_FULLCONTEXT_MAX_CHARS = 500000
 THOROUGH_OUTLINE_MAX_TOKENS = 6000
 THOROUGH_CHAPTER_MAX_TOKENS = 6000
@@ -86,6 +95,25 @@ EXHAUSTIVE_SUSPICIOUS_ASR_TERMS = re.compile(
     r"OpenClow|杀乡|Hermes Agent（Harness Engineering）"
 )
 
+# 只拦截明确属于课程行政/收尾的独立章节标题。匹配保持窄范围，避免把“会员产品
+# 定价”“通知系统设计”等真正课程主题误判为噪声。
+LOW_VALUE_CHAPTER_TITLE = re.compile(
+    r"(?:^|[：:、·—\-\s])(?:开场寒暄|下期预告|课程预告|结束语|感谢观看|"
+    r"关注公众号|关注账号|加入群聊|加群通知|个人事务|个人安排|"
+    r"会员涨价通知|会员通知)(?:$|[：:、与和及·—\-\s])",
+    re.IGNORECASE,
+)
+
+# 连续重复只作为风险信号，不直接删改。仅命中“词词再词”这种强 ASR 风险形态，
+# 覆盖真实样例“进生进生再进生”，并避开“特别特别”等正常口语强调。
+SUSPICIOUS_ASR_REPETITION = re.compile(
+    r"(?P<term>[\u4e00-\u9fff]{2,6})(?P=term)再(?P=term)"
+)
+
+RATE_CONVERSION_CONNECTOR = re.compile(
+    r"也就是|即|相当于|折合|换算(?:为|成)?|约等于"
+)
+
 EXHAUSTIVE_HIGH_CONFIDENCE_TERM_REPLACEMENTS = (
     ("Hermes Agent（Harness Engineering）", "Hermes Agent"),
     ("沙箱（杀乡）", "沙箱（Sandbox）"),
@@ -116,6 +144,7 @@ class SimpleProcessor:
         self.note_detail_level = normalize_detail_level(
             self.config.get("note_detail_level", "balanced")
         )
+        self.source_title = str(self.config.get("source_title") or "").strip()
         progress_callback = self.config.get("progress_callback")
         self.progress_callback: Optional[Callable[..., None]] = (
             progress_callback if callable(progress_callback) else None
@@ -126,7 +155,13 @@ class SimpleProcessor:
         )
         self.logger = logger or TaskLogger("default")
 
-    def _call_llm(self, messages, max_tokens=4096, timeout=120, operation_name="LLM调用"):
+    def _call_llm(
+        self,
+        messages,
+        max_tokens=4096,
+        timeout=120,
+        operation_name="LLM调用",
+    ):
         """
         调用LLM（无重试机制，根据用户需求）
 
@@ -204,14 +239,14 @@ class SimpleProcessor:
         if pdf_structure:
             self.logger.info("使用PDF参考生成笔记")
             try:
-                if self.note_detail_level == "thorough":
-                    result = self._generate_thorough_with_fullcontext(
+                if self._requires_exhaustive_chunking(subtitle_text):
+                    result = self._generate_exhaustive_with_understanding(
                         subtitle_text,
                         pdf_structure=pdf_structure,
                         extract_images=extract_images,
                     )
-                elif self._requires_exhaustive_chunking(subtitle_text):
-                    result = self._generate_exhaustive_with_understanding(
+                elif self._requires_profiled_generation(subtitle_text):
+                    result = self._generate_profiled_with_understanding(
                         subtitle_text,
                         pdf_structure=pdf_structure,
                         extract_images=extract_images,
@@ -226,13 +261,13 @@ class SimpleProcessor:
         else:
             self.logger.info("直接生成笔记")
             try:
-                if self.note_detail_level == "thorough":
-                    result = self._generate_thorough_with_fullcontext(
+                if self._requires_exhaustive_chunking(subtitle_text):
+                    result = self._generate_exhaustive_with_understanding(
                         subtitle_text,
                         extract_images=extract_images,
                     )
-                elif self._requires_exhaustive_chunking(subtitle_text):
-                    result = self._generate_exhaustive_with_understanding(
+                elif self._requires_profiled_generation(subtitle_text):
+                    result = self._generate_profiled_with_understanding(
                         subtitle_text,
                         extract_images=extract_images,
                     )
@@ -789,6 +824,1197 @@ class SimpleProcessor:
             and len(subtitle_text or "") > EXHAUSTIVE_CHUNK_SIZE
         )
 
+    def _requires_profiled_generation(self, subtitle_text: str) -> bool:
+        """中长字幕的三种非超详细档位启用共享分层生成器。"""
+        return (
+            self.note_detail_level in DETAIL_LEVEL_PROFILES
+            and len(subtitle_text or "") >= PROFILE_LAYERED_MIN_CHARS
+        )
+
+    def _generate_profiled_with_understanding(
+        self,
+        subtitle_text: str,
+        *,
+        pdf_structure: Optional[Dict[str, Any]] = None,
+        extract_images: bool = False,
+    ) -> str:
+        """以全量内容地图、分批写作和档位审计生成三档长笔记。"""
+        profile = DETAIL_LEVEL_PROFILES.get(self.note_detail_level)
+        if profile is None:
+            raise ValueError(f"不支持分层生成的笔记档位：{self.note_detail_level}")
+        body = str(subtitle_text or "").strip()
+        if not body:
+            raise ValueError(f"{profile.label}笔记生成失败：字幕正文为空")
+        if len(body) > PROFILE_FULL_CONTEXT_MAX_CHARS:
+            raise ValueError(
+                f"{profile.label}笔记正文 {len(body)} 字符超过全文安全上限 "
+                f"{PROFILE_FULL_CONTEXT_MAX_CHARS}，为避免静默截断已终止"
+            )
+
+        map_prompt = self._build_profile_content_map_prompt(
+            body,
+            profile=profile,
+            pdf_structure=pdf_structure,
+        )
+        map_messages = [
+            {
+                "role": "system",
+                "content": (
+                    "你是严谨的课程内容架构师。先理解全部材料并建立可追溯的"
+                    "结构化内容地图，不写最终笔记，不补充外部事实。"
+                ),
+            },
+            {"role": "user", "content": map_prompt},
+        ]
+        map_raw = self._call_llm(
+            map_messages,
+            max_tokens=profile.map_max_tokens,
+            timeout=420,
+            operation_name=f"{profile.label}字幕理解与内容地图",
+        ).strip()
+        if not map_raw:
+            raise RuntimeError(f"{profile.label}内容地图输出为空")
+        try:
+            content_map = self._parse_profile_content_map(map_raw, profile=profile)
+        except RuntimeError as parse_error:
+            map_messages.append({"role": "assistant", "content": map_raw})
+            raw_map = self._load_profile_json_object(map_raw)
+            use_chapter_patch = (
+                raw_map is not None
+                and self._profile_error_uses_chapter_patch(str(parse_error))
+            )
+            repair_instruction = (
+                self._build_profile_chapter_mapping_patch_instruction(
+                    profile,
+                    parse_error=str(parse_error),
+                    evidence_ids=self._raw_profile_evidence_ids(raw_map),
+                )
+                if use_chapter_patch
+                else self._build_profile_map_repair_instruction(
+                    profile,
+                    parse_error=str(parse_error),
+                )
+            )
+            map_messages.append({"role": "user", "content": repair_instruction})
+            repaired_map = self._call_llm(
+                map_messages,
+                max_tokens=profile.map_max_tokens,
+                timeout=420,
+                operation_name=(
+                    f"{profile.label}字幕理解章节映射补丁"
+                    if use_chapter_patch
+                    else f"{profile.label}字幕理解 JSON 修复"
+                ),
+            ).strip()
+            if not repaired_map:
+                raise RuntimeError(f"{profile.label}内容地图 JSON 修复输出为空")
+            if use_chapter_patch:
+                patch = self._load_profile_json_object(repaired_map)
+                if not patch or not isinstance(patch.get("chapters"), list):
+                    raise RuntimeError(f"{profile.label}内容地图章节映射补丁无效")
+                raw_map["chapters"] = self._normalize_profile_chapter_patch(
+                    patch["chapters"],
+                    evidence_ids=self._raw_profile_evidence_ids(raw_map),
+                )
+                repaired_content = json.dumps(raw_map, ensure_ascii=False)
+            else:
+                repaired_content = repaired_map
+            content_map = self._parse_profile_content_map(
+                repaired_content,
+                profile=profile,
+            )
+            map_raw = repaired_map
+
+        # 精确复用实际调用链作为后续写作前缀。正常路径为 system/user/assistant；
+        # JSON 修复路径额外保留无效回复与修复指令，使服务端已持久化前缀仍可命中。
+        stable_prefix = [dict(message) for message in map_messages]
+        stable_prefix.append({"role": "assistant", "content": map_raw})
+        self._report_exhaustive_progress("understand", 1, 1)
+
+        evidence_by_id = {
+            item["evidence_id"]: item for item in content_map["evidence"]
+        }
+        chapters = content_map["chapters"]
+        chapter_drafts: list[Dict[str, Any]] = []
+        batches = [
+            chapters[index:index + profile.chapters_per_batch]
+            for index in range(0, len(chapters), profile.chapters_per_batch)
+        ]
+        completed_chapters = 0
+        for batch_index, batch in enumerate(batches, start=1):
+            batch_payload = self._profile_batch_payload(
+                batch,
+                evidence_by_id=evidence_by_id,
+            )
+            draft_instruction = self._build_profile_draft_prompt(
+                batch_payload,
+                profile=profile,
+                extract_images=extract_images,
+            )
+            draft_messages = [
+                *[dict(message) for message in stable_prefix],
+                {"role": "user", "content": draft_instruction},
+            ]
+            draft_raw = self._clean_markdown_output(
+                self._call_llm(
+                    draft_messages,
+                    max_tokens=profile.draft_max_tokens,
+                    timeout=600,
+                    operation_name=(
+                        f"{profile.label}章节初稿({batch_index}/{len(batches)})"
+                    ),
+                )
+            )
+            if not draft_raw:
+                raise RuntimeError(
+                    f"{profile.label}章节初稿第 {batch_index}/{len(batches)} 批输出为空"
+                )
+            try:
+                parsed_batch = self._parse_profile_draft_batch(
+                    draft_raw,
+                    batch=batch,
+                )
+            except RuntimeError as structure_error:
+                format_chain = [
+                    *draft_messages,
+                    {"role": "assistant", "content": draft_raw},
+                    {
+                        "role": "user",
+                        "content": self._build_profile_batch_format_repair(
+                            batch,
+                            error=str(structure_error),
+                        ),
+                    },
+                ]
+                repaired_raw = self._clean_markdown_output(
+                    self._call_llm(
+                        format_chain,
+                        max_tokens=profile.draft_max_tokens,
+                        timeout=600,
+                        operation_name=f"{profile.label}章节格式修复",
+                    )
+                )
+                parsed_batch = self._parse_profile_draft_batch(
+                    repaired_raw,
+                    batch=batch,
+                )
+                draft_messages = format_chain
+                draft_raw = repaired_raw
+
+            final_chain = [
+                *draft_messages,
+                {"role": "assistant", "content": draft_raw},
+            ]
+            for item in parsed_batch:
+                expected = set(item["chapter"]["evidence_ids"])
+                missing = expected - set(item["covered_ids"])
+                issues = []
+                if missing:
+                    issues.append(
+                        {
+                            "chapter_id": item["chapter"]["chapter_id"],
+                            "types": ["missing_evidence"],
+                            "instruction": "补回并实质表达证据："
+                            + ", ".join(sorted(missing)),
+                        }
+                    )
+                issues.extend(
+                    self._chapter_reliability_issues(
+                        item["draft"],
+                        chapter_id=item["chapter"]["chapter_id"],
+                    )
+                )
+                item["preflight_issues"] = issues
+                item["messages"] = [dict(message) for message in final_chain]
+                chapter_drafts.append(item)
+            completed_chapters += len(batch)
+            self._report_exhaustive_progress(
+                "draft",
+                completed_chapters,
+                len(chapters),
+            )
+
+        audit_issues: list[Dict[str, Any]] = []
+        if self._profile_should_audit(
+            profile,
+            content_map=content_map,
+            chapter_drafts=chapter_drafts,
+        ):
+            audit_raw = self._call_llm(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "你是课程笔记质量审计员。只报告证据、事实、重复、"
+                            "术语或结构问题，不重写正文。"
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": self._build_profile_audit_prompt(
+                            content_map,
+                            chapter_drafts,
+                            profile=profile,
+                        ),
+                    },
+                ],
+                max_tokens=profile.audit_max_tokens,
+                timeout=420,
+                operation_name=f"{profile.label}全局质量审计",
+            ).strip()
+            audit_issues = self._parse_profile_audit(
+                audit_raw,
+                chapter_ids={
+                    item["chapter"]["chapter_id"] for item in chapter_drafts
+                },
+            )
+
+        issues_by_chapter: dict[str, list[Dict[str, Any]]] = {}
+        for item in chapter_drafts:
+            for issue in item.get("preflight_issues") or []:
+                issues_by_chapter.setdefault(
+                    item["chapter"]["chapter_id"], []
+                ).append(issue)
+        for issue in audit_issues:
+            issues_by_chapter.setdefault(issue["chapter_id"], []).append(issue)
+
+        reviewed_chapters: list[str] = []
+        for index, item in enumerate(chapter_drafts, start=1):
+            chapter = item["chapter"]
+            reviewed = item["draft"]
+            issues = issues_by_chapter.get(chapter["chapter_id"], [])
+            if issues:
+                repair_messages = [
+                    *[dict(message) for message in item["messages"]],
+                    {
+                        "role": "user",
+                        "content": self._build_profile_repair_prompt(
+                            chapter,
+                            evidence_by_id=evidence_by_id,
+                            issues=issues,
+                            profile=profile,
+                            extract_images=extract_images,
+                        ),
+                    },
+                ]
+                repaired_raw = self._clean_markdown_output(
+                    self._call_llm(
+                        repair_messages,
+                        max_tokens=profile.repair_max_tokens,
+                        timeout=600,
+                        operation_name=f"{profile.label}问题章节修复({index}/{len(chapters)})",
+                    )
+                )
+                repaired = self._parse_profile_draft_batch(
+                    repaired_raw,
+                    batch=[chapter],
+                )[0]
+                missing = set(chapter["evidence_ids"]) - set(
+                    repaired["covered_ids"]
+                )
+                if missing:
+                    raise RuntimeError(
+                        f"{profile.label}问题章节修复 {chapter['chapter_id']} 仍遗漏证据："
+                        + ", ".join(sorted(missing))
+                    )
+                remaining_reliability = self._chapter_reliability_issues(
+                    repaired["draft"],
+                    chapter_id=chapter["chapter_id"],
+                )
+                if remaining_reliability:
+                    raise RuntimeError(
+                        f"{profile.label}问题章节修复 {chapter['chapter_id']} "
+                        "仍未通过数字/ASR 可靠性门禁"
+                    )
+                reviewed = repaired["draft"]
+            reviewed_chapters.append(reviewed)
+            self._report_exhaustive_progress("review", index, len(chapters))
+
+        final_markdown = self._assemble_profile_note(
+            content_map,
+            reviewed_chapters,
+        )
+        self._validate_profile_final(
+            final_markdown,
+            content_map=content_map,
+            profile=profile,
+        )
+        self.logger.info(
+            f"{profile.label}分层笔记完成：输入 {len(body)} 字符，"
+            f"证据 {len(content_map['evidence'])} 条，章节 {len(chapters)} 个，"
+            f"写作 {len(batches)} 批，修复 {len(issues_by_chapter)} 章，"
+            f"终稿 {len(final_markdown)} 字符"
+        )
+        return final_markdown
+
+    def _build_profile_content_map_prompt(
+        self,
+        subtitle_text: str,
+        *,
+        profile: DetailProfile,
+        pdf_structure: Optional[Dict[str, Any]],
+    ) -> str:
+        allowed = ", ".join(profile.allowed_importance)
+        return f"""
+【阶段：档位内容地图】
+{detail_instruction(profile.level)}
+
+档位标识：{profile.level}
+章节范围：{profile.min_chapters}-{profile.max_chapters}
+每章要点范围：{profile.min_key_points}-{profile.max_key_points}
+证据数量：恰好 {profile.min_evidence} 条
+允许重要度：{allowed}
+覆盖策略：{profile.coverage_policy}
+案例策略：{profile.example_policy}
+
+请完整理解材料，只返回严格、紧凑的 JSON 对象，不要 Markdown 围栏、缩进或说明。
+为避免长课程地图触及输出上限，必须使用下面的短键与定长数组 schema：
+{{"title":"准确具体的课程标题","course_overview":"核心结论、主论证链和1-3条行动摘要≤180字","terminology":[["规范专名",["字幕变体"],"high或uncertain"]],"evidence":[["N001","{profile.allowed_importance[0]}","conclusion/concept/data/method/example/caveat/boundary","high/medium/low/uncertain","quote≤36字","summary≤60字"]],"chapters":[{{"id":"C01","title":"逻辑章节标题≤30字","purpose":"全局作用≤50字","points":["必须表达的要点≤40字"],"evidence":["N001"]}}]}}
+
+硬性规则：
+- 证据只从字幕或讲义抽取；不得使用外部常识补齐材料没有的数据、案例或边界
+- 先合并跨时段重复主题和同义事实，再按重要度选择独立新增信息；不得创建内容等价的重复证据
+- 每条证据必须且只能映射到一个章节；不要设置独立的“引言”“课程概览”或“总结”章节
+- evidence_id 从 N001 连续编号；章节 ID 从 C01 连续编号，不得虚构未知 ID
+- quote 必须是材料中可回查的短摘录；ASR 无法确认的专名、数字或句子标 low / uncertain
+- 数字、币种、百分比和时间单位保持原始口径，不得在 summary 中做无公式的心算换算
+- 讲者观点、个案统计或主观估算必须在 summary 中保留“讲者观点/案例数据”等来源边界
+- 寒暄、关注/加群、下期预告、会员通知、个人事务和结束语不得创建证据或独立章节；
+  只有直接构成课程目标或行动约束时才可简短并入相关主题
+- 任务标题只用于校正 ASR 专名；标题与字幕上下文一致时可写入 terminology，不能作为事实证据
+- course_overview、quote、summary、title、purpose 和 points 必须遵守 schema 字数上限；术语最多 12 个
+- 章节顺序服从理解和教学逻辑，不服从字幕时间顺序
+
+【任务标题参考（只用于校正 ASR 专名，不能作为事实证据）】
+{self._sanitize_content(self.source_title, max_length=500) or "未提供"}
+
+【讲义参考】
+{self._exhaustive_reference_context(pdf_structure)}
+
+【完整课程字幕】
+{self._sanitize_content(subtitle_text, max_length=None)}
+""".strip()
+
+    def _build_profile_map_repair_instruction(
+        self,
+        profile: DetailProfile,
+        *,
+        parse_error: str,
+    ) -> str:
+        return f"""
+【阶段：修复内容地图 JSON】
+上一则内容地图未通过严格解析：{self._sanitize_content(parse_error, max_length=None)}
+
+请依据对话中的完整材料重新返回一份完整严格 JSON，沿用原紧凑定长数组 schema，
+不要复述、续写或修补上一则无效 JSON。必须保持
+{profile.min_chapters}-{profile.max_chapters} 章、只使用 {', '.join(profile.allowed_importance)}
+重要度、恰好 {profile.min_evidence} 条证据，所有证据 ID 必须存在且仅映射一次。
+严格限制 quote≤36字、summary≤60字、
+course_overview≤180字、术语≤12个；不得删除已识别事实，不得加入外部事实。
+只返回 JSON，不要代码块围栏或解释。
+""".strip()
+
+    @staticmethod
+    def _load_profile_json_object(content: str) -> Optional[Dict[str, Any]]:
+        raw = str(content or "").strip()
+        start, end = raw.find("{"), raw.rfind("}")
+        if start < 0 or end <= start:
+            return None
+        try:
+            parsed = json.loads(raw[start:end + 1])
+        except (TypeError, ValueError):
+            return None
+        return parsed if isinstance(parsed, dict) else None
+
+    @staticmethod
+    def _raw_profile_evidence_ids(raw_map: Dict[str, Any]) -> list[str]:
+        result = []
+        for item in raw_map.get("evidence") or []:
+            value = item[0] if isinstance(item, list) and item else (
+                item.get("evidence_id") if isinstance(item, dict) else ""
+            )
+            evidence_id = str(value or "").strip()
+            if re.fullmatch(r"N\d{3}", evidence_id):
+                result.append(evidence_id)
+        return list(dict.fromkeys(result))
+
+    @staticmethod
+    def _profile_error_uses_chapter_patch(parse_error: str) -> bool:
+        error = str(parse_error or "")
+        return (
+            ("内容地图需要" in error and "章" in error)
+            or "章节字段或证据映射无效" in error
+            or "遗漏证据映射" in error
+            or "证据重复映射" in error
+            or "章节主题语义重复" in error
+            or "低价值行政章节" in error
+        )
+
+    @staticmethod
+    def _normalize_profile_chapter_patch(
+        chapters: list[Dict[str, Any]],
+        *,
+        evidence_ids: list[str],
+    ) -> list[Dict[str, Any]]:
+        """机械清理章节补丁映射，并把模型漏挂的证据均匀补入最小章节。"""
+        allowed = set(evidence_ids)
+        seen: set[str] = set()
+        normalized: list[Dict[str, Any]] = []
+        for raw_chapter in chapters:
+            chapter = dict(raw_chapter) if isinstance(raw_chapter, dict) else {}
+            raw_assigned = chapter.get("evidence") or chapter.get("evidence_ids") or []
+            assigned = []
+            for raw_id in raw_assigned:
+                evidence_id = str(raw_id or "").strip()
+                if evidence_id in allowed and evidence_id not in seen:
+                    assigned.append(evidence_id)
+                    seen.add(evidence_id)
+            chapter["evidence"] = assigned
+            chapter.pop("evidence_ids", None)
+            normalized.append(chapter)
+
+        if normalized:
+            for evidence_id in evidence_ids:
+                if evidence_id in seen:
+                    continue
+                target = min(
+                    normalized,
+                    key=lambda item: len(item.get("evidence") or []),
+                )
+                target["evidence"].append(evidence_id)
+                seen.add(evidence_id)
+        return normalized
+
+    @staticmethod
+    def _clean_exact_parenthetical_duplicates(content: str) -> str:
+        """机械移除括号内外完全相同的词组，不推断同义词或翻译。"""
+        normalized = str(content or "")
+        patterns = (
+            re.compile(
+                r"(?P<term>(?<![A-Za-z0-9])[A-Za-z][A-Za-z0-9]*"
+                r"(?:[ ._+\-/]+[A-Za-z0-9]+){0,7})\s*[（(]\s*"
+                r"(?P=term)\s*[）)]",
+                re.IGNORECASE,
+            ),
+            re.compile(
+                r"(?P<term>[\u4e00-\u9fff]{2,16})\s*[（(]\s*"
+                r"(?P=term)\s*[）)]"
+            ),
+        )
+        for pattern in patterns:
+            normalized = pattern.sub(lambda match: match.group("term"), normalized)
+        return normalized
+
+    @staticmethod
+    def _plan_text_ngrams(value: str) -> set[str]:
+        text = re.sub(r"[^0-9a-z\u4e00-\u9fff]+", "", str(value or "").lower())
+        if len(text) < 2:
+            return {text} if text else set()
+        return {text[index:index + 2] for index in range(len(text) - 1)}
+
+    @staticmethod
+    def _ngram_similarity(left: str, right: str) -> float:
+        left_grams = SimpleProcessor._plan_text_ngrams(left)
+        right_grams = SimpleProcessor._plan_text_ngrams(right)
+        if not left_grams or not right_grams:
+            return 0.0
+        return len(left_grams & right_grams) / len(left_grams | right_grams)
+
+    @classmethod
+    def _validate_chapter_plan_quality(
+        cls,
+        chapters: list[Dict[str, Any]],
+        *,
+        label: str,
+        evidence_by_id: Optional[Dict[str, Dict[str, Any]]] = None,
+    ) -> None:
+        """以保守本地规则拒绝明显行政章与语义近重复章。"""
+        evidence_by_id = evidence_by_id or {}
+        prepared = []
+        for chapter in chapters:
+            chapter_id = str(chapter.get("chapter_id") or "").strip()
+            title = str(chapter.get("title") or "").strip()
+            if LOW_VALUE_CHAPTER_TITLE.search(title):
+                raise RuntimeError(
+                    f"{label}低价值行政章节：{chapter_id} {title}"
+                )
+            points = chapter.get("key_points") or chapter.get("required_points") or []
+            evidence_text = []
+            for evidence_id in chapter.get("evidence_ids") or []:
+                evidence = evidence_by_id.get(evidence_id) or {}
+                evidence_text.extend(
+                    [
+                        str(evidence.get("topic") or ""),
+                        str(evidence.get("summary") or ""),
+                    ]
+                )
+            detail = " ".join(
+                [
+                    str(chapter.get("purpose") or ""),
+                    *[str(item) for item in points],
+                    *evidence_text,
+                ]
+            )
+            prepared.append((chapter_id, title, detail))
+
+        for index, (left_id, left_title, left_detail) in enumerate(prepared):
+            left_normalized = re.sub(r"\W+", "", left_title).lower()
+            for right_id, right_title, right_detail in prepared[index + 1:]:
+                right_normalized = re.sub(r"\W+", "", right_title).lower()
+                same_title = bool(left_normalized) and left_normalized == right_normalized
+                title_similarity = cls._ngram_similarity(left_title, right_title)
+                detail_similarity = cls._ngram_similarity(left_detail, right_detail)
+                if same_title or (
+                    title_similarity >= 0.78 and detail_similarity >= 0.82
+                ):
+                    raise RuntimeError(
+                        f"{label}章节主题语义重复：{left_id} 与 {right_id}"
+                    )
+
+    @staticmethod
+    def _extract_explicit_rates(content: str) -> list[tuple[float, str]]:
+        """提取显式货币/时间费率并统一为元/小时，仅用于局部一致性比较。"""
+        patterns = (
+            re.compile(
+                r"每\s*(分钟|小时|天|月|年)\s*"
+                r"(?:约|大约|仅|只|是|为|需|需要|成本|价格|收费)?\s*[:：]?\s*"
+                r"(\d+(?:\.\d+)?)\s*(元|块|角|毛)"
+            ),
+            re.compile(
+                r"(\d+(?:\.\d+)?)\s*(元|块|角|毛)\s*"
+                r"(?:/|每)\s*(分钟|小时|天|月|年)"
+            ),
+        )
+        currency_factor = {"元": 1.0, "块": 1.0, "角": 0.1, "毛": 0.1}
+        hours_per_unit = {
+            "分钟": 1.0 / 60.0,
+            "小时": 1.0,
+            "天": 24.0,
+            "月": 24.0 * 30.0,
+            "年": 24.0 * 365.0,
+        }
+        extracted: list[tuple[float, str]] = []
+        seen_spans: set[tuple[int, int]] = set()
+        for pattern_index, pattern in enumerate(patterns):
+            for match in pattern.finditer(str(content or "")):
+                if match.span() in seen_spans:
+                    continue
+                seen_spans.add(match.span())
+                if pattern_index == 0:
+                    unit, raw_value, currency = match.groups()
+                else:
+                    raw_value, currency, unit = match.groups()
+                hourly = (
+                    float(raw_value)
+                    * currency_factor[currency]
+                    / hours_per_unit[unit]
+                )
+                extracted.append((hourly, match.group(0)))
+        return extracted
+
+    @classmethod
+    def _has_rate_consistency_failure(cls, content: str) -> bool:
+        """只判断带显式换算关系的高置信费率矛盾，避免比较不同产品。"""
+        clauses = re.split(r"[。！？；;\n]+", str(content or ""))
+        for clause in clauses:
+            connector = RATE_CONVERSION_CONNECTOR.search(clause)
+            if not connector:
+                continue
+            rates = cls._extract_explicit_rates(clause)
+            if len(rates) >= 2:
+                values = [value for value, _ in rates if value > 0]
+                if values and max(values) / min(values) > 1.2:
+                    return True
+
+            prefix = clause[:connector.start()]
+            suffix = clause[connector.end():]
+            package_patterns = (
+                re.compile(
+                    r"(\d+(?:\.\d+)?)\s*(元|块)\D{0,18}?"
+                    r"(\d+(?:\.\d+)?)\s*(分钟|小时|天)"
+                ),
+                re.compile(
+                    r"(\d+(?:\.\d+)?)\s*(分钟|小时|天)\D{0,18}?"
+                    r"(\d+(?:\.\d+)?)\s*(元|块)"
+                ),
+            )
+            package = None
+            for pattern_index, pattern in enumerate(package_patterns):
+                match = pattern.search(prefix)
+                if not match:
+                    continue
+                if pattern_index == 0:
+                    raw_price, _currency, raw_duration, unit = match.groups()
+                else:
+                    raw_duration, unit, raw_price, _currency = match.groups()
+                duration_hours = float(raw_duration) * {
+                    "分钟": 1.0 / 60.0,
+                    "小时": 1.0,
+                    "天": 24.0,
+                }[unit]
+                if duration_hours > 0:
+                    package = float(raw_price) / duration_hours
+                    break
+            suffix_rates = cls._extract_explicit_rates(suffix)
+            if package and suffix_rates:
+                compared = suffix_rates[0][0]
+                if compared > 0 and max(package, compared) / min(package, compared) > 1.2:
+                    return True
+        return False
+
+    @classmethod
+    def _chapter_reliability_issues(
+        cls,
+        content: str,
+        *,
+        chapter_id: str,
+    ) -> list[Dict[str, Any]]:
+        """返回可并入现有局部修复链的确定性可靠性问题。"""
+        issues: list[Dict[str, Any]] = []
+        text = str(content or "")
+        if cls._has_rate_consistency_failure(text):
+            issues.append(
+                {
+                    "chapter_id": chapter_id,
+                    "types": ["numeric_consistency"],
+                    "instruction": (
+                        "核对本章显式费率换算：保持证据中的数字和单位；"
+                        "只有展示可核验公式且结果一致时才保留换算。"
+                    ),
+                }
+            )
+        repeated = SUSPICIOUS_ASR_REPETITION.search(text)
+        if repeated or EXHAUSTIVE_SUSPICIOUS_ASR_TERMS.search(text):
+            sample = repeated.group(0) if repeated else "疑似 ASR 错拼"
+            issues.append(
+                {
+                    "chapter_id": chapter_id,
+                    "types": ["terminology"],
+                    "instruction": (
+                        f"依据证据修复疑似 ASR 连续复读或错拼“{sample}”；"
+                        "无法确认时标注 ASR 名称不确定，不得猜测外部实体。"
+                    ),
+                }
+            )
+        return issues
+
+    def _build_profile_chapter_mapping_patch_instruction(
+        self,
+        profile: DetailProfile,
+        *,
+        parse_error: str,
+        evidence_ids: list[str],
+    ) -> str:
+        return f"""
+【阶段：修复内容地图章节映射】
+上一则 JSON 的标题、主线、术语与证据数组已经保留，只需修复章节结构：
+{self._sanitize_content(parse_error, max_length=None)}
+
+只返回紧凑 JSON：
+{{"chapters":[{{"id":"C01","title":"互斥主题≤30字","purpose":"全局作用≤50字","points":["必须表达的要点≤40字"],"evidence":["N001"]}}]}}
+
+硬性要求：
+- 恰好 {profile.min_chapters}-{profile.max_chapters} 章，C01 起连续编号
+- 只能使用这些证据 ID，且每个 ID 必须且只能出现一次：{', '.join(evidence_ids)}
+- 合并重复主题；不得设置独立的引言、课程概览或总结章
+- 每章有明确且互斥的主题，points 保持 {profile.min_key_points}-{profile.max_key_points} 个
+- 不返回 title、course_overview、terminology、evidence 或解释
+""".strip()
+
+    def _parse_profile_content_map(
+        self,
+        content: str,
+        *,
+        profile: DetailProfile,
+    ) -> Dict[str, Any]:
+        raw = str(content or "").strip()
+        start, end = raw.find("{"), raw.rfind("}")
+        if start < 0 or end <= start:
+            raise RuntimeError(f"{profile.label}内容地图不是有效 JSON")
+        try:
+            parsed = json.loads(raw[start:end + 1])
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(f"{profile.label}内容地图 JSON 解析失败：{exc}") from exc
+        if not isinstance(parsed, dict):
+            raise RuntimeError(f"{profile.label}内容地图必须是 JSON 对象")
+
+        title = str(parsed.get("title") or "").strip()
+        overview = str(parsed.get("course_overview") or "").strip()
+        raw_evidence = parsed.get("evidence")
+        raw_chapters = parsed.get("chapters")
+        if not title or not overview:
+            raise RuntimeError(f"{profile.label}内容地图缺少标题或课程主线")
+        if not isinstance(raw_evidence, list) or not raw_evidence:
+            raise RuntimeError(f"{profile.label}内容地图缺少证据数组")
+        if not profile.min_evidence <= len(raw_evidence) <= profile.max_evidence:
+            raise RuntimeError(
+                f"{profile.label}内容地图需要恰好 {profile.min_evidence} 条证据"
+            )
+        if (
+            not isinstance(raw_chapters, list)
+            or not profile.min_chapters <= len(raw_chapters) <= profile.max_chapters
+        ):
+            raise RuntimeError(
+                f"{profile.label}内容地图需要 {profile.min_chapters}-{profile.max_chapters} 章"
+            )
+
+        evidence: list[Dict[str, Any]] = []
+        evidence_ids: set[str] = set()
+        allowed_importance = set(profile.allowed_importance)
+        for item in raw_evidence:
+            if isinstance(item, list) and len(item) >= 6:
+                evidence_id, importance, evidence_type, confidence, quote, summary = item[:6]
+                topic = summary
+            elif isinstance(item, dict):
+                evidence_id = item.get("evidence_id")
+                importance = item.get("importance")
+                evidence_type = item.get("type")
+                topic = item.get("topic")
+                quote = item.get("quote")
+                summary = item.get("summary")
+                confidence = item.get("confidence") or "uncertain"
+            else:
+                raise RuntimeError(f"{profile.label}内容地图包含无效证据")
+            evidence_id = str(evidence_id or "").strip()
+            importance = str(importance or "").strip().lower()
+            evidence_type = str(evidence_type or "").strip()
+            topic = str(topic or "").strip()
+            quote = str(quote or "").strip()
+            summary = str(summary or "").strip()
+            confidence = str(confidence or "uncertain").strip().lower()
+            if (
+                not re.fullmatch(r"N\d{3}", evidence_id)
+                or evidence_id in evidence_ids
+                or importance not in allowed_importance
+                or not evidence_type
+                or not topic
+                or not quote
+                or not summary
+                or confidence not in {"high", "medium", "low", "uncertain"}
+            ):
+                raise RuntimeError(f"{profile.label}内容地图证据字段无效")
+            evidence_ids.add(evidence_id)
+            evidence.append(
+                {
+                    "evidence_id": evidence_id,
+                    "importance": importance,
+                    "type": evidence_type,
+                    "topic": topic,
+                    "quote": quote,
+                    "summary": summary,
+                    "confidence": confidence,
+                }
+            )
+
+        chapters: list[Dict[str, Any]] = []
+        chapter_ids: set[str] = set()
+        mapped_ids: set[str] = set()
+        for index, item in enumerate(raw_chapters, start=1):
+            if not isinstance(item, dict):
+                raise RuntimeError(f"{profile.label}内容地图包含无效章节")
+            chapter_id = str(
+                item.get("id") or item.get("chapter_id") or f"C{index:02d}"
+            ).strip()
+            chapter_title = str(item.get("title") or "").strip()
+            purpose = str(item.get("purpose") or "").strip()
+            key_points = [
+                str(value).strip()
+                for value in (item.get("points") or item.get("key_points") or [])
+                if str(value).strip()
+            ]
+            assigned_ids = list(dict.fromkeys(
+                value
+                for value in (
+                    str(raw_id).strip()
+                    for raw_id in (
+                        item.get("evidence") or item.get("evidence_ids") or []
+                    )
+                )
+                if re.fullmatch(r"N\d{3}", value)
+            ))
+            if (
+                not re.fullmatch(r"C\d{2,}", chapter_id)
+                or chapter_id in chapter_ids
+                or not chapter_title
+                or not purpose
+                or not key_points
+                or not assigned_ids
+                or set(assigned_ids) - evidence_ids
+            ):
+                raise RuntimeError(f"{profile.label}内容地图章节字段或证据映射无效")
+            duplicated_ids = mapped_ids.intersection(assigned_ids)
+            if duplicated_ids:
+                raise RuntimeError(
+                    f"{profile.label}内容地图证据重复映射："
+                    + ", ".join(sorted(duplicated_ids))
+                )
+            chapter_ids.add(chapter_id)
+            mapped_ids.update(assigned_ids)
+            chapters.append(
+                {
+                    "chapter_id": chapter_id,
+                    "title": chapter_title,
+                    "purpose": purpose,
+                    "key_points": key_points,
+                    "evidence_ids": assigned_ids,
+                }
+            )
+        missing = evidence_ids - mapped_ids
+        if missing:
+            raise RuntimeError(
+                f"{profile.label}内容地图遗漏证据映射：{', '.join(sorted(missing))}"
+            )
+
+        self._validate_chapter_plan_quality(
+            chapters,
+            label=f"{profile.label}内容地图",
+            evidence_by_id={item["evidence_id"]: item for item in evidence},
+        )
+
+        terminology = []
+        for item in parsed.get("terminology") or []:
+            if isinstance(item, list) and len(item) >= 3:
+                canonical, raw_variants, confidence = item[:3]
+            elif isinstance(item, dict):
+                canonical = item.get("canonical")
+                raw_variants = item.get("variants") or []
+                confidence = item.get("confidence") or "uncertain"
+            else:
+                continue
+            canonical = str(canonical or "").strip()
+            variants = [
+                str(value).strip()
+                for value in raw_variants
+                if str(value).strip()
+            ]
+            if canonical:
+                terminology.append(
+                    {
+                        "canonical": canonical,
+                        "variants": list(dict.fromkeys(variants)),
+                        "confidence": str(confidence or "uncertain").strip().lower(),
+                    }
+                )
+        return {
+            "title": title,
+            "course_overview": overview,
+            "terminology": terminology,
+            "evidence": evidence,
+            "chapters": chapters,
+        }
+
+    @staticmethod
+    def _profile_batch_payload(
+        batch: list[Dict[str, Any]],
+        *,
+        evidence_by_id: Dict[str, Dict[str, Any]],
+    ) -> list[Dict[str, Any]]:
+        return [
+            {
+                **chapter,
+                "evidence": [
+                    evidence_by_id[evidence_id]
+                    for evidence_id in chapter["evidence_ids"]
+                ],
+            }
+            for chapter in batch
+        ]
+
+    def _build_profile_draft_prompt(
+        self,
+        batch_payload: list[Dict[str, Any]],
+        *,
+        profile: DetailProfile,
+        extract_images: bool,
+    ) -> str:
+        prompt = f"""
+【阶段：档位章节写作】
+只写当前批次章节。完整内容地图和原始材料已在对话前缀中，必须以当前批次分配的
+证据为事实边界，不得使用其他章节证据制造重复，不得补充外部知识。
+
+【当前写作批次 JSON】
+{json.dumps(batch_payload, ensure_ascii=False, separators=(",", ":"))}
+【写作要求】
+- 按 JSON 顺序输出，每章恰好一个 `##`，标题使用规划 title；不要输出 H1
+- {profile.coverage_policy}；{profile.example_policy}
+- 每章正文控制在 {profile.min_chapter_chars}-{profile.max_chapter_chars} 字；优先提高信息密度，禁止用重复总结凑长度
+- 解释证据的含义和作用，不要逐条复述 quote，不要为满足模板编造缺失维度
+- 数字、币种、百分比和时间单位必须保持证据原口径；需要换算时展示公式并核对结果，
+  禁止同时写出互相矛盾的每分钟/每小时费率
+- 讲者判断、个案统计和估算使用“讲者认为/案例中/材料称”等归因，不写成无来源客观事实
+- low / uncertain 专名不得猜测为熟悉品牌；使用原表达并标注“ASR 名称不确定”
+- 合并同义表述，不输出 `vibe coding（vibe coding）` 这类同词括注或连续 ASR 复读
+- 规范使用 H3、列表、表格、加粗和引用；只有比较关系适合时才使用表格
+- 每章末尾输出一行内部覆盖声明：
+  `<!-- PROFILE_COVERAGE C01: N001, N002 -->`
+- 声明必须列出该章全部 evidence_ids；正文不得出现 N001 等内部 ID
+- 只返回当前批次 Markdown，不要代码块围栏、写作说明或审计结论
+""".strip()
+        if extract_images:
+            prompt += "\n\n" + SCREENSHOT_INSTRUCTION
+        return prompt
+
+    def _parse_profile_draft_batch(
+        self,
+        content: str,
+        *,
+        batch: list[Dict[str, Any]],
+    ) -> list[Dict[str, Any]]:
+        raw = str(content or "").strip()
+        matches = list(re.finditer(r"(?m)^##\s+(.+?)\s*$", raw))
+        if len(matches) != len(batch):
+            raise RuntimeError(
+                f"章节批次结构错误：预期 {len(batch)} 个 H2，实际 {len(matches)} 个"
+            )
+        results = []
+        for index, (match, chapter) in enumerate(zip(matches, batch)):
+            end = matches[index + 1].start() if index + 1 < len(matches) else len(raw)
+            section = raw[match.start():end].strip()
+            coverage_matches = re.findall(
+                rf"<!--\s*PROFILE_COVERAGE\s+{re.escape(chapter['chapter_id'])}\s*:\s*(.*?)-->",
+                section,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+            covered_ids = {
+                item
+                for payload in coverage_matches
+                for item in re.findall(r"\bN\d{3}\b", payload)
+            }
+            section = re.sub(
+                r"\s*<!--\s*PROFILE_COVERAGE\s+C\d{2,}\s*:.*?-->\s*",
+                "\n",
+                section,
+                flags=re.IGNORECASE | re.DOTALL,
+            ).strip()
+            section = re.sub(
+                r"(?m)^##\s+.+?$",
+                f"## {chapter['title']}",
+                section,
+                count=1,
+            )
+            section = self._clean_exact_parenthetical_duplicates(section)
+            if (
+                len(re.findall(r"(?m)^#\s+\S", section))
+                or len(re.findall(r"(?m)^##\s+\S", section)) != 1
+                or len(section.splitlines()) < 2
+                or re.search(r"【阶段：|PROFILE_COVERAGE|\bN\d{3}\b", section)
+            ):
+                raise RuntimeError(
+                    f"章节批次结构错误：{chapter['chapter_id']} 正文或内部标记无效"
+                )
+            results.append(
+                {
+                    "chapter": chapter,
+                    "draft": section,
+                    "covered_ids": covered_ids,
+                }
+            )
+        return results
+
+    @staticmethod
+    def _build_profile_batch_format_repair(
+        batch: list[Dict[str, Any]],
+        *,
+        error: str,
+    ) -> str:
+        return f"""
+【阶段：档位章节格式修复】
+上一则批次未通过结构校验：{error}
+请完整重返当前批次 {len(batch)} 个章节，每章恰好一个 H2、不得含 H1，标题与顺序必须为：
+{json.dumps([item['title'] for item in batch], ensure_ascii=False)}
+保留原有事实与解释，每章末行按规划输出 PROFILE_COVERAGE 声明。只返回 Markdown。
+""".strip()
+
+    @staticmethod
+    def _profile_should_audit(
+        profile: DetailProfile,
+        *,
+        content_map: Dict[str, Any],
+        chapter_drafts: list[Dict[str, Any]],
+    ) -> bool:
+        if profile.audit_mode == "always":
+            return True
+        if profile.audit_mode == "risk":
+            return any(item.get("preflight_issues") for item in chapter_drafts) or any(
+                item["importance"] in {"critical", "high"}
+                and item["confidence"] in {"low", "uncertain"}
+                for item in content_map["evidence"]
+            )
+        return False
+
+    def _build_profile_audit_prompt(
+        self,
+        content_map: Dict[str, Any],
+        chapter_drafts: list[Dict[str, Any]],
+        *,
+        profile: DetailProfile,
+    ) -> str:
+        audit_items = [
+            {
+                "chapter_id": item["chapter"]["chapter_id"],
+                "title": item["chapter"]["title"],
+                "expected_evidence_ids": item["chapter"]["evidence_ids"],
+                "declared_covered_ids": sorted(item["covered_ids"]),
+                "markdown": item["draft"],
+            }
+            for item in chapter_drafts
+        ]
+        return f"""
+【阶段：档位全局质量审计】
+档位：{profile.label}。检查事实/数字/单位换算/专名是否受内容地图支持、关键证据是否实质表达、
+跨章是否重复、术语是否漂移、结构是否断裂。只报告真正需要修复的问题，不润色合格章节，
+不得要求加入原材料不存在的数据、案例、反例或边界。最多报告 2 个最严重章节；表达润色、
+轻微重复、篇幅偏好或可选补充不算问题，不得报告。
+
+只返回严格 JSON：
+{{"issues":[{{"chapter_id":"C01","severity":"critical或high","types":["factual/numeric_consistency/missing_evidence/terminology/unsupported_claim/duplicate/structure"],"instruction":"具体修复要求"}}]}}
+没有问题返回 {{"issues":[]}}，不得返回 Markdown 正文。
+
+【内容地图摘要】
+{json.dumps(content_map, ensure_ascii=False, separators=(",", ":"))}
+
+【候选章节】
+{json.dumps(audit_items, ensure_ascii=False, separators=(",", ":"))}
+""".strip()
+
+    @staticmethod
+    def _parse_profile_audit(
+        content: str,
+        *,
+        chapter_ids: set[str],
+    ) -> list[Dict[str, Any]]:
+        raw = str(content or "").strip()
+        start, end = raw.find("{"), raw.rfind("}")
+        if start < 0 or end <= start:
+            raise RuntimeError("档位全局质量审计不是有效 JSON")
+        try:
+            parsed = json.loads(raw[start:end + 1])
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(f"档位全局质量审计 JSON 解析失败：{exc}") from exc
+        issues = parsed.get("issues") if isinstance(parsed, dict) else None
+        if not isinstance(issues, list):
+            raise RuntimeError("档位全局质量审计缺少 issues 数组")
+        allowed_types = {
+            "factual",
+            "numeric_consistency",
+            "missing_evidence",
+            "terminology",
+            "unsupported_claim",
+            "duplicate",
+            "structure",
+        }
+        candidates = []
+        for item in issues:
+            if not isinstance(item, dict):
+                continue
+            chapter_id = str(item.get("chapter_id") or "").strip()
+            instruction = str(item.get("instruction") or "").strip()
+            severity = str(item.get("severity") or "high").strip().lower()
+            issue_types = [
+                str(value).strip().lower()
+                for value in (item.get("types") or [])
+                if str(value).strip().lower() in allowed_types
+            ]
+            if chapter_id not in chapter_ids or not instruction:
+                continue
+            if severity not in {"critical", "high"} or not issue_types:
+                continue
+            candidates.append(
+                {
+                    "chapter_id": chapter_id,
+                    "severity": severity,
+                    "types": issue_types,
+                    "instruction": instruction,
+                }
+            )
+        candidates.sort(key=lambda item: 0 if item["severity"] == "critical" else 1)
+        normalized = []
+        seen_chapters = set()
+        for item in candidates:
+            if item["chapter_id"] in seen_chapters:
+                continue
+            normalized.append(item)
+            seen_chapters.add(item["chapter_id"])
+            if len(normalized) == 2:
+                break
+        return normalized
+
+    @staticmethod
+    def _build_profile_repair_prompt(
+        chapter: Dict[str, Any],
+        *,
+        evidence_by_id: Dict[str, Dict[str, Any]],
+        issues: list[Dict[str, Any]],
+        profile: DetailProfile,
+        extract_images: bool,
+    ) -> str:
+        chapter_payload = {
+            **chapter,
+            "evidence": [
+                evidence_by_id[evidence_id]
+                for evidence_id in chapter["evidence_ids"]
+            ],
+        }
+        instruction = f"""
+【阶段：档位问题章节修复】
+只修复已确认问题，其他合格事实、结构和表述保持不变。只使用问题章节 JSON 中的证据，
+不得引入外部事实或扩写其他章节。
+
+【问题章节 JSON】
+{json.dumps(chapter_payload, ensure_ascii=False, indent=2)}
+【问题列表 JSON】
+{json.dumps(issues, ensure_ascii=False, indent=2)}
+【修复要求】
+- 档位为{profile.label}；返回完整当前章节，恰好一个 H2，不要 H1 或代码块围栏
+- 标题必须为 `{chapter['title']}`，正文不得出现内部证据 ID 或修复说明
+- 末行必须为 `<!-- PROFILE_COVERAGE {chapter['chapter_id']}: {', '.join(chapter['evidence_ids'])} -->`
+""".strip()
+        if extract_images:
+            instruction += "\n- 保留已有可靠截图标记，不新增材料外时间戳。"
+        return instruction
+
+    def _assemble_profile_note(
+        self,
+        content_map: Dict[str, Any],
+        chapters: list[str],
+    ) -> str:
+        title = re.sub(r"^#+\s*", "", content_map["title"]).strip()
+        overview = content_map["course_overview"].strip()
+        assembled = "\n\n".join(
+            [f"# {title}\n\n> {overview}", *chapters]
+        ).strip()
+        return self._apply_exhaustive_terminology(
+            assembled,
+            content_map.get("terminology") or [],
+        )
+
+    def _validate_profile_final(
+        self,
+        content: str,
+        *,
+        content_map: Dict[str, Any],
+        profile: DetailProfile,
+    ) -> None:
+        h1_count = len(re.findall(r"(?m)^#\s+\S", content))
+        h2_titles = re.findall(r"(?m)^##\s+(.+?)\s*$", content)
+        normalized = [re.sub(r"\s+", "", item).lower() for item in h2_titles]
+        terminology = content_map.get("terminology") or []
+        expected = [
+            self._apply_exhaustive_terminology(item["title"], terminology)
+            for item in content_map["chapters"]
+        ]
+        if h1_count != 1 or len(h2_titles) != len(expected):
+            raise RuntimeError(
+                f"{profile.label}终稿结构不完整：需要唯一 H1 和 {len(expected)} 个 H2"
+            )
+        if len(normalized) != len(set(normalized)) or h2_titles != expected:
+            raise RuntimeError(f"{profile.label}终稿章节标题重复或顺序错误")
+        if re.search(
+            r"PROFILE_COVERAGE|\bN\d{3}\b|\"evidence_id\"|【阶段：",
+            content,
+        ):
+            raise RuntimeError(f"{profile.label}终稿包含内部分析模板")
+
     def _split_exhaustive_chunks(
         self,
         subtitle_text: str,
@@ -843,7 +2069,7 @@ class SimpleProcessor:
         pdf_structure: Optional[Dict[str, Any]] = None,
         extract_images: bool = False,
     ) -> str:
-        """以全量证据映射、逐章深写和逐章审校生成超详细笔记。
+        """以全量证据映射、逐章深写和按需审计修复生成超详细笔记。
 
         最终结果只做机械组装，不再交给 LLM 进行全篇重写，避免模型在最后一步
         主动压缩已经覆盖的后半段主题、案例和机制细节。
@@ -998,17 +2224,18 @@ class SimpleProcessor:
                     ),
                 }
             )
-            repaired_blueprint = self._call_llm(
+            mapping_patch = self._call_llm(
                 blueprint_messages,
-                max_tokens=EXHAUSTIVE_BLUEPRINT_MAX_TOKENS,
+                max_tokens=4096,
                 timeout=420,
-                operation_name="超详细课程知识蓝图修复",
+                operation_name="超详细课程知识蓝图映射修复",
             ).strip()
-            if not repaired_blueprint:
-                raise RuntimeError("超详细全局知识蓝图修复输出为空")
-            blueprint_data = self._parse_exhaustive_blueprint(
-                repaired_blueprint,
-                total,
+            if not mapping_patch:
+                raise RuntimeError("超详细全局知识蓝图映射修复输出为空")
+            blueprint_data = self._apply_exhaustive_blueprint_mapping_patch(
+                blueprint_data,
+                mapping_patch,
+                expected_evidence_ids=expected_evidence_ids,
             )
             missing_ids, unknown_ids = self._exhaustive_blueprint_coverage(
                 blueprint_data,
@@ -1029,7 +2256,7 @@ class SimpleProcessor:
         chapter_total = len(chapters)
         chapter_drafts: list[Dict[str, Any]] = []
         for chapter_index, chapter in enumerate(chapters, start=1):
-            chapter_source, chapter_evidence = self._exhaustive_chapter_material(
+            _chapter_source, chapter_evidence = self._exhaustive_chapter_material(
                 chapter,
                 chunks=chunks,
                 evidence_packets=evidence_packets,
@@ -1037,25 +2264,23 @@ class SimpleProcessor:
             draft_prompt = self._build_exhaustive_chapter_prompt(
                 chapter,
                 blueprint=blueprint_data,
-                source_text=chapter_source,
+                source_text="",
                 evidence_text=chapter_evidence,
                 pdf_structure=pdf_structure,
                 extract_images=extract_images,
             )
-            # 每章一条独立消息链：审校、格式修复、术语保真依次接链尾，
-            # 深写输入与初稿整体成为可命中的缓存前缀单元
-            # (openspec「超详细 prompt 前缀缓存优化」)。不跨章累积历史。
+            # 每章一条独立消息链；只有全局审计命中的问题章才在链尾修复。
             chapter_messages = [
                 {
                     "role": "system",
                     "content": (
                         "你是资深课程作者。只写当前逻辑章节，充分使用分配给"
-                        "本章的原始字幕和语义证据，输出可直接进入终稿的 Markdown。"
+                        "本章的可追溯语义证据，输出可直接进入终稿的 Markdown。"
                     ),
                 },
                 {"role": "user", "content": draft_prompt},
             ]
-            draft = self._clean_markdown_output(
+            raw_draft = self._clean_markdown_output(
                 self._call_llm(
                     chapter_messages,
                     max_tokens=EXHAUSTIVE_DRAFT_MAX_TOKENS,
@@ -1065,16 +2290,44 @@ class SimpleProcessor:
                     ),
                 )
             )
-            if not draft:
+            if not raw_draft:
                 raise RuntimeError(
                     f"超详细章节初稿 {chapter['chapter_id']} 输出为空"
                 )
-            chapter_messages.append({"role": "assistant", "content": draft})
+            draft, covered_ids = self._extract_exhaustive_coverage(raw_draft)
+            draft = self._normalize_exhaustive_chapter(draft)
+            draft = self._set_exhaustive_chapter_title(draft, chapter["title"])
+            preflight_issues: list[Dict[str, Any]] = []
+            try:
+                self._validate_exhaustive_chapter(
+                    draft,
+                    chapter_id=chapter["chapter_id"],
+                )
+            except RuntimeError as exc:
+                # 初稿结构或内部模板异常应进入已有的局部修复通道；只有修复后的终稿
+                # 仍不合格才终止整个任务，避免一个偶发 H2 错误浪费全部上游调用。
+                preflight_issues.append(
+                    {
+                        "chapter_id": chapter["chapter_id"],
+                        "types": ["structure"],
+                        "instruction": str(exc),
+                    }
+                )
+            preflight_issues.extend(
+                self._chapter_reliability_issues(
+                    draft,
+                    chapter_id=chapter["chapter_id"],
+                )
+            )
+            chapter_messages.append({"role": "assistant", "content": raw_draft})
             chapter_drafts.append(
                 {
                     "chapter": chapter,
                     "messages": chapter_messages,
                     "draft": draft,
+                    "covered_ids": covered_ids,
+                    "evidence": chapter_evidence,
+                    "preflight_issues": preflight_issues,
                 }
             )
             self._report_exhaustive_progress(
@@ -1083,73 +2336,75 @@ class SimpleProcessor:
                 chapter_total,
             )
 
+        audit_prompt = self._build_exhaustive_global_audit_prompt(
+            blueprint_data,
+            chapter_drafts,
+        )
+        audit_raw = self._call_llm(
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "你是课程笔记质量审计员。只返回紧凑 JSON 问题列表，"
+                        "不得重写或复述完整章节。"
+                    ),
+                },
+                {"role": "user", "content": audit_prompt},
+            ],
+            max_tokens=EXHAUSTIVE_AUDIT_MAX_TOKENS,
+            timeout=420,
+            operation_name="超详细全局质量审计",
+        ).strip()
+        audit_issues = self._parse_exhaustive_audit(
+            audit_raw,
+            chapter_ids={item["chapter"]["chapter_id"] for item in chapter_drafts},
+        )
+        issues_by_chapter = self._merge_exhaustive_coverage_issues(
+            audit_issues,
+            chapter_drafts,
+        )
+
         reviewed_chapters: list[str] = []
         for chapter_index, item in enumerate(chapter_drafts, start=1):
             chapter = item["chapter"]
-            chain = item["messages"]
-            chain.append(
-                {
-                    "role": "user",
-                    "content": self._build_exhaustive_chapter_review_instruction(
-                        chapter,
-                        extract_images=extract_images,
-                    ),
-                }
-            )
-            reviewed = self._clean_markdown_output(
-                self._call_llm(
-                    chain,
-                    max_tokens=EXHAUSTIVE_REVIEW_MAX_TOKENS,
-                    timeout=600,
-                    operation_name=(
-                        f"超详细章节审校({chapter_index}/{chapter_total})"
-                    ),
-                )
-            )
-            if not reviewed:
-                raise RuntimeError(
-                    f"超详细章节审校 {chapter['chapter_id']} 输出为空"
-                )
-            reviewed = self._normalize_exhaustive_chapter(reviewed)
-            reviewed = self._set_exhaustive_chapter_title(
-                reviewed,
-                chapter["title"],
-            )
-            try:
-                self._validate_exhaustive_chapter(
-                    reviewed,
-                    chapter_id=chapter["chapter_id"],
-                )
-            except RuntimeError as validation_error:
-                # 章节内容完整但模型偶发泄露 evidence ID 时，执行一次定向清理。
-                # 不对普通结构缺失自动“兜底”，避免把不合格章节悄悄发布。
-                if "包含内部分析模板" not in str(validation_error):
-                    raise
-                chain.append({"role": "assistant", "content": reviewed})
+            reviewed = item["draft"]
+            issues = issues_by_chapter.get(chapter["chapter_id"], [])
+            if issues:
+                chain = list(item["messages"])
                 chain.append(
                     {
                         "role": "user",
-                        "content": self._build_exhaustive_chapter_format_repair_instruction(
+                        "content": self._build_exhaustive_targeted_repair_instruction(
                             chapter,
+                            issues=issues,
+                            extract_images=extract_images,
                         ),
                     }
                 )
-                repaired = self._clean_markdown_output(
+                repaired_raw = self._clean_markdown_output(
                     self._call_llm(
                         chain,
-                        max_tokens=EXHAUSTIVE_REVIEW_MAX_TOKENS,
+                        max_tokens=EXHAUSTIVE_REPAIR_MAX_TOKENS,
                         timeout=600,
                         operation_name=(
-                            f"超详细章节格式修复"
-                            f"({chapter_index}/{chapter_total})"
+                            f"超详细问题章节修复({chapter_index}/{chapter_total})"
                         ),
                     )
                 )
-                if not repaired:
+                if not repaired_raw:
                     raise RuntimeError(
-                        f"超详细章节格式修复 {chapter['chapter_id']} 输出为空"
+                        f"超详细问题章节修复 {chapter['chapter_id']} 输出为空"
                     )
-                reviewed = self._normalize_exhaustive_chapter(repaired)
+                reviewed, repaired_covered = self._extract_exhaustive_coverage(
+                    repaired_raw
+                )
+                expected = set(chapter["evidence_ids"])
+                if expected - repaired_covered:
+                    raise RuntimeError(
+                        f"超详细问题章节修复 {chapter['chapter_id']} 仍遗漏证据："
+                        + ", ".join(sorted(expected - repaired_covered))
+                    )
+                reviewed = self._normalize_exhaustive_chapter(reviewed)
                 reviewed = self._set_exhaustive_chapter_title(
                     reviewed,
                     chapter["title"],
@@ -1158,52 +2413,21 @@ class SimpleProcessor:
                     reviewed,
                     chapter_id=chapter["chapter_id"],
                 )
-            if EXHAUSTIVE_SUSPICIOUS_ASR_TERMS.search(reviewed):
-                chain.append({"role": "assistant", "content": reviewed})
-                chain.append(
-                    {
-                        "role": "user",
-                        "content": self._build_exhaustive_terminology_fidelity_instruction(
-                            chapter,
-                        ),
-                    }
-                )
-                terminology_checked = self._clean_markdown_output(
-                    self._call_llm(
-                        chain,
-                        max_tokens=EXHAUSTIVE_REVIEW_MAX_TOKENS,
-                        timeout=600,
-                        operation_name=(
-                            f"超详细章节术语保真"
-                            f"({chapter_index}/{chapter_total})"
-                        ),
-                    )
-                )
-                if not terminology_checked:
-                    raise RuntimeError(
-                        f"超详细章节术语保真 {chapter['chapter_id']} 输出为空"
-                    )
-                reviewed = self._normalize_exhaustive_chapter(
-                    terminology_checked
-                )
-                reviewed = self._set_exhaustive_chapter_title(
-                    reviewed,
-                    chapter["title"],
-                )
-                self._validate_exhaustive_chapter(
+                remaining_reliability = self._chapter_reliability_issues(
                     reviewed,
                     chapter_id=chapter["chapter_id"],
                 )
+                if remaining_reliability:
+                    raise RuntimeError(
+                        f"超详细问题章节修复 {chapter['chapter_id']} "
+                        "仍未通过数字/ASR 可靠性门禁"
+                    )
             reviewed = self._apply_exhaustive_ai_term_safeguards(
                 reviewed,
                 chapter=chapter,
             )
             reviewed_chapters.append(reviewed)
-            self._report_exhaustive_progress(
-                "review",
-                chapter_index,
-                chapter_total,
-            )
+            self._report_exhaustive_progress("review", chapter_index, chapter_total)
 
         final_markdown = self._assemble_exhaustive_note(
             blueprint_data,
@@ -1211,8 +2435,9 @@ class SimpleProcessor:
         )
         self._validate_exhaustive_final(final_markdown)
         self.logger.info(
-            f"超详细笔记逐章审校完成：输入 {len(subtitle_text)} 字符，"
+            f"超详细笔记按需审计完成：输入 {len(subtitle_text)} 字符，"
             f"证据 {len(evidence_text)} 字符，章节 {chapter_total} 个，"
+            f"修复 {len(issues_by_chapter)} 章，"
             f"终稿 {len(final_markdown)} 字符"
         )
         return final_markdown
@@ -1251,8 +2476,12 @@ class SimpleProcessor:
         raw_chapters = parsed.get("chapters")
         if not title or not overview or not learning_outcomes:
             raise RuntimeError("超详细全局知识蓝图缺少标题、课程主线或学习目标")
-        if not isinstance(raw_chapters, list) or len(raw_chapters) < 3:
-            raise RuntimeError("超详细全局知识蓝图至少需要三个逻辑章节")
+        if (
+            not isinstance(raw_chapters, list)
+            or len(raw_chapters) < 3
+            or len(raw_chapters) > 10
+        ):
+            raise RuntimeError("超详细全局知识蓝图需要 3-10 个去重后的逻辑章节")
 
         terminology: list[Dict[str, Any]] = []
         for raw_term in parsed.get("terminology") or []:
@@ -1340,6 +2569,10 @@ class SimpleProcessor:
                     "required_points": required_points,
                 }
             )
+        self._validate_chapter_plan_quality(
+            chapters,
+            label="超详细全局知识蓝图",
+        )
         return {
             "title": title,
             "course_overview": overview,
@@ -1369,17 +2602,74 @@ class SimpleProcessor:
         missing_ids: set[str],
         unknown_ids: set[str],
     ) -> str:
-        """蓝图覆盖修复的链尾增量指令；全部证据与上一版蓝图已在链内前缀中。"""
+        """请求紧凑映射补丁；避免为少量缺口重写整份蓝图。"""
         return f"""
-【阶段：修复知识蓝图】
-你上一则回复的蓝图未通过机械证据覆盖校验。请修复章节规划并重新返回完整严格 JSON。
+【阶段：修复知识蓝图映射】
+你上一则回复的蓝图未通过机械证据覆盖校验。只返回一个紧凑映射补丁，schema：
+{{"assignments": {{"E01-001": "C01"}}, "remove_unknown_ids": ["E99-999"]}}
 
 必须补入的证据 ID：{", ".join(sorted(missing_ids)) or "无"}
 必须移除的未知证据 ID：{", ".join(sorted(unknown_ids)) or "无"}
 
-沿用原 schema；每个真实证据 ID 恰好分配给最合适的章节，必要时可调整章节，
-并确保每章 source_chunks 覆盖其证据来源。只返回 JSON。
+assignments 的目标只能使用上一版蓝图已有章节 ID。每个缺失 ID 必须出现一次，
+每个未知 ID 必须进入 remove_unknown_ids。不得返回完整蓝图、章节正文或解释。
 """.strip()
+
+    def _apply_exhaustive_blueprint_mapping_patch(
+        self,
+        blueprint: Dict[str, Any],
+        content: str,
+        *,
+        expected_evidence_ids: set[str],
+    ) -> Dict[str, Any]:
+        """机械应用紧凑证据映射补丁并重新执行覆盖校验。"""
+        raw = str(content or "").strip()
+        start, end = raw.find("{"), raw.rfind("}")
+        if start < 0 or end <= start:
+            raise RuntimeError("超详细蓝图映射补丁不是有效 JSON")
+        try:
+            patch = json.loads(raw[start:end + 1])
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(f"超详细蓝图映射补丁 JSON 解析失败：{exc}") from exc
+        assignments = patch.get("assignments") or {}
+        remove_unknown = {
+            str(item).strip() for item in (patch.get("remove_unknown_ids") or [])
+        }
+        if not isinstance(assignments, dict):
+            raise RuntimeError("超详细蓝图映射补丁 assignments 必须是对象")
+        chapters = blueprint["chapters"]
+        chapter_by_id = {item["chapter_id"]: item for item in chapters}
+        for chapter in chapters:
+            chapter["evidence_ids"] = [
+                item
+                for item in chapter["evidence_ids"]
+                if item not in remove_unknown and item in expected_evidence_ids
+            ]
+        for evidence_id, chapter_id in assignments.items():
+            evidence_id = str(evidence_id).strip()
+            chapter_id = str(chapter_id).strip()
+            if evidence_id not in expected_evidence_ids:
+                raise RuntimeError(f"超详细蓝图映射补丁包含未知证据：{evidence_id}")
+            if chapter_id not in chapter_by_id:
+                raise RuntimeError(f"超详细蓝图映射补丁包含未知章节：{chapter_id}")
+            chapter = chapter_by_id[chapter_id]
+            if evidence_id not in chapter["evidence_ids"]:
+                chapter["evidence_ids"].append(evidence_id)
+            source_index = int(evidence_id[1:3])
+            if source_index not in chapter["source_chunks"]:
+                chapter["source_chunks"].append(source_index)
+                chapter["source_chunks"].sort()
+        missing, unknown = self._exhaustive_blueprint_coverage(
+            blueprint,
+            expected_evidence_ids,
+        )
+        if missing or unknown:
+            raise RuntimeError(
+                "超详细全局知识蓝图证据映射不完整："
+                f"遗漏 {', '.join(sorted(missing)) or '无'}；"
+                f"未知 {', '.join(sorted(unknown)) or '无'}"
+            )
+        return blueprint
 
     def _build_exhaustive_blueprint_json_repair_instruction(
         self,
@@ -1396,7 +2686,7 @@ class SimpleProcessor:
 
 修复要求：
 - 沿用首次蓝图 schema，必须包含 title、course_overview、learning_outcomes、
-  terminology 和至少三个 chapters
+  terminology 和 3-10 个去重后的 chapters
 - 不得遗漏任何真实证据 ID；每个 evidence ID 都要进入最合适章节
 - source_chunks 必须覆盖章节证据来源
 - 高置信术语只做拼写校对，概念与产品不得混淆；无法确认时标 uncertain
@@ -1411,18 +2701,35 @@ class SimpleProcessor:
         chunks: list[str],
         evidence_packets: list[str],
     ) -> tuple[str, str]:
-        source_parts = []
         evidence_parts = []
         for source_index in chapter["source_chunks"]:
-            source_parts.append(
-                f"【原始字幕第 {source_index}/{len(chunks)} 段】\n"
-                f"{self._sanitize_content(chunks[source_index - 1], max_length=None)}"
+            packet = evidence_packets[source_index - 1]
+            selected = self._select_exhaustive_evidence_blocks(
+                packet,
+                set(chapter["evidence_ids"]),
             )
             evidence_parts.append(
                 f"【语义证据第 {source_index}/{len(chunks)} 段】\n"
-                f"{self._sanitize_content(evidence_packets[source_index - 1], max_length=None)}"
+                f"{self._sanitize_content(selected, max_length=None)}"
             )
-        return "\n\n".join(source_parts), "\n\n".join(evidence_parts)
+        return "", "\n\n".join(evidence_parts)
+
+    @staticmethod
+    def _select_exhaustive_evidence_blocks(
+        packet: str,
+        wanted_ids: set[str],
+    ) -> str:
+        """从结构化证据包中只取当前章节需要的证据；旧自由格式安全回退整包。"""
+        pattern = re.compile(
+            r"(?ms)^#{1,6}\s+(E\d{2}-\d{3})\b.*?(?=^#{1,6}\s+E\d{2}-\d{3}\b|\Z)"
+        )
+        blocks = [match.group(0).strip() for match in pattern.finditer(packet or "")]
+        selected = []
+        for block in blocks:
+            match = re.search(r"\bE\d{2}-\d{3}\b", block)
+            if match and match.group(0) in wanted_ids:
+                selected.append(block)
+        return "\n\n".join(selected) if selected else str(packet or "")
 
     def _build_exhaustive_chapter_prompt(
         self,
@@ -1435,8 +2742,9 @@ class SimpleProcessor:
         extract_images: bool,
     ) -> str:
         # 前缀稳定化：固定指令、全局蓝图与讲义参考（跨章逐字节相同）在前，
-        # 章节 ID / 规划 / 证据 / 原文等变量压到末尾，使跨章公共前缀可命中缓存
+        # 章节 ID / 规划 / 证据等变量压到末尾，使跨章公共前缀可命中缓存
         # (openspec「超详细 prompt 前缀缓存优化」)。
+        _ = source_text  # 兼容旧内部签名；优化链路不再逐章重发完整字幕。
         prompt = f"""
 【阶段：章节深写】
 请只撰写蓝图指定的当前章节（章节 ID 见文末），输出一个以 `##` 开头、可直接拼入终稿的完整章节。
@@ -1444,13 +2752,17 @@ class SimpleProcessor:
 {detail_instruction("exhaustive")}
 
 章节写作要求：
-- 充分理解当前章节对应的全部原始字幕，而不是把证据列表逐项改写
-- 完成定义、结论、推导、因果 / 对比关系、案例证明作用、反例、限制和实践意义
+- 充分理解证据包中的原文摘录和上下文，而不是把证据列表逐项改写
+- 只展开证据真实提供的定义、结论、推导、因果 / 对比、案例、反例、限制和实践意义
+- 某个维度没有证据时忠实省略，不得为套模板补写
 - 跨字幕段的同一主题要综合为一条连贯论证；不得遗漏 required_points
 - 严格使用全局蓝图 terminology 中的高置信 canonical 专名，不得重新猜测或混淆概念与产品
 - 只使用字幕和讲义可支持的内容；专名或数字无法确认时明确标记不确定
-- 不输出 H1，不展示 evidence ID、source chunk、蓝图字段或写作过程
-- 章节内部使用必要的 H3、列表、表格与时间戳，让读者能独立学习和复用
+- 数字、币种、百分比和时间单位保持证据原口径；如需换算必须展示可核验公式并确保结果一致
+- 讲者判断、个案统计和估算使用“讲者认为/案例中/材料称”等归因，不得写成无来源事实
+- 不展开寒暄、预告、营销或个人事务，不输出同词括注和连续 ASR 复读
+- 不输出 H1，正文不展示 evidence ID、source chunk、蓝图字段或写作过程
+- 章节内部使用必要的 H3、列表、表格；同类内容适合比较时才使用表格，避免表格泛滥
 """
         if extract_images:
             prompt += (
@@ -1460,7 +2772,9 @@ class SimpleProcessor:
                 "避免全篇截图过密。\n"
             )
         prompt += f"""
-直接返回当前章节的纯 Markdown，不要包裹代码块。
+直接返回当前章节的纯 Markdown，不要包裹代码块。正文最后必须另起一行追加：
+`<!-- COVERED_EVIDENCE_IDS: E01-001, E01-002 -->`
+其中列出本章已实质表达的全部证据 ID；该注释由程序剥离，不会进入终稿。
 
 【全局蓝图 JSON】
 {json.dumps(blueprint, ensure_ascii=False, indent=2)}
@@ -1475,11 +2789,167 @@ class SimpleProcessor:
 
 【当前章节语义证据】
 {self._sanitize_content(evidence_text, max_length=None)}
-
-【当前章节全部原始字幕】
-{self._sanitize_content(source_text, max_length=None)}
 """.strip()
         return prompt
+
+    @staticmethod
+    def _extract_exhaustive_coverage(content: str) -> tuple[str, set[str]]:
+        """提取并剥离章节覆盖声明，正文不得残留内部证据 ID。"""
+        raw = str(content or "")
+        matches = re.findall(
+            r"<!--\s*COVERED_EVIDENCE_IDS\s*:\s*(.*?)-->",
+            raw,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        covered = {
+            item
+            for payload in matches
+            for item in re.findall(r"\bE\d{2}-\d{3}\b", payload)
+        }
+        cleaned = re.sub(
+            r"\s*<!--\s*COVERED_EVIDENCE_IDS\s*:.*?-->\s*",
+            "\n",
+            raw,
+            flags=re.IGNORECASE | re.DOTALL,
+        ).strip()
+        return cleaned, covered
+
+    def _build_exhaustive_global_audit_prompt(
+        self,
+        blueprint: Dict[str, Any],
+        chapter_drafts: list[Dict[str, Any]],
+    ) -> str:
+        audit_items = []
+        for item in chapter_drafts:
+            chapter = item["chapter"]
+            audit_items.append(
+                {
+                    "chapter_id": chapter["chapter_id"],
+                    "title": chapter["title"],
+                    "required_points": chapter["required_points"],
+                    "expected_evidence_ids": chapter["evidence_ids"],
+                    "declared_covered_ids": sorted(item["covered_ids"]),
+                    "evidence": item["evidence"],
+                    "markdown": item["draft"],
+                }
+            )
+        return f"""
+【阶段：全局质量审计】
+请同时检查全部候选章节，只报告真正需要修复的问题。不要润色合格章节，不要返回 Markdown 正文。
+
+检查范围：
+1. 证据支持：数字、单位换算、专名、因果和结论是否可由本章证据支持
+2. 重要遗漏：required_points 或高价值证据是否没有实质表达
+3. 跨章重复：是否存在整段重复、相同主题被拆成互相覆盖的重复章节
+4. 术语保真：是否出现高置信错拼或概念 / 产品归属混淆
+5. 结构可读：是否泄漏内部模板、空泛堆表、同词括注、连续 ASR 复读或论证断裂
+6. 核心相关：是否把寒暄、下期预告、营销、会员通知或个人事务扩写成核心内容
+
+只返回严格 JSON：
+{{"issues": [{{"chapter_id": "C01", "types": ["missing_evidence"], "instruction": "只描述需要修复的内容"}}]}}
+没有问题时返回 {{"issues": []}}。不得为了显得严格而虚构问题，不得建议加入证据之外的数据、案例、反例或边界。
+
+【全局蓝图】
+{json.dumps(blueprint, ensure_ascii=False, separators=(",", ":"))}
+
+【候选章节与证据】
+{json.dumps(audit_items, ensure_ascii=False, separators=(",", ":"))}
+""".strip()
+
+    @staticmethod
+    def _parse_exhaustive_audit(
+        content: str,
+        *,
+        chapter_ids: set[str],
+    ) -> list[Dict[str, Any]]:
+        raw = str(content or "").strip()
+        start, end = raw.find("{"), raw.rfind("}")
+        if start < 0 or end <= start:
+            raise RuntimeError("超详细全局质量审计不是有效 JSON")
+        try:
+            data = json.loads(raw[start:end + 1])
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(f"超详细全局质量审计 JSON 解析失败：{exc}") from exc
+        issues = data.get("issues") if isinstance(data, dict) else None
+        if not isinstance(issues, list):
+            raise RuntimeError("超详细全局质量审计缺少 issues 数组")
+        normalized = []
+        for item in issues:
+            if not isinstance(item, dict):
+                continue
+            chapter_id = str(item.get("chapter_id") or "").strip()
+            instruction = str(item.get("instruction") or "").strip()
+            if chapter_id not in chapter_ids or not instruction:
+                continue
+            normalized.append(
+                {
+                    "chapter_id": chapter_id,
+                    "types": [
+                        str(value).strip()
+                        for value in (item.get("types") or [])
+                        if str(value).strip()
+                    ],
+                    "instruction": instruction,
+                }
+            )
+        return normalized
+
+    def _merge_exhaustive_coverage_issues(
+        self,
+        audit_issues: list[Dict[str, Any]],
+        chapter_drafts: list[Dict[str, Any]],
+    ) -> Dict[str, list[Dict[str, Any]]]:
+        grouped: Dict[str, list[Dict[str, Any]]] = {}
+        for issue in audit_issues:
+            grouped.setdefault(issue["chapter_id"], []).append(issue)
+        for item in chapter_drafts:
+            chapter = item["chapter"]
+            for issue in item.get("preflight_issues") or []:
+                grouped.setdefault(chapter["chapter_id"], []).append(issue)
+            missing = set(chapter["evidence_ids"]) - set(item["covered_ids"])
+            if missing:
+                grouped.setdefault(chapter["chapter_id"], []).append(
+                    {
+                        "chapter_id": chapter["chapter_id"],
+                        "types": ["missing_evidence"],
+                        "instruction": "补回并实质解释这些证据："
+                        + ", ".join(sorted(missing)),
+                    }
+                )
+            if EXHAUSTIVE_SUSPICIOUS_ASR_TERMS.search(item["draft"]):
+                grouped.setdefault(chapter["chapter_id"], []).append(
+                    {
+                        "chapter_id": chapter["chapter_id"],
+                        "types": ["terminology"],
+                        "instruction": "依据证据和全局术语表修复疑似 ASR 错拼，不得猜测。",
+                    }
+                )
+        return grouped
+
+    def _build_exhaustive_targeted_repair_instruction(
+        self,
+        chapter: Dict[str, Any],
+        *,
+        issues: list[Dict[str, Any]],
+        extract_images: bool,
+    ) -> str:
+        instruction = f"""
+【阶段：问题章节定向修复】
+只修复以下已确认问题，其他合格内容、事实、数字、论证和 Markdown 结构保持不变：
+{json.dumps(issues, ensure_ascii=False, separators=(",", ":"))}
+
+要求：
+- 只使用对话前文的本章证据、章节规划和全局术语表，不引入外部事实
+- 原材料没有某个维度时忠实省略，不得机械补齐数据、案例、反例或边界
+- 数字与单位保持证据口径；换算必须展示公式并一致，无法确认的专名标注 ASR 名称不确定
+- 删除同词括注和无信息连续复读，不扩写寒暄、预告、营销或个人事务
+- 返回完整当前章节，恰好一个 H2，不要 H1、代码块围栏或修复说明
+- 正文不得出现内部证据 ID；末行必须追加覆盖声明：
+  `<!-- COVERED_EVIDENCE_IDS: {", ".join(chapter["evidence_ids"])} -->`
+""".strip()
+        if extract_images:
+            instruction += "\n- 保留原有可靠截图标记，不新增无证据时间戳。"
+        return instruction
 
     def _build_exhaustive_chapter_review_instruction(
         self,
@@ -1523,7 +2993,7 @@ class SimpleProcessor:
     def _normalize_exhaustive_chapter(self, content: str) -> str:
         """把模型偶发的章节 H1 降为 H2，不改写章节正文。"""
         normalized = re.sub(r"(?m)^#\s+", "## ", str(content or "").strip())
-        return normalized.strip()
+        return self._clean_exact_parenthetical_duplicates(normalized).strip()
 
     def _set_exhaustive_chapter_title(
         self,
@@ -1549,6 +3019,7 @@ class SimpleProcessor:
     ) -> str:
         """机械应用蓝图中高置信术语，只统一拼写，不生成新事实。"""
         normalized = str(content or "")
+        entries: list[tuple[str, list[str]]] = []
         for term in terminology:
             confidence = str(term.get("confidence") or "").lower()
             if confidence not in {"high", "confirmed", "高", "高置信"}:
@@ -1565,9 +3036,46 @@ class SimpleProcessor:
                 key=len,
                 reverse=True,
             )
-            for variant in variants:
-                normalized = normalized.replace(variant, canonical)
-        return normalized
+            entries.append((canonical, variants))
+
+        # 先把已经正确的规范词替换为不可碰撞占位符。否则类似
+        # ``GPT -> ChatGPT``、``元宝 -> 腾讯元宝`` 的短变体会再次命中
+        # 规范词自身，产生 ChatChatGPT / 腾讯腾讯元宝。
+        placeholders: dict[str, str] = {}
+        for index, (canonical, _) in enumerate(
+            sorted(entries, key=lambda item: len(item[0]), reverse=True)
+        ):
+            placeholder = f"\x00VID2NOTE_TERM_{index}\x00"
+            placeholders[placeholder] = canonical
+            normalized = normalized.replace(canonical, placeholder)
+
+        replacement_pairs = sorted(
+            (
+                (variant, placeholder)
+                for placeholder, canonical in placeholders.items()
+                for entry_canonical, variants in entries
+                if entry_canonical == canonical
+                for variant in variants
+            ),
+            key=lambda item: len(item[0]),
+            reverse=True,
+        )
+        for variant, placeholder in replacement_pairs:
+            if re.fullmatch(r"[A-Za-z0-9_.+-]+", variant):
+                pattern = rf"(?<![A-Za-z0-9]){re.escape(variant)}(?![A-Za-z0-9])"
+                normalized = re.sub(pattern, placeholder, normalized)
+            else:
+                normalized = normalized.replace(variant, placeholder)
+
+        for placeholder, canonical in placeholders.items():
+            normalized = re.sub(
+                rf"(?:{re.escape(placeholder)}){{2,}}",
+                placeholder,
+                normalized,
+            )
+            normalized = normalized.replace(placeholder, canonical)
+        normalized = re.sub(r"([\u4e00-\u9fff])\1{2,}", r"\1", normalized)
+        return self._clean_exact_parenthetical_duplicates(normalized)
 
     def _build_exhaustive_chapter_format_repair_instruction(
         self,
@@ -1991,15 +3499,21 @@ class SimpleProcessor:
 证据提取要求：
 - 使用文末给定的证据命名空间，每个独立知识单元从 `命名空间001` 起递增编号
   （例如命名空间为 E01- 时，编号为 E01-001、E01-002）
+- 每个知识单元必须以三级标题 `### E01-001` 形式开头，便于后端按证据精确选取
 - 记录主题与中心结论
 - 记录定义、解释和完整论证链
 - 记录数据、步骤、案例、反例，以及它们证明或限制了什么
 - 记录适用边界、注意事项、术语、易错点和有价值问答
+- 每项至少保留一段能核验该结论的原文摘录；原文没有某类信息时不要补齐
 - 记录与前后内容可能存在的跨段线索
 - 记录时间戳或时间范围（原文存在时）
 - ASR 不确定项：只做高置信纠正，无法确认的专名、数字或语句原样标记
+- 数字、币种、百分比和时间单位保持原文口径；不要在证据包中做无公式的换算
+- 讲者观点、个案统计和主观估算标明来源边界，不得改写为无条件客观事实
 
-不要写课程总标题，不要把寒暄和逐字重复创建为证据，不要使用外部知识。
+不要写课程总标题，不要把寒暄、关注/加群、下期预告、会员通知、个人事务、
+结束语和逐字重复创建为证据；只有直接构成课程目标或行动约束时才可保留。
+不要使用外部知识。
 边界上下文只用于理解衔接，不得重复提取为本段证据。
 
 直接返回结构化 Markdown 证据包，不要解释工作过程。
@@ -2077,11 +3591,14 @@ class SimpleProcessor:
   不得把 Hermes Agent 猜成 Claude / Hailuo，不得把 Skill 的 ASR 音译猜成 Store / Studio
 - 只有跨段上下文足以确认时 confidence 才能为 high；否则保留原音译并标 uncertain，
   禁止用熟悉但无证据的品牌名强行补全
-- 根据内容复杂度设计约 6-12 个逻辑章节；章节顺序服从理解和教学逻辑，不服从分块边界
+- 根据内容复杂度设计 6-9 个逻辑章节；章节顺序服从理解和教学逻辑，不服从分块边界
 - 合并跨时段同一主题，但不能以合并为由删除后续新增的机制、案例、边界或反例
+- 章节标题、purpose、required_points 必须语义互斥；不得创建语义近重复章节
+- 下期预告、关注/加群、会员通知、个人事务和结束语不得成为独立章节；
+  只有直接影响课程目标的行动约束才可并入对应知识章节
 - 每个真实证据 ID 必须分配给最合适的章节，不能遗漏，不能编造不存在的 ID
-- source_chunks 必须覆盖该章 evidence_ids 的来源段，确保写作时能回看完整原始字幕
-- required_points 要具体列出论证链、重要案例 / 反例作用、适用边界、行动方法和 ASR 不确定项
+- source_chunks 必须覆盖该章 evidence_ids 的来源段
+- required_points 只列证据真实提供的论证链、重要案例 / 反例作用、适用边界、行动方法和 ASR 不确定项；不存在的维度不要补齐
 
 这只是写作蓝图，不要撰写最终笔记，也不要按分块逐段摘要。
 
@@ -2112,8 +3629,18 @@ class SimpleProcessor:
             raise RuntimeError(
                 "超详细终稿结构不完整：必须包含唯一 H1 和至少三个有效 H2 章节"
             )
-        if re.search(r"(?i)SOURCE-CHUNK|证据命名空间|【阶段：", content):
+        if re.search(
+            r"(?i)\bE\d{2}-\d{3}\b|SOURCE-CHUNK|证据命名空间|"
+            r"COVERED_EVIDENCE_IDS|【阶段：",
+            content,
+        ):
             raise RuntimeError("超详细终稿结构不完整：包含内部分析模板")
+        h2_titles = [
+            re.sub(r"\s+", "", item).lower()
+            for item in re.findall(r"(?m)^##\s+(.+)$", content)
+        ]
+        if len(h2_titles) != len(set(h2_titles)):
+            raise RuntimeError("超详细终稿结构不完整：包含重复章节标题")
 
     def _report_exhaustive_progress(
         self,
