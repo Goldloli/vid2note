@@ -618,7 +618,9 @@ class TestAsr:
         )
         assert key_saved.status_code == 200
         body = client.get("/api/v1/settings").json()
-        assert body["settings"]["asr.config"]["concurrency"] == 2
+        assert body["settings"]["asr.config"]["online_concurrency"] == 2
+        assert body["settings"]["asr.config"]["local_concurrency"] == 1
+        assert "concurrency" not in body["settings"]["asr.config"]
         assert body["sensitive"]["external_asr"]["api_key"]["configured"] is True
         public_file = (
             Path(os.environ["DATA_ROOT"]) / "config" / "settings.json"
@@ -680,6 +682,8 @@ class TestAsr:
         assert {"bcut", "whisper_cpp", "external"} <= set(d.keys())
         assert d["bcut"]["available"] is True
         assert d["bcut"]["experimental"] is True
+        assert "budget" in d["bcut"]
+        assert "remaining_calls" in d["bcut"]["budget"]
         assert "model_exists" in d["whisper_cpp"]
         assert d["whisper_cpp"]["binary_exists"] is False
         assert d["whisper_cpp"]["language"] == "en"
@@ -689,8 +693,10 @@ class TestAsr:
         assert d["external"]["timeout"] == 33
         assert d["selection"] == {"engine": "external", "strategy": "single"}
         assert d["vad"]["threshold_seconds"] == 360
-        assert d["vad"]["target_segment_seconds"] == 120
-        assert d["vad"]["concurrency"] == 2
+        assert d["vad"]["online_target_segment_seconds"] == 120
+        assert d["vad"]["local_target_segment_seconds"] == 120
+        assert d["vad"]["online_concurrency"] == 2
+        assert d["vad"]["local_concurrency"] == 1
 
     def test_test_bad_engine_400(self, client):
         r = client.post("/api/v1/asr/test", json={"engine": "nope"})

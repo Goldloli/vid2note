@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "phase": "before",
+  "captured_at": "2026-08-04T12:29:00+08:00",
+  "implementation": "legacy-direct-single-call",
+  "model": "deepseek-v4-flash",
+  "pricing_cny_per_million_tokens": {
+    "cache_hit_input": 0.02,
+    "cache_miss_input": 1.0,
+    "output": 2.0,
+    "source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing"
+  },
+  "common_parameters": {
+    "asr_engine": "bcut",
+    "asr_strategy_effective": "online_first-budget-precheck-to-whisper_cpp",
+    "llm_provider": "deepseek",
+    "output_language": "zh",
+    "extract_images": false,
+    "mindmap_formats": ["md"]
+  },
+  "tasks": [
+    {
+      "detail_level": "concise",
+      "task_id": "task_a801b6cc6048",
+      "source_file": "【一百七十三回】AI|OpenClaw的强大是否会照进现实.mp4",
+      "generated_title": "朝会第173期：OpenClaw（小龙虾）深度解析",
+      "video_duration_seconds": 8958.769,
+      "subtitle_text_chars": 38678,
+      "srt_chars": 159610,
+      "note_chars": 1854,
+      "note_bytes": 3876,
+      "markdown": {"h1": 1, "h2": 5, "h3": 13, "table_lines": 7, "internal_marker_hits": 0},
+      "llm_usage": {"calls": 1, "prompt_tokens": 24338, "cache_hit_tokens": 0, "cache_miss_tokens": 24338, "completion_tokens": 1066},
+      "estimated_cost_cny": 0.026470,
+      "note_seconds": 10.515,
+      "asr": {"total_seconds": 200.117, "cache_hit": false, "segment_count": 58, "worker_count": 1, "engine_order": ["whisper_cpp"]}
+    },
+    {
+      "detail_level": "balanced",
+      "task_id": "task_a540cf4c832a",
+      "source_file": "【一百九十回】世界如棋.mp4",
+      "generated_title": "世界局势与围棋思维：持久战视角下的国际格局",
+      "video_duration_seconds": 9182.215,
+      "subtitle_text_chars": 36427,
+      "srt_chars": 153440,
+      "note_chars": 2694,
+      "note_bytes": 6416,
+      "markdown": {"h1": 1, "h2": 5, "h3": 9, "table_lines": 24, "internal_marker_hits": 0},
+      "llm_usage": {"calls": 1, "prompt_tokens": 24156, "cache_hit_tokens": 0, "cache_miss_tokens": 24156, "completion_tokens": 1687},
+      "estimated_cost_cny": 0.027530,
+      "note_seconds": 13.143,
+      "asr": {"total_seconds": 190.223, "cache_hit": false, "segment_count": 60, "worker_count": 1, "engine_order": ["whisper_cpp"]}
+    },
+    {
+      "detail_level": "detailed",
+      "task_id": "task_799276626c6d",
+      "source_file": "【一百七十八回】消费品出海营销策略 -  - 2026-05-22 11-16-50.mp4",
+      "generated_title": "仇法会第178回：中国电动微出行出海与海外营销",
+      "video_duration_seconds": 9275.675,
+      "subtitle_text_chars": 40914,
+      "srt_chars": 161562,
+      "note_chars": 7077,
+      "note_bytes": 15653,
+      "markdown": {"h1": 1, "h2": 7, "h3": 24, "table_lines": 26, "internal_marker_hits": 0},
+      "llm_usage": {"calls": 1, "prompt_tokens": 25798, "cache_hit_tokens": 0, "cache_miss_tokens": 25798, "completion_tokens": 4243},
+      "estimated_cost_cny": 0.034284,
+      "note_seconds": 33.884,
+      "asr": {"total_seconds": 192.906, "cache_hit": false, "segment_count": 60, "worker_count": 1, "engine_order": ["whisper_cpp"]}
+    }
+  ]
+}

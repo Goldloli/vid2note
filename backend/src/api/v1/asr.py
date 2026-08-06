@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from src.core.kernel import logger
 from src.runtime.settings import get_external_asr_api_key, get_settings_snapshot
 from src.runtime.task_service import get_task_service
+from src.speech_to_text.bcut_budget import snapshot as bcut_budget_snapshot
 from src.speech_to_text.pipeline import AsrConfig
 
 router = APIRouter(prefix="/asr", tags=["asr"])
@@ -58,6 +59,7 @@ def asr_status() -> Dict[str, Any]:
             "available": True,  # 在线引擎恒可用,实际可达性由 /test 探活
             "experimental": True,
             "timeout": cfg.bcut_timeout,
+            "budget": bcut_budget_snapshot(cfg.cache_dir or None).to_dict(),
         },
         "whisper_cpp": {
             "available": model_exists,
@@ -78,8 +80,14 @@ def asr_status() -> Dict[str, Any]:
         },
         "vad": {
             "threshold_seconds": cfg.vad_threshold_seconds,
-            "target_segment_seconds": cfg.vad_target_segment_seconds,
-            "concurrency": cfg.concurrency,
+            "online_target_segment_seconds": cfg.effective_target_segment_seconds(online=True),
+            "local_target_segment_seconds": cfg.effective_target_segment_seconds(online=False),
+            "online_concurrency": cfg.effective_concurrency(online=True),
+            "local_concurrency": cfg.effective_concurrency(online=False),
+            "online_audio_format": cfg.online_audio_format,
+            "online_audio_bitrate_kbps": cfg.online_audio_bitrate_kbps,
+            "cache_enabled": cfg.cache_enabled,
+            "cache_dir": cfg.cache_dir,
             "request_timeout": cfg.request_timeout,
         },
     }

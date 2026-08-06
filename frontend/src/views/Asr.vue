@@ -35,7 +35,7 @@
               <article v-for="engine in engines" :key="engine.value" class="engine-option" :class="{ active: s['asr.engine'] === engine.value }">
                 <h3>{{ $t(engine.label) }}</h3>
                 <p>{{ $t(engine.hint) }}</p>
-                <StatusBadge :tone="engineTone(engine.value)">{{ engineState(engine.value) }}</StatusBadge>
+                <StatusBadge v-if="engine.value !== 'bcut'" :tone="engineTone(engine.value)">{{ engineState(engine.value) }}</StatusBadge>
                 <div class="engine-option-actions">
                   <button class="btn btn-sm" type="button" :disabled="testing === engine.value" @click="test(engine.value)">{{ testing === engine.value ? $t('asr.testing') : $t('asr.test') }}</button>
                   <button class="btn btn-sm" :class="{ 'btn-primary': s['asr.engine'] === engine.value }" type="button" @click="setEngine(engine.value)">{{ s['asr.engine'] === engine.value ? $t('asr.current') : $t('asr.setDefault') }}</button>
@@ -123,8 +123,15 @@
             </SettingField>
             <SettingField :label="$t('asr.bcutTimeout')" :hint="$t('asr.bcutTimeoutHint')"><input v-model.number="cfg.bcut_timeout" class="input" type="number" min="1" max="600" @input="markDirty"></SettingField>
             <SettingField :label="$t('asr.vadThreshold')" :hint="$t('asr.vadThresholdHint')"><input v-model.number="cfg.vad_threshold_seconds" class="input" type="number" min="30" max="7200" @input="markDirty"></SettingField>
-            <SettingField :label="$t('asr.segmentLength')" :hint="$t('asr.segmentLengthHint')"><input v-model.number="cfg.vad_target_segment_seconds" class="input" type="number" min="10" max="1800" @input="markDirty"></SettingField>
-            <SettingField :label="$t('asr.segmentConcurrency')" :hint="$t('asr.segmentConcurrencyHint')"><input v-model.number="cfg.concurrency" class="input" type="number" min="1" max="3" @input="markDirty"></SettingField>
+            <SettingField :label="$t('asr.onlineSegmentLength')" :hint="$t('asr.onlineSegmentLengthHint')"><input v-model.number="cfg.online_target_segment_seconds" class="input" type="number" min="10" max="295" @input="markDirty"></SettingField>
+            <SettingField :label="$t('asr.onlineConcurrency')" :hint="$t('asr.onlineConcurrencyHint')"><input v-model.number="cfg.online_concurrency" class="input" type="number" min="1" max="3" @input="markDirty"></SettingField>
+            <SettingField :label="$t('asr.onlineFormat')" :hint="$t('asr.onlineFormatHint')">
+              <select v-model="cfg.online_audio_format" class="input" @change="markDirty"><option value="mp3">MP3</option><option value="wav">WAV</option></select>
+            </SettingField>
+            <SettingField :label="$t('asr.onlineBitrate')" :hint="$t('asr.onlineBitrateHint')"><input v-model.number="cfg.online_audio_bitrate_kbps" class="input" type="number" min="32" max="128" step="16" @input="markDirty"></SettingField>
+            <SettingField :label="$t('asr.localSegmentLength')" :hint="$t('asr.localSegmentLengthHint')"><input v-model.number="cfg.local_target_segment_seconds" class="input" type="number" min="10" max="1800" @input="markDirty"></SettingField>
+            <SettingField :label="$t('asr.localConcurrency')" :hint="$t('asr.localConcurrencyHint')"><input v-model.number="cfg.local_concurrency" class="input" type="number" min="1" max="3" @input="markDirty"></SettingField>
+            <SettingField :label="$t('asr.cacheEnabled')" :hint="$t('asr.cacheEnabledHint')"><input v-model="cfg.cache_enabled" type="checkbox" @change="markDirty"></SettingField>
             <SettingField :label="$t('asr.requestTimeout')" :hint="$t('asr.requestTimeoutHint')"><input v-model.number="cfg.request_timeout" class="input" type="number" min="1" max="3600" @input="markDirty"></SettingField>
           </div>
         </div>
@@ -180,8 +187,13 @@ const asrConfigDefaults = {
   external_endpoint: '',
   external_timeout: 120,
   vad_threshold_seconds: 300,
-  vad_target_segment_seconds: 120,
-  concurrency: 1,
+  online_target_segment_seconds: 280,
+  local_target_segment_seconds: 120,
+  online_concurrency: 3,
+  local_concurrency: 1,
+  online_audio_format: 'mp3',
+  online_audio_bitrate_kbps: 64,
+  cache_enabled: true,
   request_timeout: 120,
 }
 const asrConfigKeys = Object.keys(asrConfigDefaults)
@@ -203,7 +215,6 @@ const tabs = computed(() => [
   { id: 'external', label: i18n.global.t('asr.tab.external') },
   { id: 'strategy', label: i18n.global.t('asr.tab.strategy') },
 ])
-
 function notify(message, tone = 'success') {
   const id = Date.now() + Math.random()
   toasts.value.push({ id, message, tone })
@@ -224,12 +235,10 @@ function setStrategy(value) {
   markDirty()
 }
 function engineTone(engine) {
-  if (engine === 'bcut') return 'success'
   if (engine === 'whisper_cpp') return status.value?.whisper_cpp?.available ? 'success' : 'warning'
   return status.value?.external?.available ? 'success' : 'warning'
 }
 function engineState(engine) {
-  if (engine === 'bcut') return i18n.global.t('asr.cloudReady')
   if (engine === 'whisper_cpp') return status.value?.whisper_cpp?.available ? i18n.global.t('asr.ready') : i18n.global.t('asr.modelNotReady')
   return status.value?.external?.available ? i18n.global.t('asr.endpointReady') : i18n.global.t('asr.endpointMissing')
 }
@@ -244,6 +253,13 @@ async function load() {
     const incomingConfig = { ...(settings['asr.config'] || {}) }
     if (!incomingConfig.whisper_model_path && incomingConfig.model_path) {
       incomingConfig.whisper_model_path = incomingConfig.model_path
+    }
+    if (incomingConfig.online_concurrency === undefined && incomingConfig.concurrency !== undefined) {
+      incomingConfig.online_concurrency = incomingConfig.concurrency
+    }
+    if (incomingConfig.vad_target_segment_seconds !== undefined) {
+      if (incomingConfig.online_target_segment_seconds === undefined) incomingConfig.online_target_segment_seconds = incomingConfig.vad_target_segment_seconds
+      if (incomingConfig.local_target_segment_seconds === undefined) incomingConfig.local_target_segment_seconds = incomingConfig.vad_target_segment_seconds
     }
     Object.assign(
       cfg,

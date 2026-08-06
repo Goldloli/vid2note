@@ -22,7 +22,7 @@ SETTING_KEYS = (
     "asr.engine",
 )
 BACKGROUND_VALUES = ("mesh", "static", "plain")
-DETAIL_VALUES = ("concise", "balanced", "detailed", "thorough", "exhaustive")
+DETAIL_VALUES = ("concise", "balanced", "detailed", "exhaustive")
 LANGUAGE_VALUES = ("zh", "en")
 ASR_VALUES = ("bcut", "whisper_cpp", "external")
 
@@ -39,6 +39,30 @@ def _alternate(current: str, values: tuple[str, ...]) -> str:
 def _record(failures: list[str], condition: bool, message: str) -> None:
     if not condition:
         failures.append(message)
+
+
+def _configured_provider_ids(document: dict) -> list[str]:
+    profiles = document.get("profiles", {})
+    credentials = document.get("credentials", {})
+    configured: list[str] = []
+    for provider in document.get("providers", []):
+        provider_id = provider.get("id", "")
+        profile = profiles.get(provider_id, {})
+        if not str(profile.get("model", "")).strip() or not str(
+            profile.get("base_url", "")
+        ).strip():
+            continue
+        required_fields = [
+            field.get("id")
+            for field in provider.get("credential_fields", [])
+            if field.get("required")
+        ]
+        if all(
+            credentials.get(provider_id, {}).get(field_id, {}).get("configured")
+            for field_id in required_fields
+        ):
+            configured.append(provider_id)
+    return configured
 
 
 def run() -> None:
@@ -134,12 +158,12 @@ def run() -> None:
                 item["id"] for item in original_document.get("providers", [])
             ]
             current_provider = str(original.get("llm.provider", "deepseek"))
-            target_provider = "qwen" if current_provider != "qwen" else "deepseek"
-            target_model = next(
-                item["default_model"]
-                for item in original_document["providers"]
-                if item["id"] == target_provider
+            target_provider = next(
+                provider_id
+                for provider_id in _configured_provider_ids(original_document)
+                if provider_id != current_provider
             )
+            target_model = original_document["profiles"][target_provider]["model"]
             page.locator(".provider-item").nth(provider_ids.index(target_provider)).click()
             page.locator(".provider-heading-actions .btn").first.click()
 
@@ -147,29 +171,29 @@ def run() -> None:
                 lambda response: response.url.endswith("/api/v1/settings")
                 and response.request.method == "PUT"
             ) as save_response:
-                page.locator(".settings-header .btn-primary").click()
+                page.locator(".page-header-actions .btn-primary").click()
             assert save_response.value.ok, "设置保存失败"
 
             # 必须使用 SPA 导航，才能覆盖“后端已保存、Pinia 仍是旧快照”的回归。
             page.locator('.nav-item[href="/"]').click()
             page.wait_for_selector(".console", timeout=20_000)
-            console_chips = page.locator(".engine-row > .chip")
+            page.locator(".advanced-toggle").click()
             _record(
                 failures,
-                console_chips.last.get_attribute("aria-pressed") == "true"
-                if target_extract_images
-                else console_chips.last.get_attribute("aria-pressed") == "false",
+                page.get_by_test_id("task-extract-images").get_attribute(
+                    "aria-pressed"
+                )
+                == str(target_extract_images).lower(),
                 "截图设置保存后未同步到主页",
             )
             _record(
                 failures,
-                page.locator('.engine-row select[aria-label]').input_value()
-                == target_detail,
+                page.get_by_test_id("task-detail-level").input_value() == target_detail,
                 "笔记详细程度保存后未同步到主页",
             )
             _record(
                 failures,
-                page.locator(".engine-row select").first.input_value()
+                page.get_by_test_id("task-llm-provider").input_value()
                 == target_provider,
                 "默认 LLM 保存后未同步到主页",
             )
@@ -179,13 +203,15 @@ def run() -> None:
                 == target_model,
                 "默认 LLM 保存后未同步到侧栏摘要",
             )
-            language_chips = console_chips.nth(3), console_chips.nth(4)
             _record(
                 failures,
                 "active"
-                in language_chips[LANGUAGE_VALUES.index(target_language)].get_attribute(
-                    "class"
-                ).split(),
+                in page.locator(
+                    f'[data-testid="task-output-language"]'
+                    f'[data-language="{target_language}"]'
+                )
+                .get_attribute("class")
+                .split(),
                 "输出语言保存后未同步到主页",
             )
 
@@ -200,15 +226,16 @@ def run() -> None:
                 lambda response: response.url.endswith("/api/v1/settings")
                 and response.request.method == "PUT"
             ) as asr_save_response:
-                page.locator(".settings-header .btn-primary").click()
+                page.locator(".page-header-actions .btn-primary").click()
             assert asr_save_response.value.ok, "ASR 设置保存失败"
             page.locator('.nav-item[href="/"]').click()
             page.wait_for_selector(".console", timeout=20_000)
             _record(
                 failures,
                 "active"
-                in page.locator(".engine-row > .chip")
-                .nth(ASR_VALUES.index(target_asr))
+                in page.locator(
+                    f'[data-testid="task-asr-engine"][data-engine="{target_asr}"]'
+                )
                 .get_attribute("class")
                 .split(),
                 "ASR 默认引擎保存后未同步到主页",

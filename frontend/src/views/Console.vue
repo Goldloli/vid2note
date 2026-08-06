@@ -65,6 +65,8 @@
               class="chip"
               :class="{ active: form.asr_engine === engine.v }"
               :aria-pressed="form.asr_engine === engine.v"
+              data-testid="task-asr-engine"
+              :data-engine="engine.v"
               type="button"
               @click="form.asr_engine = engine.v"
             >
@@ -74,7 +76,7 @@
         </div>
         <div class="option-group">
           <label class="field-label" for="task-llm-provider">{{ $t('console.llm') }}</label>
-          <select id="task-llm-provider" v-model="form.llm_provider" class="select" :disabled="!llmProviders.length">
+          <select id="task-llm-provider" v-model="form.llm_provider" class="select" data-testid="task-llm-provider" :disabled="!llmProviders.length">
             <option v-for="provider in llmProviders" :key="provider.id" :value="provider.id">{{ provider.name }}</option>
             <option v-if="!llmProviders.length" value="" disabled>{{ $t('console.noLlm') }}</option>
           </select>
@@ -83,8 +85,8 @@
         <div class="option-group">
           <span class="field-label">{{ $t('console.lang') }}</span>
           <div class="segmented">
-            <button type="button" :class="{ active: form.output_language === 'zh' }" @click="form.output_language = 'zh'">{{ $t('console.zh') }}</button>
-            <button type="button" :class="{ active: form.output_language === 'en' }" @click="form.output_language = 'en'">{{ $t('console.en') }}</button>
+            <button type="button" data-testid="task-output-language" data-language="zh" :class="{ active: form.output_language === 'zh' }" @click="form.output_language = 'zh'">{{ $t('console.zh') }}</button>
+            <button type="button" data-testid="task-output-language" data-language="en" :class="{ active: form.output_language === 'en' }" @click="form.output_language = 'en'">{{ $t('console.en') }}</button>
           </div>
         </div>
       </div>
@@ -97,11 +99,10 @@
       <div v-if="advancedOpen" class="advanced-panel">
         <label class="option-group">
           <span class="field-label">{{ $t('console.detail') }}</span>
-          <select v-model="form.note_detail_level" class="select">
+          <select v-model="form.note_detail_level" class="select" data-testid="task-detail-level">
             <option value="concise">{{ $t('settings.detail.concise') }}</option>
             <option value="balanced">{{ $t('settings.detail.balanced') }}</option>
             <option value="detailed">{{ $t('settings.detail.detailed') }}</option>
-            <option value="thorough">{{ $t('settings.detail.thorough') }}</option>
             <option value="exhaustive">{{ $t('settings.detail.exhaustive') }}</option>
           </select>
         </label>
@@ -112,6 +113,7 @@
             :class="{ active: form.extract_images }"
             type="button"
             :aria-pressed="form.extract_images"
+            data-testid="task-extract-images"
             @click="form.extract_images = !form.extract_images"
           >
             <AppIcon :name="form.extract_images ? 'check-circle' : 'file-video'" :size="19" />

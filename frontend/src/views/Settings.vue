@@ -377,7 +377,6 @@ const detailLevels = [
   { value: 'concise', label: 'settings.detail.concise', hint: 'settings.detail.conciseHint' },
   { value: 'balanced', label: 'settings.detail.balanced', hint: 'settings.detail.balancedHint' },
   { value: 'detailed', label: 'settings.detail.detailed', hint: 'settings.detail.detailedHint' },
-  { value: 'thorough', label: 'settings.detail.thorough', hint: 'settings.detail.thoroughHint' },
   { value: 'exhaustive', label: 'settings.detail.exhaustive', hint: 'settings.detail.exhaustiveHint' },
 ]
 const retentionKinds = ['video', 'audio', 'srt', 'note', 'screenshot']
@@ -464,6 +463,7 @@ async function load() {
     const [response, stats] = await Promise.all([getSettings(), storageStats().catch(() => null)])
     config.adoptSettings(response)
     Object.assign(s, defaults, response.settings || {})
+    if (s['note.detail_level'] === 'thorough') s['note.detail_level'] = 'exhaustive'
     Object.keys(profiles).forEach(key => delete profiles[key])
     Object.assign(profiles, response.profiles || {})
     Object.keys(credentials).forEach(key => delete credentials[key])
