@@ -177,6 +177,20 @@ cd ..
 docker compose build
 ```
 
+手工浏览器端到端测试使用独立依赖，不会影响普通后端测试收集：
+
+```bash
+backend/.venv/bin/python -m pip install -r backend/requirements-e2e.txt
+backend/.venv/bin/python -m playwright install chromium
+backend/.venv/bin/python backend/tests/test_playwright.py
+```
+
+准备公开发布前，可执行不会回显凭据原文的仓库与 Git 历史预检：
+
+```bash
+python3 scripts/release_preflight.py
+```
+
 更多实现细节见 [架构文档](docs/ARCHITECTURE.md) 和 [贡献指南](CONTRIBUTING.md)。
 
 ## 项目结构
@@ -188,6 +202,7 @@ vid2note/
 ├── data/                本地数据库与产物（内容不入 Git）
 ├── docs/                架构、配置、故障排查、Roadmap
 ├── openspec/            当前能力规格与历史变更
+├── scripts/             发布安全与合规预检
 ├── .github/             CI、发布、依赖更新、社区模板
 ├── Dockerfile
 └── docker-compose.yml

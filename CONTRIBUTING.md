@@ -25,8 +25,21 @@ cd backend
 ```bash
 cd frontend
 npm ci
-npm run lint
-npm run build
+npm run check
+```
+
+浏览器端到端测试是可选门禁，依赖单独安装：
+
+```bash
+backend/.venv/bin/python -m pip install -r backend/requirements-e2e.txt
+backend/.venv/bin/python -m playwright install chromium
+backend/.venv/bin/python backend/tests/test_playwright.py
+```
+
+提交前还应运行发布预检；它会扫描当前文件和可达 Git 历史，但不会输出凭据原文：
+
+```bash
+python3 scripts/release_preflight.py
 ```
 
 本地联调：
@@ -56,7 +69,7 @@ npm run dev
 1. 从 `main` 创建功能分支。
 2. 保持 PR 聚焦，不混入无关格式化。
 3. 更新受影响的文档和 `CHANGELOG.md` 的 `Unreleased` 部分。
-4. 确保后端测试、前端 lint/build、Docker 构建通过。
+4. 确保后端测试与依赖审计、前端 check 与依赖审计、发布预检、Docker 构建通过。
 5. 在 PR 描述中说明动机、验证方法、兼容性和安全影响。
 
 提交信息推荐使用简洁的 Conventional Commits 风格，例如：

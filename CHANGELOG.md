@@ -12,6 +12,8 @@
 - 页签化设置中心与 ASR 管理页，包含引擎诊断、Provider 状态和连通性测试。
 - DeepSeek、Qwen、GLM、Moonshot、Baidu、Doubao、MiniMax、Ollama 与自定义 OpenAI-compatible Provider 的独立配置。
 - 简洁、适中、详细、超详细四档笔记详细度。
+- 视频下载、音频提取、ASR、LLM 笔记、思维导图和清理组成的完整六步流水线。
+- 任务持久化、SSE 进度、节点级重跑、产物保留策略和 Docker 单容器部署。
 
 ### 变更
 
@@ -28,10 +30,4 @@
 - 生产环境 500 响应不再泄露内部异常。
 - LLM Key、外部 ASR Key 与 Bilibili Cookie 改为 Fernet 认证加密文件；密钥查看按字段白名单、显式操作和禁止缓存处理。
 
-## [1.0.0] - 2026-07-28
-
-- 首个完整版本：视频下载、音频提取、ASR、LLM 笔记、思维导图、清理组成六步流水线。
-- 支持任务持久化、SSE 进度、节点级重跑、产物保留策略和 Docker 单容器部署。
-
-[Unreleased]: https://github.com/Goldloli/vid2note/compare/v1.0.0...HEAD
-[1.0.0]: https://github.com/Goldloli/vid2note/releases/tag/v1.0.0
+[Unreleased]: https://github.com/Goldloli/vid2note/commits/main

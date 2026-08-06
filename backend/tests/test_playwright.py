@@ -7,7 +7,6 @@ import sys
 import time
 
 import requests
-from playwright.sync_api import sync_playwright
 
 BASE = "http://localhost:8761"
 TEST_URL = "https://www.bilibili.com/video/BV1fj6vBfEnu"
@@ -15,6 +14,13 @@ TIMEOUT_S = 600  # 单任务最多等 10 分钟
 
 
 def run():
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError as exc:
+        raise RuntimeError(
+            "缺少 Playwright；请安装 requirements-e2e.txt 并执行 playwright install chromium"
+        ) from exc
+
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page()

@@ -10,7 +10,7 @@
 
 **Spec:** [docs/superpowers/specs/2026-06-14-vid2note-super-refactor-design.md](../specs/2026-06-14-vid2note-super-refactor-design.md)
 
-**新仓库位置：** `/Users/gejiawei/Desktop/ai_code/vid2note/`（与现有 `ai_srt2md` 同级，独立 git repo）
+**新仓库位置：** `<repo>/`（与现有 `ai_srt2md` 同级，独立 git repo）
 
 ---
 
@@ -19,12 +19,12 @@
 ### Task 0.1: 创建新仓库目录结构
 
 **Files:**
-- Create: `/Users/gejiawei/Desktop/ai_code/vid2note/` (整个仓库根)
+- Create: `<repo>/` (整个仓库根)
 
 - [ ] **Step 1: 创建新仓库**
 
 ```bash
-cd /Users/gejiawei/Desktop/ai_code/
+cd <workspace>/
 mkdir vid2note
 cd vid2note
 git init
@@ -42,7 +42,7 @@ mkdir -p web tests/fixtures
 
 - [ ] **Step 3: 创建顶层文件**
 
-`/Users/gejiawei/Desktop/ai_code/vid2note/README.md`:
+`<repo>/README.md`:
 ```markdown
 # vid2note
 
@@ -54,7 +54,7 @@ mkdir -p web tests/fixtures
 实施计划：[docs/superpowers/plans/](docs/superpowers/plans/)
 ```
 
-`/Users/gejiawei/Desktop/ai_code/vid2note/LICENSE`:
+`<repo>/LICENSE`:
 ```
 MIT License
 
@@ -79,7 +79,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-`/Users/gejiawei/Desktop/ai_code/vid2note/.gitignore`:
+`<repo>/.gitignore`:
 ```
 __pycache__/
 *.pyc
@@ -116,7 +116,7 @@ config/config.yaml
 - [ ] **Step 4: 首次 commit**
 
 ```bash
-cd /Users/gejiawei/Desktop/ai_code/vid2note
+cd <repo>
 git add -A
 git commit -m "chore: 初始化 vid2note 仓库骨架"
 ```
@@ -130,7 +130,7 @@ git commit -m "chore: 初始化 vid2note 仓库骨架"
 
 - [ ] **Step 1: 写根 pyproject.toml**
 
-`/Users/gejiawei/Desktop/ai_code/vid2note/pyproject.toml`:
+`<repo>/pyproject.toml`:
 ```toml
 [project]
 name = "vid2note-workspace"
@@ -176,7 +176,7 @@ show_missing = true
 
 - [ ] **Step 2: 写 core/pyproject.toml**
 
-`/Users/gejiawei/Desktop/ai_code/vid2note/core/pyproject.toml`:
+`<repo>/core/pyproject.toml`:
 ```toml
 [project]
 name = "vid2note-core"
@@ -223,7 +223,7 @@ packages = ["src/vid2note_core"]
 
 - [ ] **Step 3: 写 server/pyproject.toml**
 
-`/Users/gejiawei/Desktop/ai_code/vid2note/server/pyproject.toml`:
+`<repo>/server/pyproject.toml`:
 ```toml
 [project]
 name = "vid2note-server"
@@ -257,14 +257,14 @@ packages = ["src/vid2note_server"]
 
 - [ ] **Step 4: 创建 core/server 包入口占位**
 
-`/Users/gejiawei/Desktop/ai_code/vid2note/core/src/vid2note_core/__init__.py`:
+`<repo>/core/src/vid2note_core/__init__.py`:
 ```python
 """vid2note 核心业务库"""
 
 __version__ = "0.1.0"
 ```
 
-`/Users/gejiawei/Desktop/ai_code/vid2note/server/src/vid2note_server/__init__.py`:
+`<repo>/server/src/vid2note_server/__init__.py`:
 ```python
 """vid2note FastAPI 服务"""
 
@@ -273,7 +273,7 @@ __version__ = "0.1.0"
 
 - [ ] **Step 5: 创建 .python-version**
 
-`/Users/gejiawei/Desktop/ai_code/vid2note/.python-version`:
+`<repo>/.python-version`:
 ```
 3.11
 ```
@@ -281,7 +281,7 @@ __version__ = "0.1.0"
 - [ ] **Step 6: 安装依赖并验证**
 
 ```bash
-cd /Users/gejiawei/Desktop/ai_code/vid2note
+cd <repo>
 brew install uv  # 如果还没装
 uv sync --all-extras
 uv run python -c "import vid2note_core; import vid2note_server; print('OK')"
@@ -304,7 +304,7 @@ git commit -m "chore: 配置 uv workspace + ruff + mypy + pytest"
 
 - [ ] **Step 1: 写 Makefile**
 
-`/Users/gejiawei/Desktop/ai_code/vid2note/Makefile`:
+`<repo>/Makefile`:
 ```makefile
 .PHONY: help dev test test-unit test-integ test-e2e test-watch coverage lint typecheck golden package clean
 
@@ -364,7 +364,7 @@ clean:
 
 - [ ] **Step 2: 写占位脚本**
 
-`/Users/gejiawei/Desktop/ai_code/vid2note/scripts/fetch_binaries.sh`:
+`<repo>/scripts/fetch_binaries.sh`:
 ```bash
 #!/usr/bin/env bash
 # 拉取 ffmpeg / yt-dlp / BBDown / you-get 二进制到 desktop/resources/
@@ -374,7 +374,7 @@ echo "TODO: Phase 15 实现二进制拉取"
 ```
 
 ```bash
-chmod +x /Users/gejiawei/Desktop/ai_code/vid2note/scripts/fetch_binaries.sh
+chmod +x <repo>/scripts/fetch_binaries.sh
 ```
 
 - [ ] **Step 3: Commit**
@@ -393,11 +393,11 @@ git commit -m "chore: 添加 Makefile + 脚本占位"
 - [ ] **Step 1: 复制 spec 和 plan**
 
 ```bash
-cp /Users/gejiawei/Desktop/ai_code/ai_srt2md/docs/superpowers/specs/2026-06-14-vid2note-super-refactor-design.md \
-   /Users/gejiawei/Desktop/ai_code/vid2note/docs/superpowers/specs/
+cp <workspace>/ai_srt2md/docs/superpowers/specs/2026-06-14-vid2note-super-refactor-design.md \
+   <repo>/docs/superpowers/specs/
 
-cp /Users/gejiawei/Desktop/ai_code/ai_srt2md/docs/superpowers/plans/2026-06-14-vid2note-implementation.md \
-   /Users/gejiawei/Desktop/ai_code/vid2note/docs/superpowers/plans/
+cp <workspace>/ai_srt2md/docs/superpowers/plans/2026-06-14-vid2note-implementation.md \
+   <repo>/docs/superpowers/plans/
 ```
 
 - [ ] **Step 2: Commit**
@@ -419,7 +419,7 @@ git commit -m "docs: 复制设计稿和实施计划到新仓库"
 
 - [ ] **Step 1: 写失败测试**
 
-`/Users/gejiawei/Desktop/ai_code/vid2note/core/tests/unit/test_types.py`:
+`<repo>/core/tests/unit/test_types.py`:
 ```python
 """测试类型定义"""
 from pathlib import Path
@@ -488,7 +488,7 @@ def test_task_status_values():
 - [ ] **Step 2: 跑测试确认失败**
 
 ```bash
-cd /Users/gejiawei/Desktop/ai_code/vid2note
+cd <repo>
 uv run pytest core/tests/unit/test_types.py -v
 ```
 
@@ -496,7 +496,7 @@ Expected: FAIL with ImportError（模块不存在）
 
 - [ ] **Step 3: 写实现**
 
-`/Users/gejiawei/Desktop/ai_code/vid2note/core/src/vid2note_core/types.py`:
+`<repo>/core/src/vid2note_core/types.py`:
 ```python
 """核心类型定义"""
 import re
@@ -624,7 +624,7 @@ class ErrorInfo:
 
 - [ ] **Step 1: 写失败测试**
 
-`/Users/gejiawei/Desktop/ai_code/vid2note/core/tests/unit/test_errors.py`:
+`<repo>/core/tests/unit/test_errors.py`:
 ```python
 """测试错误体系"""
 import pytest
@@ -687,7 +687,7 @@ def test_all_error_codes_unique():
 - [ ] **Step 2: 跑测试确认失败**
 
 ```bash
-cd /Users/gejiawei/Desktop/ai_code/vid2note
+cd <repo>
 uv run pytest core/tests/unit/test_errors.py -v
 ```
 
@@ -695,7 +695,7 @@ Expected: FAIL
 
 - [ ] **Step 3: 写实现**
 
-`/Users/gejiawei/Desktop/ai_code/vid2note/core/src/vid2note_core/errors.py`:
+`<repo>/core/src/vid2note_core/errors.py`:
 ```python
 """统一错误体系"""
 from typing import Optional
@@ -945,7 +945,7 @@ git commit -m "feat: 统一错误体系 + 错误码定义"
 
 - [ ] **Step 1: 写失败测试**
 
-`/Users/gejiawei/Desktop/ai_code/vid2note/core/tests/unit/test_logger.py`:
+`<repo>/core/tests/unit/test_logger.py`:
 ```python
 """测试日志模块"""
 import json
@@ -988,7 +988,7 @@ Expected: FAIL
 
 - [ ] **Step 3: 写实现**
 
-`/Users/gejiawei/Desktop/ai_code/vid2note/core/src/vid2note_core/utils/logger.py`:
+`<repo>/core/src/vid2note_core/utils/logger.py`:
 ```python
 """结构化日志"""
 import json
@@ -1108,7 +1108,7 @@ git commit -m "feat: 结构化日志模块"
 
 - [ ] **Step 1: 写 db.py 测试**
 
-`/Users/gejiawei/Desktop/ai_code/vid2note/core/tests/unit/storage/test_db.py`:
+`<repo>/core/tests/unit/storage/test_db.py`:
 ```python
 """测试数据库管理"""
 import sqlite3
@@ -1162,7 +1162,7 @@ Expected: FAIL
 
 - [ ] **Step 3: 写 db.py 实现**
 
-`/Users/gejiawei/Desktop/ai_code/vid2note/core/src/vid2note_core/storage/db.py`:
+`<repo>/core/src/vid2note_core/storage/db.py`:
 ```python
 """SQLite 数据库管理"""
 import sqlite3
@@ -1330,7 +1330,7 @@ class Database:
 
 - [ ] **Step 4: 写 task_repo.py 测试**
 
-`/Users/gejiawei/Desktop/ai_code/vid2note/core/tests/unit/storage/test_task_repo.py`:
+`<repo>/core/tests/unit/storage/test_task_repo.py`:
 ```python
 """测试任务仓库"""
 import pytest
@@ -1400,7 +1400,7 @@ def test_count_by_status(repo):
 
 - [ ] **Step 5: 写 task_repo.py 实现**
 
-`/Users/gejiawei/Desktop/ai_code/vid2note/core/src/vid2note_core/storage/task_repo.py`:
+`<repo>/core/src/vid2note_core/storage/task_repo.py`:
 ```python
 """任务仓库"""
 import json
@@ -1609,7 +1609,7 @@ class TaskRepository:
 
 - [ ] **Step 6: 写 artifact_store.py 测试**
 
-`/Users/gejiawei/Desktop/ai_code/vid2note/core/tests/unit/storage/test_artifact_store.py`:
+`<repo>/core/tests/unit/storage/test_artifact_store.py`:
 ```python
 """测试产物存储"""
 from pathlib import Path
@@ -1659,7 +1659,7 @@ def test_delete_downstream_artifacts(tmp_path):
 
 - [ ] **Step 7: 写 artifact_store.py 实现**
 
-`/Users/gejiawei/Desktop/ai_code/vid2note/core/src/vid2note_core/storage/artifact_store.py`:
+`<repo>/core/src/vid2note_core/storage/artifact_store.py`:
 ```python
 """产物文件系统存储"""
 from pathlib import Path
@@ -1761,7 +1761,7 @@ git commit -m "feat: 存储层（db + task_repo + artifact_store）"
 
 - [ ] **Step 1: 写测试**
 
-`/Users/gejiawei/Desktop/ai_code/vid2note/core/tests/unit/utils/test_security.py`:
+`<repo>/core/tests/unit/utils/test_security.py`:
 ```python
 """测试安全工具"""
 from pathlib import Path
@@ -1810,7 +1810,7 @@ def test_sanitize_content_truncates_long():
 
 - [ ] **Step 2: 写实现**
 
-`/Users/gejiawei/Desktop/ai_code/vid2note/core/src/vid2note_core/utils/security.py`:
+`<repo>/core/src/vid2note_core/utils/security.py`:
 ```python
 """安全工具"""
 import re
@@ -1922,7 +1922,7 @@ git commit -m "feat: 安全工具（路径校验、文件名清理、提示词�
 
 - [ ] **Step 1: 迁移 base.py**
 
-从 `/Users/gejiawei/Desktop/ai_code/ai_srt2md/backend/src/llm/base.py` 复制到 `core/src/vid2note_core/llm/base.py`，做以下调整：
+从 `<workspace>/ai_srt2md/backend/src/llm/base.py` 复制到 `core/src/vid2note_core/llm/base.py`，做以下调整：
 - 包名改为 `vid2note_core.llm`
 - `_load_prompt` 路径改为 `core/src/vid2note_core/prompts/`
 - 保留 `restructure_content`、`classify_content`、`_estimate_tokens`、`_simple_format`
@@ -1937,7 +1937,7 @@ git commit -m "feat: 安全工具（路径校验、文件名清理、提示词�
 
 - [ ] **Step 4: 写测试**
 
-`/Users/gejiawei/Desktop/ai_code/vid2note/core/tests/unit/llm/test_factory.py`:
+`<repo>/core/tests/unit/llm/test_factory.py`:
 ```python
 """测试 LLM 工厂"""
 import pytest
@@ -2001,13 +2001,13 @@ git commit -m "feat: 迁移现有 7 家 LLM 适配器 + mock + factory"
 - [ ] **Step 1: 复制 prompts**
 
 ```bash
-cp /Users/gejiawei/Desktop/ai_code/ai_srt2md/backend/src/prompts/*.txt \
-   /Users/gejiawei/Desktop/ai_code/vid2note/core/src/vid2note_core/prompts/
+cp <workspace>/ai_srt2md/backend/src/prompts/*.txt \
+   <repo>/core/src/vid2note_core/prompts/
 ```
 
 - [ ] **Step 2: 写 __init__.py**
 
-`/Users/gejiawei/Desktop/ai_code/vid2note/core/src/vid2note_core/prompts/__init__.py`:
+`<repo>/core/src/vid2note_core/prompts/__init__.py`:
 ```python
 """Prompt templates"""
 from pathlib import Path
@@ -2166,7 +2166,7 @@ git commit -m "feat: 迁移 PDF 解析器"
 
 - [ ] **Step 1: 写接口**
 
-`/Users/gejiawei/Desktop/ai_code/vid2note/core/src/vid2note_core/downloaders/base.py`:
+`<repo>/core/src/vid2note_core/downloaders/base.py`:
 ```python
 """下载器接口"""
 from abc import ABC, abstractmethod
@@ -2210,7 +2210,7 @@ class IDownloader(ABC):
 
 - [ ] **Step 2: 写路由器**
 
-`/Users/gejiawei/Desktop/ai_code/vid2note/core/src/vid2note_core/downloaders/router.py`:
+`<repo>/core/src/vid2note_core/downloaders/router.py`:
 ```python
 """下载器路由"""
 from pathlib import Path
@@ -2248,7 +2248,7 @@ class DownloaderRouter:
 
 - [ ] **Step 3: 写 binary_manager**
 
-`/Users/gejiawei/Desktop/ai_code/vid2note/core/src/vid2note_core/downloaders/binary_manager.py`:
+`<repo>/core/src/vid2note_core/downloaders/binary_manager.py`:
 ```python
 """外部二进制管理"""
 import os
@@ -2286,7 +2286,7 @@ class BinaryManager:
 
 - [ ] **Step 4: 写测试**
 
-`/Users/gejiawei/Desktop/ai_code/vid2note/core/tests/unit/downloaders/test_router.py`:
+`<repo>/core/tests/unit/downloaders/test_router.py`:
 ```python
 """测试下载器路由"""
 from pathlib import Path
@@ -2395,7 +2395,7 @@ git commit -m "feat: 5 个下载器适配器（yt-dlp + BBDown + you-get + direc
 
 - [ ] **Step 1: 写实现**
 
-`/Users/gejiawei/Desktop/ai_code/vid2note/core/src/vid2note_core/audio/extractor.py`:
+`<repo>/core/src/vid2note_core/audio/extractor.py`:
 ```python
 """ffmpeg 音频提取"""
 import subprocess
@@ -2427,7 +2427,7 @@ class AudioExtractor:
         return output
 ```
 
-`/Users/gejiawei/Desktop/ai_code/vid2note/core/src/vid2note_core/audio/ffmpeg_binary.py`:
+`<repo>/core/src/vid2note_core/audio/ffmpeg_binary.py`:
 ```python
 """ffmpeg 二进制管理"""
 from vid2note_core.downloaders.binary_manager import BinaryManager
@@ -2482,7 +2482,7 @@ git commit -m "feat: ffmpeg 音频提取 wrapper"
 
 - [ ] **Step 1: 写实现**
 
-`/Users/gejiawei/Desktop/ai_code/vid2note/core/src/vid2note_core/asr/cloud/bcut.py`:
+`<repo>/core/src/vid2note_core/asr/cloud/bcut.py`:
 ```python
 """bcut 实验性在线 ASR 适配器"""
 import httpx
@@ -3173,7 +3173,7 @@ git commit -m "feat: 配置系统重构（yaml + env + keychain）"
 - [ ] **Step 1: 初始化 Vue3 项目**
 
 ```bash
-cd /Users/gejiawei/Desktop/ai_code/vid2note/desktop
+cd <repo>/desktop
 npm create vue@latest . -- --ts --router --pinia --eslint
 npm install element-plus @element-plus/icons-vue axios
 ```
@@ -3625,7 +3625,7 @@ git commit -m "feat: PyInstaller 打包脚本 + 桌面构建流程"
 - [ ] **Step 1: 本地测试构建**
 
 ```bash
-cd /Users/gejiawei/Desktop/ai_code/vid2note
+cd <repo>
 make package
 ```
 
@@ -3743,7 +3743,7 @@ git commit -m "feat: Ollama 本地 LLM 适配器"
 - [ ] **Step 1: 配置 Playwright**
 
 ```bash
-cd /Users/gejiawei/Desktop/ai_code/vid2note/desktop
+cd <repo>/desktop
 npm install -D @playwright/test
 npx playwright install chromium
 ```

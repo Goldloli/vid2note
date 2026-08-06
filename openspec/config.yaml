@@ -8,7 +8,7 @@ context: |
   不在 v1 范围(以后版本):Electron 客户端、扫码登录、远程/多用户、GPU/MLX 加速、交互式思维导图页。
 
   ## 技术栈
-  - 后端: Python 3 + FastAPI。基底 = fork 自 ai_srt2md(/Volumes/worknie/Desktop/ai_code/ai_srt2md)改造。
+  - 后端: Python 3 + FastAPI。基底 = fork 自 ai_srt2md(<workspace>/ai_srt2md)改造。
     ai_srt2md 已具备: FastAPI:8765 + SQLite + 7 家 LLM 适配(OpenAI 兼容协议) + PDF 讲义对照(pypdf)
     + 思维导图(XMind/PNG) + prompt 库(restructure/generate_directly/generate_with_pdf_reference/classify)
     + 提示词注入防护 + SRT 校验。

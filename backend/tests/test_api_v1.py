@@ -31,6 +31,9 @@ from src.runtime import worker as worker_mod
 from src.api.v1 import tasks as tasks_api
 
 
+FAKE_PROVIDER_KEY = "sk-" + "secret-must-not-leak"
+
+
 # --------------------------------------------------------------------------- #
 # 隔离 fixture:tmp DATA_ROOT + tmp DB,重置 Database / service / worker 单例
 # --------------------------------------------------------------------------- #
@@ -303,7 +306,7 @@ class TestSettings:
         ("error", "category"),
         [
             (TimeoutError("request timed out"), "timeout"),
-            (RuntimeError("401 Unauthorized test-provider-key-redacted"), "authentication"),
+            (RuntimeError(f"401 Unauthorized {FAKE_PROVIDER_KEY}"), "authentication"),
         ],
     )
     def test_llm_connection_failure_is_categorized_and_sanitized(
@@ -314,7 +317,7 @@ class TestSettings:
             json={
                 "provider": "qwen",
                 "field": "api_key",
-                "value": "test-provider-key-redacted",
+                "value": FAKE_PROVIDER_KEY,
             },
         )
 
@@ -331,7 +334,7 @@ class TestSettings:
         assert r.status_code == 200
         assert r.json()["ok"] is False
         assert r.json()["category"] == category
-        assert "test-provider-key-redacted" not in r.text
+        assert FAKE_PROVIDER_KEY not in r.text
 
 
 # --------------------------------------------------------------------------- #

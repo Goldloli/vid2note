@@ -87,6 +87,21 @@ npm ci
 npm run check
 ```
 
+Browser E2E checks use a separate dependency boundary:
+
+```bash
+backend/.venv/bin/python -m pip install -r backend/requirements-e2e.txt
+backend/.venv/bin/python -m playwright install chromium
+backend/.venv/bin/python backend/tests/test_playwright.py
+```
+
+Before a public release, scan the tracked tree and reachable Git history. The
+preflight reports only non-reversible fingerprints, never secret values:
+
+```bash
+python3 scripts/release_preflight.py
+```
+
 See [architecture](docs/ARCHITECTURE.md), [troubleshooting](docs/TROUBLESHOOTING.md),
 the [roadmap](docs/ROADMAP.md), and the [security policy](SECURITY.md).
 

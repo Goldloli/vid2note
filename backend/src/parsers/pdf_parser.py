@@ -1,10 +1,11 @@
-"""
-PDF 课件解析器
-"""
+"""PDF 课件解析器（稳定基础模式使用 pypdf，不包含 OCR）。"""
+
 import re
-from typing import List, Dict, Optional
 from dataclasses import dataclass
-import fitz  # PyMuPDF
+from typing import Dict, List, Optional
+
+from pypdf import PdfReader
+from pypdf.errors import FileNotDecryptedError
 
 
 @dataclass
@@ -50,62 +51,31 @@ class PDFParser:
         Returns:
             解析结果字典
         """
-        doc = fitz.open(file_path)
-        
-        pages = []
-        all_text = []
-        
-        for page_num in range(len(doc)):
-            page = doc[page_num]
-            
-            # 提取文本
-            text = page.get_text()
-            all_text.append(text)
-            
-            # 提取图片
-            images = []
-            if extract_images:
-                images = self._extract_images_from_page(page, page_num)
-            
-            pages.append(PDFPage(
-                page_num=page_num + 1,
-                text=text,
-                images=images
-            ))
-        
-        # 识别章节结构
+        with open(file_path, "rb") as stream:
+            reader = PdfReader(stream)
+            self._reject_encrypted(reader)
+            pages = [
+                PDFPage(
+                    page_num=page_num,
+                    text=page.extract_text() or "",
+                    # 基础 pypdf 模式只承诺文本参考，不提取图片。
+                    images=[],
+                )
+                for page_num, page in enumerate(reader.pages, start=1)
+            ]
+        all_text = [page.text for page in pages]
         chapters = self._extract_chapters(pages)
-        
-        doc.close()
-        
         return {
             'total_pages': len(pages),
             'pages': pages,
             'chapters': chapters,
             'full_text': '\n'.join(all_text)
         }
-    
-    def _extract_images_from_page(self, page: fitz.Page, page_num: int) -> List[Dict]:
-        """从页面提取图片"""
-        images = []
-        image_list = page.get_images()
-        
-        for img_index, img in enumerate(image_list):
-            xref = img[0]
-            base_image = page.parent.extract_image(xref)
-            
-            if base_image:
-                images.append({
-                    'xref': xref,
-                    'page_num': page_num + 1,
-                    'index': img_index,
-                    'ext': base_image['ext'],
-                    'width': base_image['width'],
-                    'height': base_image['height'],
-                    'image_data': base_image['image']
-                })
-        
-        return images
+
+    @staticmethod
+    def _reject_encrypted(reader: PdfReader) -> None:
+        if reader.is_encrypted:
+            raise FileNotDecryptedError("暂不支持加密 PDF")
     
     def _extract_chapters(self, pages: List[PDFPage]) -> List[Chapter]:
         """从页面中提取章节结构"""
@@ -166,18 +136,28 @@ class PDFParser:
         Returns:
             大纲列表
         """
-        doc = fitz.open(file_path)
-        outline = doc.get_toc()
-        doc.close()
-        
-        return [
-            {
-                'level': item[0],
-                'title': item[1],
-                'page': item[2]
-            }
-            for item in outline
-        ]
+        with open(file_path, "rb") as stream:
+            reader = PdfReader(stream)
+            self._reject_encrypted(reader)
+            result: List[Dict] = []
+
+            def visit(items, level: int) -> None:
+                for item in items:
+                    if isinstance(item, list):
+                        visit(item, level + 1)
+                        continue
+                    try:
+                        page = reader.get_destination_page_number(item) + 1
+                    except Exception:  # noqa: BLE001 - 跳过无可定位页码的异常书签
+                        continue
+                    result.append({
+                        'level': level,
+                        'title': getattr(item, 'title', str(item)),
+                        'page': page,
+                    })
+
+            visit(reader.outline, 1)
+            return result
     
     def extract_text_by_pages(self, file_path: str, start_page: int = 0, end_page: Optional[int] = None) -> str:
         """
@@ -191,12 +171,12 @@ class PDFParser:
         Returns:
             文本内容
         """
-        doc = fitz.open(file_path)
-        end_page = end_page or len(doc)
-        
-        texts = []
-        for page_num in range(start_page, min(end_page, len(doc))):
-            texts.append(doc[page_num].get_text())
-        
-        doc.close()
-        return '\n'.join(texts)
+        with open(file_path, "rb") as stream:
+            reader = PdfReader(stream)
+            self._reject_encrypted(reader)
+            stop = len(reader.pages) if end_page is None else min(end_page, len(reader.pages))
+            start = max(0, start_page)
+            return '\n'.join(
+                reader.pages[page_num].extract_text() or ""
+                for page_num in range(start, max(start, stop))
+            )

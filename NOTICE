@@ -8,4 +8,6 @@ adds media ingestion, speech-to-text, the six-stage pipeline, retention,
 screenshot embedding, the Vue web application, and container deployment.
 
 Third-party packages remain subject to their respective licenses. See the
-Python and Node dependency manifests for the complete dependency set.
+Python and Node dependency manifests for the complete dependency set. PDF text
+extraction uses pypdf under its BSD-3-Clause license; PyMuPDF is not a runtime
+dependency.

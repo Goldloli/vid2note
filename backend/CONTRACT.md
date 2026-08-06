@@ -26,7 +26,7 @@
 7. **临时文件隔离（design D9）**：一切中间文件（下载分片、音频切片、ASR 中间结果、截图临时帧）MUST 写 `data/temp/<task_id>/`，MUST NOT 写入五类产物目录。
 8. **并发（design D8）**：复用 `TaskQueue(max_concurrent)`，默认 **1**，设置页 1~3 可配，越界拒绝并回落。跨任务并发与单任务内 VAD 分段并行共享同一 CPU/IO 预算上限。
 9. **启动恢复（design D10 / spec task-pipeline）**：进程启动时扫库，把残留 `running` 任务标 `failed`，error 注明「重启中断于 `<节点名>` 节点」；并触发一次 retention 清理扫描（spec storage-retention）。
-10. **测试命令**：`cd /Volumes/worknie/Desktop/ai_code/vid2note/backend && .venv/bin/python -m pytest`。
+10. **测试命令**：`cd <repo>/backend && .venv/bin/python -m pytest`。
 
 ---
 

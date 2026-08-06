@@ -1,6 +1,7 @@
 name: CodeQL
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
   pull_request:
@@ -15,6 +16,7 @@ permissions:
 jobs:
   analyze:
     name: Analyze (${{ matrix.language }})
+    if: github.event.repository.private == false
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

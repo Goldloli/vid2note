@@ -10,7 +10,7 @@
 
 **场景与动机。** 看视频做笔记是高频却割裂的体力活:手动下载、提取音频、转字幕、整理结构化笔记,工具链冗长。vid2note 把它压缩成「粘链接 → 拿 Markdown 笔记 + 思维导图」的一条本地流水线。
 
-**现状:fork ai_srt2md。** 作者已有的 `ai_srt2md`(/Volumes/worknie/Desktop/ai_code/ai_srt2md)是一条「字幕 → 笔记」链路,工程上已成熟,可直接作为 v1 基底:
+**现状:fork ai_srt2md。** 作者已有的 `ai_srt2md`(<workspace>/ai_srt2md)是一条「字幕 → 笔记」链路,工程上已成熟,可直接作为 v1 基底:
 
 - 后端 FastAPI(:8765),`backend/src/main.py` + `api/` 路由;SQLite 持久化(`db/task_repository.py`);异步任务队列 `core/task_queue.py`(`max_concurrent` 可配);后台 worker `core/worker.py`。
 - LLM 适配层 `llm/`(8 家:deepseek/qwen/glm/moonshot/minimax/doubao/baidu/mock,统一走 OpenAI 兼容协议,`factory.py` 工厂),prompt 库 `prompts/`(restructure / generate_directly / generate_with_pdf_reference / classify / mindmap / mindmap_outline / pdf_structure_analysis)。
