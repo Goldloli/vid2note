@@ -2,6 +2,7 @@
 安全工具函数模块
 提供文件名安全处理、路径验证等安全相关功能
 """
+import os
 import re
 import unicodedata
 from pathlib import Path
@@ -116,13 +117,14 @@ def is_safe_path(base_path: Path, target_path: Path) -> bool:
         False
     """
     try:
-        # 解析绝对路径
-        base = base_path.resolve()
-        target = target_path.resolve()
-        
-        # 检查target是否在base内
-        return str(target).startswith(str(base))
-    except (OSError, ValueError):
+        # 先做纯词法规范化，不在完成边界校验前对不可信路径触发文件系统解析。
+        # Path.relative_to 按路径组件比较，避免 ``/output-evil`` 被字符串前缀
+        # 误判为 ``/output`` 的子目录。
+        base = Path(os.path.abspath(os.fspath(base_path)))
+        target = Path(os.path.abspath(os.fspath(target_path)))
+        target.relative_to(base)
+        return True
+    except (OSError, TypeError, ValueError):
         return False
 
 

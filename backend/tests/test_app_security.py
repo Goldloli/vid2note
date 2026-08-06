@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from fastapi import Request
 from starlette.responses import Response
 
-from src.main import add_security_headers, global_exception_handler
+from src.main import add_security_headers, app, global_exception_handler
 
 
 def _request(path: str = "/api/v1/test") -> Request:
@@ -67,3 +67,9 @@ def test_importing_v1_app_does_not_create_legacy_config(tmp_path):
     )
     assert result.returncode == 0, result.stderr
     assert not (config_dir / "config.yaml").exists()
+
+
+def test_legacy_upload_and_process_routes_are_not_exposed():
+    paths = {path for route in app.routes if (path := getattr(route, "path", None))}
+    assert not any(path.startswith("/api/v1/upload") for path in paths)
+    assert not any(path.startswith("/api/v1/process") for path in paths)

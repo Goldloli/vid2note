@@ -19,6 +19,6 @@ SERVER_HOST=127.0.0.1 .venv/bin/python run.py
 .venv/bin/python -m pip_audit -r requirements.txt
 ```
 
-不要使用旧的 `src.api.upload/process/queue` 路由开发新功能；v1 入口集中在 `src/api/v1/`。新增模块通过 `src.core.kernel` 门面使用继承自 `ai_srt2md` 的内核。
+旧版 `upload/process/queue/config/logs` 路由已经移除；v1 入口集中在 `src/api/v1/`。新增模块通过 `src.core.kernel` 门面使用继承自 `ai_srt2md` 的内核。
 
 架构、扩展点和数据流见 [项目架构文档](../docs/ARCHITECTURE.md)，接口和数据模型约定见 [CONTRACT.md](CONTRACT.md)。

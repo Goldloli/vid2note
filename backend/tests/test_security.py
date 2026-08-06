@@ -101,6 +101,12 @@ class TestIsSafePath:
         assert is_safe_path(base, Path("/app/output/../../../etc/passwd")) == False
         assert is_safe_path(base, Path("/other/path")) == False
 
+    def test_sibling_prefix_is_not_treated_as_child(self):
+        """目录名仅共享字符串前缀时仍必须拒绝。"""
+        base = Path("/app/output")
+        assert is_safe_path(base, Path("/app/output-archive/file.md")) is False
+        assert is_safe_path(base, Path("/app/output2/file.md")) is False
+
 
 class TestGetSafeOutputPath:
     """测试 get_safe_output_path 函数"""

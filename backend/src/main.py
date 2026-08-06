@@ -1,7 +1,7 @@
 """FastAPI 主应用入口(vid2note v1 · 单容器同源)。
 
 改造点(契约 §4.2 / §0.9):
-- 注册 v1 路由(``src.api.v1.v1_router``),**不注册**基底旧 api 路由。
+- 注册唯一的 v1 路由(``src.api.v1.v1_router``)，基底旧 api 路由已移除。
 - **移除 CORS 中间件**(单容器同源,前后端同源托管,design D1)。
 - 托管前端构建产物(目录不存在时 try 兜底)。
 - startup:启动 worker + 启动恢复(残留 running 标 failed)+ 一次 retention 清理扫描。
@@ -90,7 +90,7 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# 注册 v1 路由(prefix /api/v1);不注册基底旧 api 路由(契约 §4.2)
+# 注册唯一的 v1 路由(prefix /api/v1，契约 §4.2)
 app.include_router(v1_router)
 
 

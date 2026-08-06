@@ -3,8 +3,8 @@
 把 v1 的四组路由(``tasks`` / ``settings`` / ``storage`` / ``health``)聚合到一个
 ``APIRouter(prefix="/api/v1")`` 下,供 ``src.main`` 注册。
 
-**不注册**基底旧路由(``api.upload`` / ``process`` / ``config`` / ``queue`` /
-``logs``)—— v1 路由清单见契约 §4.1。
+基底旧路由(``api.upload`` / ``process`` / ``config`` / ``queue`` / ``logs``)
+已经移除—— v1 路由清单见契约 §4.1。
 """
 from fastapi import APIRouter
 
