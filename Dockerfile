@@ -1,5 +1,5 @@
 # 阶段 1：前端构建
-FROM node:22-alpine AS fe
+FROM node:25-alpine AS fe
 WORKDIR /fe
 COPY frontend/package*.json ./
 ARG NPM_REGISTRY=https://registry.npmmirror.com
