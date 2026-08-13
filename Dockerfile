@@ -8,7 +8,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # 阶段 2：生产运行时（单容器、同源托管）
-FROM python:3.11-slim
+FROM python:3.14-slim
 
 ARG APP_UID=1000
 ARG APP_GID=1000
