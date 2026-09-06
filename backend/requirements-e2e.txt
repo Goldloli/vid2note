@@ -1,4 +1,4 @@
 -r requirements-dev.txt
 
 # 手工浏览器端到端测试；普通 pytest/CI 不需要安装浏览器运行时。
-playwright==1.61.0
+playwright==1.62.0
