@@ -4,17 +4,17 @@
 # API and server
 fastapi==0.141.1
 starlette==1.6.0
-uvicorn[standard]==0.52.4
+uvicorn[standard]==0.53.0
 python-multipart==0.0.32
 python-dotenv==1.2.3
 
 # LLM and local ASR
-openai==3.6.0
+openai==3.16.2
 faster-whisper==1.2.1
 
 # Media, PDF, and export
 Pillow==12.3.0
-pypdf==6.16.2
+pypdf==6.19.0
 xmind==1.2.0
 yt-dlp==2026.8.19
 
@@ -28,4 +28,4 @@ PyYAML==6.0.3
 aiofiles==25.1.0
 requests==2.34.2
 slowapi==0.1.10
-sse-starlette==3.4.8
+sse-starlette==3.4.11
