@@ -3,13 +3,13 @@
 
 # API and server
 fastapi==0.141.1
-starlette==1.6.0
-uvicorn[standard]==0.53.0
+starlette==1.7.0
+uvicorn[standard]==0.54.0
 python-multipart==0.0.32
 python-dotenv==1.2.3
 
 # LLM and local ASR
-openai==3.16.2
+openai==3.20.0
 faster-whisper==1.2.1
 
 # Media, PDF, and export
