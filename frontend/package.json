@@ -6,6 +6,9 @@
   "engines": {
     "node": ">=22"
   },
+  "overrides": {
+    "katex": "^0.18.11"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite --port 5735",
