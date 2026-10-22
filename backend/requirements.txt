@@ -13,7 +13,7 @@ openai==3.29.0
 faster-whisper==1.2.1
 
 # Media, PDF, and export
-Pillow==12.3.0
+Pillow==13.0.0
 pypdf==6.20.1
 xmind==1.2.0
 yt-dlp==2026.8.19
