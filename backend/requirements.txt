@@ -2,30 +2,30 @@
 # reproducible. Dependabot keeps these pins current.
 
 # API and server
-fastapi==0.148.0
-starlette==1.9.0
+fastapi==0.162.0
+starlette==1.10.0
 uvicorn[standard]==0.54.0
 python-multipart==0.0.32
 python-dotenv==1.2.4
 
 # LLM and local ASR
-openai==3.35.1
+openai==3.38.0
 faster-whisper==1.2.1
 
 # Media, PDF, and export
 Pillow==13.0.0
 pypdf==6.21.2
 xmind==1.2.0
-yt-dlp==2026.8.19
+yt-dlp==2026.10.21
 
 # Configuration and validation
 cryptography==50.0.2
 pydantic==2.14.1
-pydantic-settings==2.16.0
+pydantic-settings==2.16.1
 PyYAML==6.0.3
 
 # HTTP, files, SSE, and rate limiting
 aiofiles==25.1.0
 requests==2.34.2
 slowapi==0.1.10
-sse-starlette==3.5.0
+sse-starlette==3.6.0
