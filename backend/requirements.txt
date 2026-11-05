@@ -5,23 +5,23 @@
 fastapi==0.162.0
 starlette==1.10.0
 uvicorn[standard]==0.54.0
-python-multipart==0.0.32
+python-multipart==0.0.33
 python-dotenv==1.2.4
 
 # LLM and local ASR
-openai==3.38.0
+openai==3.42.1
 faster-whisper==1.2.1
 
 # Media, PDF, and export
 Pillow==13.0.0
-pypdf==6.21.2
+pypdf==6.21.4
 xmind==1.2.0
-yt-dlp==2026.10.21
+yt-dlp==2026.10.26
 
 # Configuration and validation
 cryptography==50.0.2
-pydantic==2.14.1
-pydantic-settings==2.16.1
+pydantic==2.14.2
+pydantic-settings==2.16.2
 PyYAML==6.0.3
 
 # HTTP, files, SSE, and rate limiting
